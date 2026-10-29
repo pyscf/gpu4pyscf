@@ -104,10 +104,9 @@ def switch_function(R, r, dr):
     return np.exp(dr/(R-dr-r)) if R<r+dr else 0
 
 def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
-    '''
-    - list of atomic symbols
-    - atomic coordinates in Anstrong
-    - solvent descriptors: n, alpha, beta
+    '''Atomic tensions in cal/(mol Angstrom**2), with output shape (natm,).
+
+    Coordinates are in Angstrom; n, alpha and beta are solvent descriptors.
     '''
 
     def get_bond_tension(bond):
@@ -228,12 +227,13 @@ def molecular_surface_tension(beta, gamma, phi, psi):
     return sig_gamma + sig_phi + sig_psi + sig_beta
 
 def naive_sasa(mol, rad):
+    '''Approximate exposed areas in Angstrom squared for radii in Angstrom.'''
     coords = mol.atom_coords(unit='A')
     charges = mol.atom_charges()
     radius = [rad[ch] for ch in charges]
     sasa = []
     for i in range(mol.natm):
-        area = 4 * np.pi * radius[i]
+        area = 4 * np.pi * radius[i]**2
         for j in range(mol.natm):
             if i != j:
                 dr = coords[i] - coords[j]
@@ -247,12 +247,13 @@ def naive_sasa(mol, rad):
     return cupy.asarray(sasa)
 
 def get_cds(smdobj):
+    '''Evaluate this educational surface model in Hartree, without an SCF solve.'''
     mol = smdobj.mol
-    solvent_descriptors = smdobj.solvent_descriptors or solvent_db[smdobj.solvent]
+    solvent_descriptors = smdobj.get_solvent_descriptors()
     n, _, alpha, beta, gamma, _, phi, psi = solvent_descriptors
     symbols = [mol.atom_symbol(ia) for ia in range(mol.natm)]
     coords = mol.atom_coords(unit='A')
-    if smdobj._solvent.lower() != 'water':
+    if smdobj.solvent != 'water':
         atm_tension = atomic_surface_tension(symbols, coords, n, alpha, beta, water=False)
         mol_tension = molecular_surface_tension(beta, gamma, phi, psi)
     else:

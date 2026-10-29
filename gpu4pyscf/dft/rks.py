@@ -35,13 +35,13 @@ def prune_small_rho_grids_(ks, mol, dm, grids):
 def initialize_grids(ks, mol=None, dm=None):
     # Initialize self.grids the first time call get_veff
     if mol is None: mol = ks.mol
+    ground_state = getattr(dm, 'ndim', 0) == 2
     if ks.grids.coords is None:
         t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
         ks.grids.weights = asarray(ks.grids.weights)
         ks.grids.coords = asarray(ks.grids.coords)
-        ground_state = getattr(dm, 'ndim', 0) == 2
         if ks.small_rho_cutoff > 1e-20 and ground_state:
             # Filter grids the first time setup grids
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)

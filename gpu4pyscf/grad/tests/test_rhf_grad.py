@@ -15,7 +15,6 @@
 import numpy as np
 import cupy as cp
 import unittest
-import pytest
 import pyscf
 from pyscf import lib, gto
 from pyscf import scf as cpu_scf
@@ -132,6 +131,7 @@ class KnownValues(unittest.TestCase):
         e1 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))
         e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))
         self.assertAlmostEqual(g[1,2], (e2-e1)/0.002*lib.param.BOHR, 6)
+
 
 if __name__ == "__main__":
     print("Full Tests for RHF Gradient")

@@ -158,7 +158,7 @@ def sort_atoms(mol):
     """
     from scipy.spatial import distance_matrix
     charges = mol.atom_charges()
-    heavy_atoms = np.argwhere(charges != 1).ravel()
+    heavy_atoms = np.where(charges != 1)[0]
     if heavy_atoms.size == 0:
         return range(mol.natm)
 
@@ -179,7 +179,8 @@ def sort_atoms(mol):
         current_node = next_node
 
     # Assign Hydrogen atoms to heavy atoms
-    full_path = [[heavy_atoms[idx]] for idx in path]
+    # Hydrogen assignments use original heavy-atom indices, not traversal ranks.
+    full_path = [[idx] for idx in heavy_atoms]
     hydrogen_atoms = np.argwhere(charges == 1).ravel()
     if hydrogen_atoms.size > 0:
         dist = distance_matrix(atom_coords[hydrogen_atoms], atom_coords[heavy_atoms])
@@ -187,7 +188,7 @@ def sort_atoms(mol):
             heavy_idx = np.argmin(d)
             full_path[heavy_idx].append(hydrogen_atoms[i])
 
-    return [x for heavy_list in full_path for x in heavy_list]
+    return [x for idx in path for x in full_path[idx]]
 
 def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
                 sparse_coeff=False):
@@ -705,7 +706,7 @@ class SortedGTO:
         mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
-            return self.mat_dot_C(mat)
+            return self.mat_dot_C(mat, out)
         elif mat_ndim == 2:
             mat = mat[None]
 
@@ -752,7 +753,7 @@ class SortedGTO:
         mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
-            return self.mat_dot_CT(mat)
+            return self.mat_dot_CT(mat, out)
         elif mat_ndim == 2:
             mat = mat[None]
 

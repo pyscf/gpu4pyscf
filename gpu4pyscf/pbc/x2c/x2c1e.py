@@ -169,7 +169,8 @@ class PBCX2CHelper(mol_x2c.X2CHelperBase):
 
     def reset(self, cell=None):
         if cell is not None:
-            self.cell = cell
+            # get_xmol() inherits its default molecule from the molecular base.
+            self.cell = self.mol = cell
         return self
 
 class SpinFreeX2CHelper(PBCX2CHelper):

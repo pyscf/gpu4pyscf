@@ -15,6 +15,7 @@
 import ctypes
 import itertools
 import contextlib
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import cupy
@@ -237,7 +238,11 @@ def eval_rho2(mol, ao, mo_coeff, mo_occ, non0tab=None, xctype='LDA',
     return _eval_rho2(ao, cpos, xctype, with_lapl, buf=buf, rho=out)
 
 def eval_rho3(mol, ao, c0, mo1, non0tab=None, xctype='LDA',
-              with_lapl=False, verbose=None):
+              with_lapl=False, verbose=None):  # pragma: no cover
+    warnings.warn(
+        'eval_rho3 is deprecated. Use '
+        'eval_rho4(mol, ao, mo0, mo1[None], xctype=xctype, hermi=1)[0].',
+        DeprecationWarning, stacklevel=2)
     xctype = xctype.upper()
     if xctype == 'LDA' or xctype == 'HF':
         _, ngrids = ao.shape
@@ -687,6 +692,10 @@ def eval_rho_group(mol, ao_group, mo_coeff_group, mo_occ,
 
 def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
            max_memory=2000, verbose=None):
+    '''LDA/GGA/MGGA RKS quadrature using grouped matrix products.
+
+    Accept a single DM (optionally tagged with MO metadata), or an untagged DM batch.
+    '''
     log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
@@ -735,7 +744,7 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             if mo_coeff is None:
                 rho_tot[i,:,p0:p1] = eval_rho(
                     _sorted_mol, ao_mask, dms[i][idx[:,None],idx],
-                    xctype=xctype, hermi=1)
+                    xctype=xctype, hermi=hermi)
             else:
                 assert hermi == 1
                 mo_coeff_mask = mo_coeff[idx,:]
@@ -762,7 +771,8 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     t1 = t0
     p0 = p1 = 0
-    for ao_mask_group, idx_group, weight_group, _ in ni.grouped_block_loop(_sorted_mol, grids, nao, ao_deriv):
+    for ao_mask_group, idx_group, weight_group, _ in _grouped_block_loop(
+            ni, _sorted_mol, grids, nao, ao_deriv):
         p0_raw = p0
         for i in range(nset):
             p0 = p0_raw
@@ -2136,7 +2146,7 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             weight_group = []
             coords_group = []
             total_used_bytes = 0
-    if total_used_bytes > 0:
+    if ao_mask_group:
         t1 = log.timer_debug2('evaluate ao slice', *t1)
         yield ao_mask_group, idx_group, weight_group, coords_group
 
@@ -2258,15 +2268,15 @@ class NumInt(lib.StreamObject, LibXCMixin):
                 nvar = 10
 
         ngrids = rho.shape[-1]
-        if work is None:
-            blksize = int(MEMPOOL_THRESHOLD // 8 // nvar)
-            blksize = min(ngrids, blksize // 64 * 64)
-            work = cupy.empty((nvar, blksize))
-        else:
+        if work is not None:
             blksize = int(work.nbytes / 8 / nvar)
             blksize = min(ngrids, blksize // 64 * 64)
             if blksize == 0:
                 work = None # The input workspace is too small
+        if work is None:
+            blksize = int(MEMPOOL_THRESHOLD // 8 // nvar)
+            blksize = min(ngrids, blksize // 64 * 64)
+            work = cupy.empty((nvar, blksize))
 
         if xctype == 'LDA' or xctype == 'HF':
             nvar = 1
@@ -2375,7 +2385,7 @@ def _dot_ao_ao(mol, ao1, ao2, non0tab, shls_slice, ao_loc, hermi=0):
 
 
 def _dot_ao_dm_sparse(ao, dm, nbins, screen_index, pair_mask, ao_loc,
-                      l_bas_offsets):
+                      l_bas_offsets):  # pragma: no cover
     assert ao.flags.f_contiguous
     assert ao.dtype == dm.dtype == np.double
     ngrids, nao = ao.shape
@@ -2386,7 +2396,7 @@ def _dot_ao_dm_sparse(ao, dm, nbins, screen_index, pair_mask, ao_loc,
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao.data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(dm.flags.c_contiguous),
+        ctypes.c_int(dm.flags.f_contiguous),
         ctypes.c_int(ngrids), ctypes.c_int(nbas),
         ctypes.c_int(nbins), ctypes.c_int(nsegs),
         l_bas_offsets.ctypes.data_as(ctypes.c_void_p),
@@ -2398,7 +2408,7 @@ def _dot_ao_dm_sparse(ao, dm, nbins, screen_index, pair_mask, ao_loc,
     return out
 
 def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
-                      bas_pair2shls, bas_pairs_locs, out):
+                      bas_pair2shls, bas_pairs_locs, out):  # pragma: no cover
     assert bra.flags.c_contiguous
     assert ket.flags.c_contiguous
     assert bra.dtype == ket.dtype == np.double
@@ -2434,7 +2444,7 @@ def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
     return out
 
 def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
-                    bas_pair2shls, bas_pairs_locs, out):
+                    bas_pair2shls, bas_pairs_locs, out):  # pragma: no cover
     '''1/2 <nabla i| v | nabla j>'''
     wv = .5 * wv
     _dot_ao_ao_sparse(bra[1], ket[1], wv, nbins, screen_index,

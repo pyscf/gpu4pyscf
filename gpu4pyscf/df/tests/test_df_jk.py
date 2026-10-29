@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from scipy.linalg import eigh
 import numpy as np
 import cupy
 import cupy as cp
@@ -239,6 +240,74 @@ H       4.224    0.640    0.837
         vk_test = mf.get_k(mol, dm0, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb)
 
         assert cp.max(cp.abs(vk_ref - vk_test)) < 1e-12
+
+
+class SmallMetricAndResponse(unittest.TestCase):
+    def setUp(self):
+        self.mol = pyscf.M(atom='H .1 0 0; H -.1 .2 .8', basis='6-31g', verbose=0)
+
+    def _only_dfj_case(self, unrestricted):
+        mol = self.mol
+        cpu = (pyscf.scf.UHF if unrestricted else pyscf.scf.RHF)(mol)
+        _, coeff = eigh(cpu.get_hcore(), cpu.get_ovlp())
+        occupied = [np.outer(coeff[:, i], coeff[:, i]) for i in (0, 1)]
+        dm = np.stack(occupied) if unrestricted else 2*occupied[0]
+        gpu = (gpu_scf.UHF if unrestricted else gpu_scf.RHF)(mol)
+        gpu = gpu.density_fit(auxbasis='weigend', only_dfj=True)
+        return cpu, gpu, dm, coeff
+
+    def _check_only_dfj_range_separated_exact_exchange(self, unrestricted, omega, lr, sr):
+        cpu, gpu, dm, _ = self._only_dfj_case(unrestricted)
+        full = cpu.get_k(dm=dm)
+        long_range = cpu.get_k(dm=dm, omega=.3)
+        # Negative omega requests pure SR; explicit factors use positive omega.
+        kwargs = {'omega': omega}
+        if lr == .65:
+            kwargs.update(lr_factor=lr, sr_factor=sr)
+        expected = sr*full + (lr-sr)*long_range
+        unused, actual = gpu.get_jk(dm=cp.asarray(dm), with_j=False, **kwargs)
+        assert unused is None
+        np.testing.assert_allclose(actual.get(), expected, atol=1e-10, rtol=0)
+        for mode in ('mix_outside_kernel', 'mix_inside_kernel'):
+            gpu.range_separated_mode = mode
+            actual = gpu.get_k(dm=cp.asarray(dm), **kwargs)
+            np.testing.assert_allclose(actual.get(), expected, atol=1e-10, rtol=0)
+
+    def test_only_dfj_rsh_unrestricted_long_range(self):
+        self._check_only_dfj_range_separated_exact_exchange(True, .3, 1., 0.)
+
+    def test_only_dfj_rsh_unrestricted_short_range(self):
+        self._check_only_dfj_range_separated_exact_exchange(True, -.3, 0., 1.)
+
+    def test_only_dfj_rsh_unrestricted_mixed_range(self):
+        self._check_only_dfj_range_separated_exact_exchange(True, .3, .65, .19)
+
+    def test_duplicate_auxiliary_metric_j(self):
+        mol = self.mol
+        basis = {'H': [[0, [.8, 1.]], [0, [.8, 1.]]]}
+        aux = df.addons.make_auxmol(mol, basis)
+        metric = aux.intor('int2c2e')
+        values = np.linalg.eigvalsh(metric)
+        assert np.count_nonzero(values < 1e-10) == 2
+        dm = np.eye(mol.nao)
+        # The CPU direct-J shortcut also uses a singular solve; its built-CDERI
+        # path instead uses the standard truncated eigenvalue decomposition.
+        ref, _ = df.DF(mol, basis).build().get_jk(dm, with_k=False)
+        ints = df.incore.aux_e2(mol, aux)
+        w, v = np.linalg.eigh(metric)
+        keep = w > df.incore.LINEAR_DEP_THR
+        inverse = (v[:, keep] / w[keep]) @ v[:, keep].T
+        oracle = np.einsum('ijP,PQ,klQ,kl->ij', ints, inverse, ints, dm, optimize=True)
+        np.testing.assert_allclose(ref, oracle, atol=1e-10, rtol=0)
+        obj = DF(mol, basis)
+        actual, unused = obj.get_jk(cp.asarray(dm), with_k=False)
+        assert unused is None
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+        cached = obj._cd_j2c
+        scaled, _ = obj.get_jk(cp.asarray(dm*.4), with_k=False)
+        assert obj._cd_j2c is cached
+        np.testing.assert_allclose(scaled.get(), ref*.4, atol=1e-9, rtol=0)
+
 
 if __name__ == "__main__":
     print("Full Tests for DF JK")

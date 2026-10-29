@@ -379,6 +379,111 @@ class KnownValues(unittest.TestCase):
         g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, delta=5e-6)
 
+class BeckeMGGAResponse_high_cost(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from gpu4pyscf.pbc.dft.gen_grid import BeckeGrids
+        cls.cell = gto.M(
+            atom='He .2 .3 .4; He 1.4 1.2 1.6', unit='Bohr',
+            a=[[5., .3, .2], [.1, 5.5, .4], [.2, -.1, 6.]],
+            basis=[[0, [1.3, 1.]], [1, [.8, 1.]]], spin=2,
+            precision=1e-11, verbose=0)
+        cls.kpts = cls.cell.make_kpts([2, 1, 1])
+        cls.scaled_kpts = cls.cell.get_scaled_kpts(cls.kpts)
+        densities = []
+        for overlap in cls.cell.pbc_intor('int1e_ovlp', kpts=cls.kpts):
+            eigenvalues, vectors = np.linalg.eigh(overlap)
+            orbitals = vectors / np.sqrt(eigenvalues)
+            # Three alpha and one beta electron, in orthonormal orbitals.
+            densities.append([
+                orbitals[:, :3] @ orbitals[:, :3].conj().T,
+                orbitals[:, 3:4] @ orbitals[:, 3:4].conj().T])
+        cls.dm = np.asarray(densities).transpose(1, 0, 2, 3).copy()
+        cls.grids = cls._make_grids(cls.cell)
+        assert isinstance(cls.grids, BeckeGrids)
+
+    @staticmethod
+    def _make_grids(cell):
+        from gpu4pyscf.pbc.dft.gen_grid import BeckeGrids
+        grids = BeckeGrids(cell)
+        grids.atom_grid = (10, 38)
+        grids.prune = None
+        return grids.build()
+
+    def _cpu_energy(self, cell, xc):
+        from pyscf.pbc.dft.gen_grid import BeckeGrids as CpuGrids
+        from pyscf.pbc.dft.numint import KNumInt as CpuNumInt
+        grids = self._make_grids(cell)
+        # The quadrature is deliberately identical, while AO, density and XC
+        # evaluation use CPU implementations. Rebuilding includes moving centers
+        # and partition weights, rather than just translating a frozen grid.
+        cpu_grids = CpuGrids(cell)
+        cpu_grids.coords = grids.coords.get()
+        cpu_grids.weights = grids.weights.get()
+        kpts = cell.get_abs_kpts(self.scaled_kpts)
+        return CpuNumInt().nr_uks(cell, cpu_grids, xc, self.dm, kpts=kpts)[1]
+
+    def _displaced_cell(self, row, axis, displacement):
+        cell = self.cell.copy()
+        coordinates = self.cell.atom_coords()
+        if row < self.cell.natm:
+            coordinates[row, axis] += displacement
+        else:
+            deformation = np.eye(3)
+            deformation[row - self.cell.natm, axis] += displacement
+            coordinates = coordinates @ deformation.T
+            cell.a = self.cell.a @ deformation.T
+        cell.set_geom_(coordinates, unit='Bohr')
+        cell.build(False, False)
+        return cell
+
+    def test_r2scan_becke_gradient_and_strain(self):
+        import cupy as cp
+        from gpu4pyscf.pbc.dft.numint import KNumInt
+        from gpu4pyscf.pbc.grad.kuks import get_vxc_full_response
+        xc = 'r2SCAN'
+        density = cp.asarray(self.dm)
+        actual = get_vxc_full_response(
+            KNumInt(), self.cell, self.grids, xc, density, self.kpts)
+        self.assertEqual(actual.shape, (self.cell.natm + 3, 3))
+        # All nuclear and strain components, including both off-diagonal
+        # orientations. These are energy derivatives, not volume-scaled stress.
+        step = 1e-4
+        reference = np.empty_like(actual)
+        for row, axis in np.ndindex(actual.shape):
+            plus = self._displaced_cell(row, axis, step)
+            minus = self._displaced_cell(row, axis, -step)
+            reference[row, axis] = (
+                self._cpu_energy(plus, xc) - self._cpu_energy(minus, xc)
+            ) / (2 * step)
+        np.testing.assert_allclose(actual, reference, atol=1e-7, rtol=0)
+        np.testing.assert_allclose(actual[:self.cell.natm].sum(axis=0),
+                                   0, atol=1e-10, rtol=0)
+        np.testing.assert_array_equal(density.get(), self.dm)
+
+    def test_becke_mgga_spin_swap_and_restricted_limit(self):
+        import cupy as cp
+        from gpu4pyscf.pbc.dft.numint import KNumInt
+        from gpu4pyscf.pbc.grad import kuks, krks
+        xc = 'r2SCAN'
+        polarized = kuks.get_vxc_full_response(
+            KNumInt(), self.cell, self.grids, xc,
+            cp.asarray(self.dm), self.kpts)
+        swapped = kuks.get_vxc_full_response(
+            KNumInt(), self.cell, self.grids, xc,
+            cp.asarray(self.dm[::-1].copy()), self.kpts)
+        np.testing.assert_allclose(polarized, swapped, atol=1e-11, rtol=0)
+        total = self.dm.sum(axis=0)
+        unpolarized = kuks.get_vxc_full_response(
+            KNumInt(), self.cell, self.grids, xc,
+            cp.asarray(np.stack([total / 2, total / 2])), self.kpts)
+        restricted = krks.get_vxc_full_response(
+            KNumInt(), self.cell, self.grids, xc,
+            cp.asarray(total), self.kpts)
+        np.testing.assert_allclose(unpolarized, restricted,
+                                   atol=1e-10, rtol=0)
+
+
 if __name__ == "__main__":
     print("Full Tests for KUKS Gradients")
     unittest.main()

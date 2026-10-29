@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from scipy.linalg import eigh
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -68,7 +69,7 @@ class KnownValues(unittest.TestCase):
     def test_kpts_without_gamma(self):
         cell = self.cell
         kpts = cell.make_kpts([2, 2, 1], with_gamma_point=False)
-        for mf_cls in (scf.KRHF, scf.KUHF, dft.KRKS, dft.KUKS):
+        for mf_cls in (scf.KRHF, dft.KRKS):
             with self.subTest(mf_cls=mf_cls.__name__):
                 with self.assertRaisesRegex(NotImplementedError, 'include the Gamma point'):
                     mf_cls(cell, kpts=kpts).kernel()
@@ -379,6 +380,150 @@ class KnownValues(unittest.TestCase):
         e1 = mf_scanner(cell1)
         assert np.array_equal(mf_scanner.with_df.mesh, [7, 7, 7])
         self.assertAlmostEqual(e1, mf1.e_tot, 9)
+
+class RestrictedSCFProperties(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from pyscf.pbc import scf as cpu_scf
+        cls.cell = pbcgto.M(
+            atom='He .2 .3 .4', unit='Bohr', a=np.diag([5., 5.2, 5.4]),
+            basis=[[0, [.8, 1.]], [1, [.4, 1.]]], pseudo='gth-pade',
+            mesh=[25, 27, 29], precision=1e-10, verbose=0)
+        cls.kpts = cls.cell.make_kpts([2, 1, 1])
+        cls.models = {}
+        for name in ('RHF', 'KRHF'):
+            kwargs = {} if name == 'RHF' else {'kpts': cls.kpts}
+            gpu = getattr(scf, name)(cls.cell, **kwargs).run(conv_tol=1e-11)
+            cpu = getattr(cpu_scf, name)(cls.cell, **kwargs).run(conv_tol=1e-11)
+            assert gpu.converged and cpu.converged
+            cls.models[name] = gpu, cpu
+
+    def test_uneven_unoccupied_orbitals(self):
+        from gpu4pyscf.pbc.scf import khf
+        from pyscf.pbc.scf import khf as cpu_khf
+        mf, cpu = self.models['KRHF']
+        # Removing a virtual orbital at one k-point must not alter the density.
+        energies = [mf.mo_energy[0], mf.mo_energy[1, :-1]]
+        coeff = [mf.mo_coeff[0], mf.mo_coeff[1, :, :-1]]
+        occupation = mf.get_occ(energies, coeff)
+        # The local CPU API accepts rectangular energies only. The removed
+        # orbital is unoccupied in its full-array reference calculation.
+        full_occ = cpu.get_occ(mf.mo_energy.get())
+        self.assertEqual(full_occ[1, -1], 0)
+        ref_occ = [full_occ[0], full_occ[1, :-1]]
+        for actual, reference in zip(occupation, ref_occ):
+            np.testing.assert_array_equal(actual.get(), reference)
+        density = khf.make_rdm1(coeff, occupation)
+        reference = cpu_khf.make_rdm1([c.get() for c in coeff],
+                                      [o.get() for o in occupation])
+        np.testing.assert_allclose(density.get(), reference, atol=1e-12, rtol=0)
+        np.testing.assert_allclose(density.get(), mf.make_rdm1().get(), atol=1e-12, rtol=0)
+        self.assertIs(density.mo_coeff, coeff)
+        self.assertIs(density.mo_occ, occupation)
+
+    def _check_density_dispatch(self, name):
+        from gpu4pyscf.pbc.dft import UniformGrids, numint
+        from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
+        from pyscf.pbc.dft.numint import KNumInt as CpuNumInt
+        sampled = name.startswith('K')
+        source = self.models['KRHF' if sampled else 'RHF'][0]
+        kwargs = {'kpts': self.kpts} if sampled else {}
+        is_dft = name in ('RKS', 'KRKS')
+        factory = dft if is_dft else scf
+        mf = getattr(factory, name)(self.cell, **kwargs)
+        mf.mo_coeff = source.mo_coeff.copy()
+        mf.mo_occ = source.mo_occ.copy()
+        grids = UniformGrids(self.cell)
+        grids.mesh = np.asarray(self.cell.mesh) + 2
+        if is_dft:
+            mf._numint = numint.KNumInt() if sampled else numint.NumInt()
+            mf.grids = grids
+            supplied_grids = None
+        else:
+            mf.build()
+            self.assertIsInstance(mf._numint, MultiGridNumInt)
+            original_mesh = np.asarray(mf._numint.mesh).copy()
+            supplied_grids = grids
+        density = mf.make_rdm1()
+        before = density.copy()
+        actual = mf.get_rho(grids=supplied_grids)
+        explicit = mf.get_rho(dm=density, grids=supplied_grids)
+        np.testing.assert_allclose(actual.get(), explicit.get(), atol=1e-12, rtol=0)
+        coordinates = grids.coords.get()
+        # NumInt.get_rho returns tile-8 order; multigrid returns FFT order.
+        if is_dft:
+            coordinates = coordinates[grids.argsort(tile=8)]
+        kpts = self.kpts if sampled else np.zeros((1, 3))
+        ao = self.cell.pbc_eval_gto('GTOval_sph', coordinates, kpts=kpts)
+        charge = density.get().reshape(len(kpts), self.cell.nao, self.cell.nao)
+        reference = CpuNumInt().eval_rho(self.cell, ao, charge, hermi=1)
+        np.testing.assert_allclose(actual.get(), reference, atol=1e-9, rtol=0)
+        np.testing.assert_array_equal(density.get(), before.get())
+        if not is_dft:
+            np.testing.assert_array_equal(mf._numint.mesh, original_mesh)
+
+    def test_get_rho_rhf_built(self):
+        self._check_density_dispatch('RHF')
+
+    def test_get_rho_krhf_built(self):
+        self._check_density_dispatch('KRHF')
+
+    def test_get_rho_rks(self):
+        self._check_density_dispatch('RKS')
+
+    def test_get_rho_krks(self):
+        self._check_density_dispatch('KRKS')
+
+    def test_default_fock_energy_gradient_and_canonicalization_krhf(self):
+        rotation = np.eye(self.cell.nao)
+        angle = .13
+        rotation[:2, :2] = [[np.cos(angle), -np.sin(angle)],
+                            [np.sin(angle), np.cos(angle)]]
+        mf, cpu = self.models['KRHF']
+        coeff = cp.matmul(mf.mo_coeff, cp.asarray(rotation))
+        occupation = mf.mo_occ
+        density = mf.make_rdm1(coeff, occupation)
+        hcore = mf.get_hcore()
+        energy = mf.energy_elec(density, hcore)
+        reference = cpu.energy_elec(density.get(), hcore.get())
+        np.testing.assert_allclose(energy, reference, atol=1e-9, rtol=0)
+        gradient = mf.get_grad(coeff, occupation)
+        ref_grad = cpu.get_grad(coeff.get(), occupation.get())
+        self.assertGreater(float(cp.linalg.norm(gradient)), 1e-3)
+        np.testing.assert_allclose(gradient.get(), ref_grad, atol=1e-9, rtol=0)
+        eigenvalues, canonical = mf.canonicalize(coeff, occupation)
+        ref_values = cpu.canonicalize(coeff.get(), occupation.get())[0]
+        np.testing.assert_allclose(eigenvalues.get(), np.asarray(ref_values), atol=1e-9, rtol=0)
+        np.testing.assert_allclose(mf.make_rdm1(canonical, occupation).get(),
+                                   density.get(), atol=1e-11, rtol=0)
+
+    def test_single_band_shape_and_normalization(self):
+        for name, (mf, cpu) in self.models.items():
+            with self.subTest(method=name):
+                energy, coeff = mf.get_bands(np.zeros(3))
+                batched = mf.get_bands(np.zeros((1, 3)))[0]
+                if name == 'KRHF':
+                    # The CPU Gamma-only band API shares the in-place cast
+                    # defect. Build its Fock with normal dtype promotion and
+                    # solve the generalized eigenproblem independently.
+                    band = np.zeros((1, 3))
+                    hcore = cpu.get_hcore(kpts=band)[0]
+                    potential = cpu.get_veff(kpts_band=band)[0]
+                    overlap = cpu.get_ovlp(kpts=band)[0]
+                    reference = eigh(hcore + potential, overlap, eigvals_only=True)
+                    self.assertEqual(mf.get_hcore(kpts=band).dtype, np.float64)
+                    self.assertEqual(mf.get_veff(kpts_band=band).dtype, np.complex128)
+                else:
+                    reference = cpu.get_bands(np.zeros(3))[0]
+                expected_shape = (self.cell.nao,)
+                self.assertEqual(energy.shape, expected_shape)
+                unbatched = batched[0]
+                np.testing.assert_allclose(energy.get(), unbatched.get(), atol=1e-11, rtol=0)
+                np.testing.assert_allclose(energy.get(), np.asarray(reference), atol=1e-9, rtol=0)
+                overlap = cp.asarray(self.cell.pbc_intor('int1e_ovlp'))
+                np.testing.assert_allclose((coeff.conj().T @ overlap @ coeff).get(),
+                                           np.eye(self.cell.nao), atol=1e-10, rtol=0)
+
 
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")

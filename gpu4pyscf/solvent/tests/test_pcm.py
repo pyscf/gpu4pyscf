@@ -15,7 +15,6 @@
 import unittest
 import numpy
 import pyscf
-import pytest
 import cupy
 from pyscf import gto
 from gpu4pyscf import scf, dft, solvent
@@ -413,6 +412,115 @@ class NamedSolvent(unittest.TestCase):
         self.assertNotAlmostEqual(cm._intermediates['f_epsilon'], f_epsilon, 6)
         eps = cm.get_eps()
         self.assertAlmostEqual(cm._intermediates['f_epsilon'], (eps-1)/eps, 12)
+
+def _make_response_attachment(unrestricted):
+    molecule = gto.M(atom='H 0 0 0; H .1 -.2 .8', basis='sto-3g', verbose=0)
+    base = (scf.UHF(molecule) if unrestricted else scf.RHF(molecule)).run(conv_tol=1e-11)
+    assert base.converged
+    model = pcm.PCM(molecule)
+    model.method = 'C-PCM'
+    model.eps = 12.
+    model.lebedev_order = 11
+    density = base.make_rdm1()
+    coeff = base.mo_coeff[0] if unrestricted else base.mo_coeff
+    transition = cupy.outer(coeff[:, 0], coeff[:, 1])
+    transition += transition.T
+    if unrestricted:
+        transition = cupy.stack([transition, -.3*transition])
+    return base, model, density, transition
+
+
+class SolventResponse(unittest.TestCase):
+    def test_attachment_equilibrium_response_matches_potential_derivative(self):
+        self._check_attachment_response(True)
+
+    def test_attachment_nonequilibrium_response_matches_potential_derivative(self):
+        self._check_attachment_response(False)
+
+    def _check_attachment_response(self, equilibrium):
+        for frozen in [False, True]:
+            with self.subTest(frozen=frozen):
+                response_attachment = _make_response_attachment(False)
+                base, model, density, transition = response_attachment
+                mf = base.PCM(model, dm=density if frozen else None)
+                model.equilibrium_solvation = equilibrium
+                vacuum = mf.undo_solvent().gen_response(hermi=1)(transition)
+                actual = mf.gen_response(hermi=1)(transition)
+                cpu_model = model.to_cpu()
+                response = cpu_model._B_dot_x(transition.get())
+                expected = vacuum.get() + (response if equilibrium and not frozen else 0)
+                numpy.testing.assert_allclose(model._B_dot_x(transition).get(), response,
+                                              atol=1e-10, rtol=1e-10)
+                assert numpy.max(abs(response)) > 1e-5
+                step = 1e-3
+                plus = mf.get_veff(mf.mol, density + step*transition).v_solvent.copy()
+                minus = mf.get_veff(mf.mol, density - step*transition).v_solvent.copy()
+                expected_derivative = numpy.zeros_like(response) if frozen else response
+                numpy.testing.assert_allclose(((plus-minus)/(2*step)).get(), expected_derivative,
+                                              atol=1e-10, rtol=1e-9)
+                numpy.testing.assert_allclose(actual.get(), expected, atol=1e-10, rtol=1e-10)
+                numpy.testing.assert_allclose(mf.make_rdm1().get(), density.get(), atol=1e-14)
+                assert model.equilibrium_solvation is equilibrium
+                assert model.frozen is frozen
+
+    def test_attachment_fixed_density_and_identity(self):
+        base, model, density, transition = _make_response_attachment(True)
+        reference_energy, reference_potential = model.to_cpu().kernel(density.get())
+        initial = pcm.PCM(base.mol)
+        mf = base.PCM(initial, dm=density)
+        assert mf.with_solvent is initial
+        assert initial.frozen
+        initial_energy, initial_potential = initial.to_cpu().kernel(density.get())
+        numpy.testing.assert_allclose(cupy.asnumpy(initial.e), initial_energy, atol=1e-10)
+        numpy.testing.assert_allclose(initial.v.get(), initial_potential, atol=1e-10)
+
+        cls = type(mf)
+        result = mf.PCM(model, dm=density)
+        assert result is mf
+        assert type(result) is cls
+        assert mf.with_solvent is model
+        assert model.frozen
+        numpy.testing.assert_allclose(cupy.asnumpy(model.e), reference_energy, atol=1e-10)
+        numpy.testing.assert_allclose(model.v.get(), reference_potential, atol=1e-10)
+        value = mf.get_veff(mf.mol, density + .03*transition)
+        numpy.testing.assert_allclose(value.v_solvent.get(), reference_potential, atol=1e-10)
+        numpy.testing.assert_allclose(cupy.asnumpy(value.e_solvent), reference_energy, atol=1e-10)
+        assert mf.PCM(model) is mf
+
+    def test_attachment_casida_equilibrium_factory_and_response(self):
+        self._check_attachment_casida_factory_and_response(True)
+
+    def test_attachment_casida_nonequilibrium_factory_and_response(self):
+        self._check_attachment_casida_factory_and_response(False)
+
+    def _check_attachment_casida_factory_and_response(self, equilibrium):
+        from gpu4pyscf.tdscf.rks import CasidaTDDFT
+        molecule = gto.M(atom='H 0 0 0; H .1 -.2 .8', basis='sto-3g', verbose=0)
+        model = pcm.PCM(molecule)
+        model.method = 'C-PCM'
+        model.eps = 12.
+        model.lebedev_order = 11
+        base = dft.RKS(molecule, xc='lda,vwn')
+        base.grids.atom_grid = (20, 50)
+        mf = base.PCM(model).run(conv_tol=1e-11)
+        assert mf.converged
+        td = mf.CasidaTDDFT(equilibrium_solvation=equilibrium)
+        assert isinstance(td, CasidaTDDFT)
+        assert td._scf is mf
+        assert td.with_solvent is not model
+        assert td.with_solvent.equilibrium_solvation is equilibrium
+        assert not model.equilibrium_solvation
+        expected_eps = model.get_eps() if equilibrium else model.get_eps_optical()
+        numpy.testing.assert_allclose(td.with_solvent.get_eps(), expected_eps, atol=1e-14)
+        transition = cupy.outer(mf.mo_coeff[:, 0], mf.mo_coeff[:, 1])
+        transition += transition.T
+        cpu_vacuum = mf.undo_solvent().to_cpu()
+        vacuum = cpu_vacuum.gen_response(singlet=True, hermi=1)(transition.get())
+        cpu_model = td.with_solvent.to_cpu()
+        expected = vacuum + cpu_model._B_dot_x(transition.get())
+        actual = td.gen_response(singlet=True, hermi=1)(transition)
+        numpy.testing.assert_allclose(actual.get(), expected, atol=1e-9, rtol=1e-9)
+
 
 if __name__ == "__main__":
     print("Full Tests for PCMs")

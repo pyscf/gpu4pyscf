@@ -162,7 +162,8 @@ def asarray(a, **kwargs):
         # cupy/_core/core.pyx, where memory buffer is allocated via
         # mem = _alloc_async_transfer_buffer(nbytes)
 
-        allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+        allow_fast_transfer = (kwargs.get('dtype', a.dtype) == a.dtype and
+                               'order' not in kwargs)
         # a must be C-contiguous or F-contiguous
         if not a.flags.c_contiguous and not a.flags.f_contiguous:
             allow_fast_transfer = False
@@ -246,6 +247,8 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
         else:
             raise NotImplementedError
         out [:,mask] = cderi_tril
+        if ndim == 1:
+            out = out[0]
         return out
 
     if stream is None:
@@ -425,15 +428,22 @@ def block_c2s_diag(angular, counts):
     return cart2sph
 
 def block_diag(blocks, out=None):
-    '''
-    each block size is up to 16x16
+    '''Construct a block-diagonal array, preserving the input result dtype.
+
+    A supplied output buffer is filled with the complete block-diagonal matrix.
     '''
     rows = np.cumsum(np.asarray([0] + [x.shape[0] for x in blocks]))
     cols = np.cumsum(np.asarray([0] + [x.shape[1] for x in blocks]))
     offsets = np.cumsum(np.asarray([0] + [x.shape[0]*x.shape[1] for x in blocks]))
 
     m, n = rows[-1], cols[-1]
-    if out is None: out = cupy.zeros([m, n])
+    dtype = np.result_type(*blocks)
+    out = ndarray([m, n], dtype=dtype, buffer=out)
+    out.fill(0.)
+    if dtype != np.float64:
+        for block, r0, r1, c0, c1 in zip(blocks, rows[:-1], rows[1:], cols[:-1], cols[1:]):
+            out[r0:r1,c0:c1] = block
+        return out
     rows = cupy.asarray(rows, dtype='int32')
     cols = cupy.asarray(cols, dtype='int32')
     offsets = cupy.asarray(offsets, dtype='int32')
@@ -721,7 +731,11 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     nroots, ndim = x1.shape
     x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
     if len(x1) == 0:
-        return cupy.zeros_like(b)
+        # A zero residual means a supplied initial guess is already a solution.
+        if x0 is None:
+            return cupy.zeros_like(b)
+        else:
+            return x0
 
     x1 *= rmat.diagonal()[:,None]
 
@@ -1144,12 +1158,13 @@ def condense(opname, a, loc_x, loc_y=None):
             code = 'val += a[ip*nj+jp];'
             result_code = 'val'
         elif opname == 'max':
-            init_code = '0'
-            code = 'double tmp = a[ip*nj+jp]; val = (val > tmp) ? val : tmp;'
+            # Seed nonempty extrema from data; zero biases all-negative maxima.
+            init_code = '(i0 < i1 && j0 < j1) ? a[i0*nj+j0] : 0'
+            code = 'double tmp = a[ip*nj+jp]; val = max(val, tmp);'
             result_code = 'val'
         elif opname == 'min':
-            init_code = '0'
-            code = 'double tmp = a[ip*nj+jp]; val = (val < tmp) ? val : tmp;'
+            init_code = '(i0 < i1 && j0 < j1) ? a[i0*nj+j0] : 0'
+            code = 'double tmp = a[ip*nj+jp]; val = min(val, tmp);'
             result_code = 'val'
         elif opname == 'abssum':
             init_code = '0'
@@ -1162,7 +1177,7 @@ def condense(opname, a, loc_x, loc_y=None):
         elif opname == 'norm':
             init_code = '0'
             code = 'double tmp = a[ip*nj+jp]; val += tmp * tmp;'
-            result_code = 'fsqrt(val)'
+            result_code = 'sqrt(val)'
 
         kernel_code = ('''\
 extern "C" __global__

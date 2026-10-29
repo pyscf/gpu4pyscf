@@ -15,8 +15,11 @@
 import unittest
 import numpy as np
 import cupy as cp
+from scipy.special import erfcinv
+from pyscf.pbc.scf import addons as cpu_addons
 from packaging.version import Version
 import pyscf
+from pyscf import lib
 from gpu4pyscf.pbc.scf import smearing
 
 
@@ -35,6 +38,46 @@ def tearDownModule():
     del cell
 
 class KnownValues(unittest.TestCase):
+    def test_krhf_fermi_and_occupations(self):
+        crystal = pyscf.M(
+            atom='He .2 .3 .4', unit='Bohr', a=np.diag([5., 5.2, 5.4]),
+            basis=[[0, [.8, 1.]], [1, [.4, 1.]]], pseudo='gth-pade',
+            mesh=[25, 27, 29], precision=1e-10, verbose=0)
+        cpu = crystal.KRHF(kpts=crystal.make_kpts([2, 1, 1]))
+        mf = cpu.to_gpu()
+        mf.run(conv_tol=1e-11)
+        cpu.run(conv_tol=1e-11)
+        self.assertTrue(mf.converged and cpu.converged)
+        np.testing.assert_allclose(mf.e_tot, cpu.e_tot, atol=1e-9, rtol=0)
+        reference = cpu.get_occ(mf.mo_energy.get())
+        np.testing.assert_array_equal(mf.get_occ().get(), np.asarray(reference))
+        with lib.temporary_env(mf, verbose=lib.logger.DEBUG):
+            fermi = mf.get_fermi()
+            explicit = mf.get_fermi(mf.mo_energy, mf.mo_occ)
+        ref = cpu.get_fermi(mf.mo_energy.get(), mf.mo_occ.get())
+        np.testing.assert_allclose(fermi, ref, atol=1e-12, rtol=0)
+        np.testing.assert_allclose(explicit, ref, atol=1e-12, rtol=0)
+
+    def test_kuhf_fermi_and_occupations(self):
+        crystal = pyscf.M(
+            atom='He .2 .3 .4', unit='Bohr', a=np.diag([5., 5.2, 5.4]),
+            basis=[[0, [.8, 1.]], [1, [.4, 1.]]], pseudo='gth-pade',
+            mesh=[25, 27, 29], precision=1e-10, verbose=0)
+        cpu = crystal.KUHF(kpts=crystal.make_kpts([2, 1, 1]))
+        mf = cpu.to_gpu()
+        mf.run(conv_tol=1e-11)
+        cpu.run(conv_tol=1e-11)
+        self.assertTrue(mf.converged and cpu.converged)
+        np.testing.assert_allclose(mf.e_tot, cpu.e_tot, atol=1e-9, rtol=0)
+        reference = cpu.get_occ(mf.mo_energy.get())
+        np.testing.assert_array_equal(mf.get_occ().get(), np.asarray(reference))
+        with lib.temporary_env(mf, verbose=lib.logger.DEBUG):
+            fermi = mf.get_fermi()
+            explicit = mf.get_fermi(mf.mo_energy, mf.mo_occ)
+        ref = cpu.get_fermi(mf.mo_energy.get(), mf.mo_occ.get())
+        np.testing.assert_allclose(fermi, ref, atol=1e-12, rtol=0)
+        np.testing.assert_allclose(explicit, ref, atol=1e-12, rtol=0)
+
     def test_krhf_smearing(self):
         nao = cell.nao
         mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu()
@@ -115,6 +158,106 @@ class KnownValues(unittest.TestCase):
         gpu_mf = mf.to_gpu()
         assert isinstance(gpu_mf, smearing.mol_smearing._SmearingSCF)
         assert gpu_mf.sigma == 0.1
+
+
+SMALL_K_ENERGIES = np.array([[[-.7, -.1, .05, .25, .8], [-.67, -.08, .08, .29, .82]],
+                             [[-.62, -.06, .12, .3, .88], [-.59, -.02, .14, .34, .93]]])
+
+
+class KSCFSmearing(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        crystal = pyscf.M(atom='Li 0 0 0', basis='sto-3g', spin=1, a=np.eye(3)*8,
+                          unit='Bohr', mesh=[7]*3, verbose=0)
+        kpts = crystal.make_kpts([2, 1, 1])
+        cpu = crystal.KUHF(kpts=kpts, exxdiv=None)
+        # KUHF.nelec counts both sampled cells. Set the supported public spin
+        # populations explicitly: two copies of Li's (2 alpha, 1 beta) electrons.
+        cpu.nelec = (4, 2)
+        cls.small_kuhf = cpu, cpu.to_gpu()
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.small_kuhf
+
+    def test_kuhf_spectral_occupations_and_entropy(self):
+        for fix_spin, mu in [(False, None), (False, .07), (True, None),
+                             (True, .07), (True, (-.04, .12))]:
+            with self.subTest(fix_spin=fix_spin, mu=mu):
+                small_kuhf = self.small_kuhf
+                cpu_base, gpu_base = small_kuhf
+                cpu = cpu_addons.smearing(cpu_base, .12, 'fermi', mu, fix_spin)
+                gpu = smearing.smearing(gpu_base, .12, 'fermi', mu, fix_spin)
+                actual = gpu.get_occ(cp.asarray(SMALL_K_ENERGIES)).get()
+                expected = np.asarray(cpu.get_occ(SMALL_K_ENERGIES))
+                np.testing.assert_allclose(actual, expected, atol=2e-13, rtol=2e-13)
+                assert actual.shape == (2, 2, 5)
+                assert np.all((actual >= 0) & (actual <= 1))
+                if mu is None:
+                    if fix_spin:
+                        np.testing.assert_allclose(actual.sum(axis=(1, 2)), gpu.nelec, atol=2e-13)
+                    else:
+                        np.testing.assert_allclose(actual.sum()/2, gpu.cell.nelectron, atol=2e-13)
+                else:
+                    # Occupations at fixed chemical potential need not conserve N.
+                    assert abs(actual.sum()/2-gpu.cell.nelectron) > .1
+                f = actual.ravel()
+                f = f[(f > 0) & (f < 1)]
+                entropy = -(f*np.log(f) + (1-f)*np.log1p(-f)).sum()/2
+                np.testing.assert_allclose(gpu.entropy, entropy, atol=3e-13, rtol=3e-13)
+                np.testing.assert_allclose(gpu.entropy, cpu.entropy, atol=2e-13, rtol=2e-13)
+
+    def test_krhf_gaussian_occupations_and_entropy(self):
+        cpu_base = cell.KRHF(kpts=cell.make_kpts([2, 1, 1]))
+        gpu_base = cpu_base.to_gpu()
+        energies = SMALL_K_ENERGIES[0]
+        cpu = cpu_addons.smearing(cpu_base, .12, 'gauss')
+        gpu = smearing.smearing(gpu_base, .12, 'gauss')
+        actual = gpu.get_occ(cp.asarray(energies)).get()
+        expected = np.asarray(cpu.get_occ(energies))
+        np.testing.assert_allclose(actual, expected, atol=2e-13, rtol=2e-13)
+        self.assertEqual(actual.shape, (2, 5))
+        self.assertTrue(np.all((actual >= 0) & (actual <= 2)))
+        np.testing.assert_allclose(actual.sum()/2, cell.nelectron, atol=2e-13)
+        f = actual.ravel()/2
+        entropy = np.exp(-erfcinv(2*f)**2).sum()/(2*np.sqrt(np.pi))
+        np.testing.assert_allclose(gpu.entropy, entropy, atol=3e-13, rtol=3e-13)
+        np.testing.assert_allclose(gpu.entropy, cpu.entropy, atol=2e-13, rtol=2e-13)
+
+    def test_kuhf_smearing_energy_and_gradient_identities(self):
+        small_kuhf = self.small_kuhf
+        cpu_base, gpu_base = small_kuhf
+        cpu = cpu_addons.smearing(cpu_base, .12, 'fermi', fix_spin=True)
+        gpu = smearing.smearing(gpu_base, .12, 'fermi', fix_spin=True)
+        occupation = np.asarray(cpu.get_occ(SMALL_K_ENERGIES))
+        gpu_occ = gpu.get_occ(cp.asarray(SMALL_K_ENERGIES))
+        eigenvalues, vectors = np.linalg.eigh(cpu.get_ovlp())
+        coefficients = np.array([vectors/np.sqrt(eigenvalues)[:, None, :]]*2)
+        dm = cpu.make_rdm1(coefficients, occupation)
+        hcore = cpu.get_hcore()
+        potential = cpu.get_veff(dm_kpts=dm)
+        expected = cpu.energy_tot(dm, hcore, potential)
+        actual = gpu.energy_tot(cp.asarray(dm), cp.asarray(hcore), cp.asarray(potential))
+        np.testing.assert_allclose(actual, expected, atol=2e-11, rtol=2e-11)
+        np.testing.assert_allclose(gpu.e_free, actual-.12*gpu.entropy, atol=1e-13)
+        np.testing.assert_allclose(gpu.e_zero, (actual+gpu.e_free)/2, atol=1e-13)
+        fock = hcore + potential
+        grad = gpu.get_grad(cp.asarray(coefficients), gpu_occ, cp.asarray(fock))
+        np.testing.assert_allclose(grad.get(), cpu.get_grad(coefficients, occupation, fock),
+                                   atol=2e-11, rtol=2e-11)
+        # The omitted-Fock interface must rebuild from these orbitals/occupations,
+        # not from stale mean-field state. Compare with an explicitly formed Fock.
+        gpu_fock = gpu.get_hcore() + gpu.get_veff(gpu.mol, cp.asarray(dm))
+        np.testing.assert_allclose(gpu.get_grad(cp.asarray(coefficients), gpu_occ).get(),
+            gpu.get_grad(cp.asarray(coefficients), gpu_occ, gpu_fock).get(),
+            atol=2e-11, rtol=2e-11)
+        gpu.sigma = 0
+        zero_occ = gpu.get_occ(cp.asarray(SMALL_K_ENERGIES))
+        np.testing.assert_array_equal(zero_occ.get(),
+                                      gpu_base.get_occ(cp.asarray(SMALL_K_ENERGIES)).get())
+        np.testing.assert_allclose(gpu.get_grad(cp.asarray(coefficients), zero_occ, cp.asarray(fock)).get(),
+            gpu_base.get_grad(cp.asarray(coefficients), zero_occ, cp.asarray(fock)).get(), atol=1e-13)
+
 
 if __name__ == "__main__":
     print("Basic Tests for GPU PBC-SCF Smearing")

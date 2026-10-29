@@ -176,5 +176,5 @@ class _SmearingKSCF(mol_smearing._SmearingSCF):
 def from_cpu(method):
     from pyscf.scf.addons import _SmearingSCF
     assert isinstance(method, _SmearingSCF)
-    return smearing(method.undo_smearing().to_cpu(), method.sigma,
+    return smearing(method.undo_smearing().to_gpu(), method.sigma,
                     method.smearing_method, method.mu0, method.fix_spin)

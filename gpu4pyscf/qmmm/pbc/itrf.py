@@ -19,7 +19,7 @@ import pyscf
 from pyscf import lib
 from pyscf import gto
 from pyscf import df
-from pyscf import grad
+from gpu4pyscf import grad
 from pyscf.lib import logger
 
 import cupy as cp
@@ -129,6 +129,15 @@ class QMMMSCF(QMMM):
         self.qm_ewald_hess = None
         self.e_nuc = None
 
+    def reset(self, mol=None):
+        # These multipole and electrostatic caches depend on the QM geometry.
+        self.s1r = None
+        self.s1rr = None
+        self.mm_ewald_pot = None
+        self.qm_ewald_hess = None
+        self.e_nuc = None
+        return super().reset(mol)
+
     def dump_flags(self, verbose=None):
         super().dump_flags(verbose)
         logger.info(self, '** Add background charges for %s **',
@@ -212,6 +221,8 @@ class QMMMSCF(QMMM):
         if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
             h1e += int1e_grids(mol, coords, charges = -charges, charge_exponents = expnts)
+        elif mm_mol.charge_model == 'point' and len(coords) != 0:
+            h1e += int1e_grids(mol, coords, charges = -charges)
         elif mm_mol.charge_model != 'point' and len(coords) != 0:
             # TODO test this block
             raise RuntimeError("Not tested yet")
@@ -331,7 +342,7 @@ class QMMMSCF(QMMM):
         vdiff = (vdiff + vdiff.T) / 2
         return vdiff
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  mm_ewald_pot=None, qm_ewald_pot=None):
         if mol is None:
             mol = self.mol
@@ -363,6 +374,7 @@ class QMMMSCF(QMMM):
         if vhf_last is not None and isinstance(vhf_last, cupy_helper.CPArrayWithTag):
             vhf_last = vhf_last.veff_rs
 
+        # None requests a full HF build, including its Coulomb-energy metadata.
         veff = super().get_veff(mol, dm, dm_last, vhf_last, hermi)
         if isinstance(veff, cupy_helper.CPArrayWithTag):
             metadata = veff.__dict__
@@ -484,7 +496,10 @@ def add_mm_charges_grad(scf_grad, atoms_or_coords, a, charges, radii=None,
     mm_mol = mm_mole.create_mm_mol(atoms_or_coords, a, charges, radii=radii,
             rcut_ewald=rcut_ewald, rcut_hcore=rcut_hcore, unit=unit)
     mm_grad = qmmm_grad_for_scf(scf_grad)
-    mm_grad.base.mm_mol = mm_mol
+    # Reuse SCF invalidation; the cached MM forces also belong to the old embedding.
+    qmmm_for_scf(mm_grad.base, mm_mol)
+    mm_grad.de_nuc_mm = None
+    mm_grad.de_ewald_mm = None
     return mm_grad
 
 # Define method mm_charge_grad for backward compatibility
@@ -557,6 +572,12 @@ class QMMMGrad:
 
     def __init__(self, scf_grad):
         self.__dict__.update(scf_grad.__dict__)
+
+    def reset(self, mol=None):
+        # The inherited reset updates the molecule but does not clear MM forces.
+        self.de_nuc_mm = None
+        self.de_ewald_mm = None
+        return super().reset(mol)
 
     def dump_flags(self, verbose=None):
         super().dump_flags(verbose)
@@ -1038,7 +1059,7 @@ class QMMMGrad:
         g_qm_orig = cp.empty([3, mol.nao, mol.nao])
         with lib.call_in_background(calculate_h1e) as calculate_hs:
             calculate_hs(self, g_qm_orig)
-            g_qm = get_hcore_mm(self)
+            g_qm = get_hcore_mm(self, mol)
 
         logger.timer(self, 'get_hcore', *cput0)
         return g_qm_orig + g_qm
@@ -1098,8 +1119,8 @@ class QMMMGrad:
 
     def grad_nuc(self, mol=None, atmlst=None, with_mm=True):
         cput0 = (logger.process_clock(), logger.perf_counter())
-        assert atmlst is None # atmlst needs to be full for computing g_mm
         if mol is None: mol = self.mol
+        assert atmlst is None or len(atmlst) == mol.natm
         mm_mol = self.base.mm_mol
         coords = cp.asarray(mm_mol.atom_coords())
         charges = cp.asarray(mm_mol.atom_charges())

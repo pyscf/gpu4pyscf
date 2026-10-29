@@ -209,6 +209,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list)-1)]
         for i, t in enumerate(time_list):
             logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
+    assert atmlst is None or len(atmlst) == mol.natm
     return de, de/EI, de_etf, de_etf/EI
 
 
@@ -590,6 +591,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         for i, t in enumerate(time_list):
             logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
 
+    assert atmlst is None or len(atmlst) == mol.natm
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 class NAC(tdrhf.NAC):

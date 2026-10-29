@@ -26,13 +26,13 @@ def _for_scf(mf, solvent_obj, dm=None):
         dm : if given, solvent does not respond to the change of density
             matrix. A frozen ddCOSMO potential is added to the results.
     '''
-    if isinstance(mf, _Solvation):
-        mf.with_solvent = solvent_obj
-        return mf
-
     if dm is not None:
         solvent_obj.e, solvent_obj.v = solvent_obj.kernel(dm)
         solvent_obj.frozen = True
+
+    if isinstance(mf, _Solvation):
+        mf.with_solvent = solvent_obj
+        return mf
 
     sol_mf = SCFWithSolvent(mf, solvent_obj)
     name = solvent_obj.__class__.__name__ + mf.__class__.__name__
@@ -176,7 +176,8 @@ class SCFWithSolvent(_Solvation):
         is_uhf = isinstance(self, scf.uhf.UHF)
         def vind_with_solvent(dm1):
             v = vind(dm1)
-            if self.with_solvent.equilibrium_solvation:
+            if (self.with_solvent.equilibrium_solvation
+                    and not self.with_solvent.frozen):
                 if is_uhf:
                     v += self.with_solvent._B_dot_x(dm1[0]+dm1[1])
                 else:

@@ -828,3 +828,59 @@ def test_separate_dd_for_small_overlap():
             ref = abs(cderi[:].reshape(naux,nao,nao))
             dat = abs(gpu_dat[0,0].get())
             assert abs(dat - ref).max() < 1e-8
+
+@pytest.mark.parametrize('prefer_ed', [False, True])
+def test_real_coulomb_metric_factorization(prefer_ed):
+    basis = [[0, [.8, 1.]], [0, [.8, 1.]]]
+    aux = pyscf.M(atom='He 0 0 0', basis=basis, verbose=0)
+    metric = aux.intor('int2c2e')
+    values = np.linalg.eigvalsh(metric)
+    assert abs(values[0]) < 1e-12
+    factor, negative, tag = rsdf_builder.decompose_j2c(
+        cp.asarray(metric), prefer_ed=prefer_ed)
+    assert negative is None
+    factor = factor.get()
+    assert tag == 'ED'
+    np.testing.assert_allclose(factor.T @ metric @ factor,
+                               np.eye(factor.shape[1]), atol=1e-12, rtol=0)
+    w, v = np.linalg.eigh(metric)
+    keep = w > rsdf_builder.LINEAR_DEP_THR
+    reference = (v[:, keep] / w[keep]) @ v[:, keep].T
+    np.testing.assert_allclose(factor @ factor.T, reference, atol=1e-12, rtol=0)
+
+
+@pytest.mark.parametrize('nk,j_only', [(1, False), (2, False), (3, False), (2, True), (3, True)])
+def test_real_builder_public_unpack_layout(nk, j_only):
+    from pyscf.pbc import df as cpu_df
+    cell = pyscf.M(atom='He .2 .3 .4', unit='Bohr',
+                   a=np.diag([5., 5.5, 12.]), mesh=[11, 11, 25],
+                   basis=[[0, [1.2, 1.]], [1, [.8, 1.]]],
+                   precision=1e-9, verbose=0)
+    aux = pyscf.df.addons.make_auxmol(cell, {'He': [[0, [.9, 1.]], [0, [.3, 1.]]]})
+    mesh = np.array([nk, 1, 1])
+    kpts = cell.make_kpts(mesh)
+    compressed, negative, indices = build_cderi(cell, aux, kpts=kpts, kmesh=mesh, j_only=j_only, compress=True)
+    dense, dense_negative = build_cderi(cell, aux, kpts=kpts, kmesh=mesh, j_only=j_only)
+    assert negative is dense_negative is None
+    translations = k2gamma.translation_vectors_for_kmesh(cell, mesh, True)
+    phases = cp.asarray(np.exp(1j * translations.dot(kpts.T)), order='C')
+    conservation = k2gamma.double_translation_indices(mesh)
+    for q, data in compressed.items():
+        before = data.copy()
+        ki, kj = np.where(conservation == q)
+        storage = cp.empty((nk, data.shape[0], cell.nao, cell.nao),
+                           dtype=np.float64 if nk == 1 else np.complex128)
+        actual = rsdf_builder.unpack_cderi(data, indices, q, conservation, phases,
+                                         cell.nao, axis=0, out=storage)
+        assert actual.data.ptr == storage.data.ptr
+        for i, j in zip(ki, kj):
+            np.testing.assert_allclose(actual[i].get(),
+                                       dense[i, j].get(), atol=1e-11, rtol=0)
+        np.testing.assert_array_equal(cp.asnumpy(data), cp.asnumpy(before))
+    if nk == 1:
+        cpu = cpu_df.GDF(cell)
+        cpu.auxbasis = aux.basis
+        reference = cpu.ao2mo(np.eye(cell.nao), compact=False)
+        assert cpu.auxcell.nao == aux.nao
+        factors = dense[0, 0].get().reshape(-1, cell.nao**2)
+        np.testing.assert_allclose(factors.T @ factors, reference, atol=1e-8, rtol=0)

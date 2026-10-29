@@ -19,6 +19,7 @@ import cupy as cp
 import pyscf
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import hf as rhf
+from gpu4pyscf.properties.polarizability import eval_polarizability
 from gpu4pyscf.properties.raman import eval_raman_intensity, \
     polarizability_derivative_numerical_dx, polarizability_derivative_numerical_dEdE
 from gpu4pyscf.lib.multi_gpu import num_devices
@@ -63,7 +64,7 @@ def make_mf(mol, xc = None, if_density_fitting = False, pcm = None):
     return mf
 
 class KnownValues(unittest.TestCase):
-    @pytest.mark.skip("Too slow, and probably nobody wants to use direct SCF to compute the Raman spectra of a big molecule")
+    @unittest.skip("Too slow, and probably nobody wants to use direct SCF to compute the Raman spectra of a big molecule")
     def test_raman_wb97mv(self):
         ### Q-Chem input
         # $rem

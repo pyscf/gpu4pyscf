@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+import numpy as np
+import pytest
 import cupy as cp
 import pyscf
 from pyscf import lib
+from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.gto import mole as mole_gpu
 
 def test_basis_seg_contraction():
@@ -267,8 +271,50 @@ C S
     0.46  0.40  1.00
     0.08  0.20  0.00'''), diffuse_cutoff=0.1)
     assert mol.nbas == 2
-test_basis_seg_contraction()
-test_general_contraction()
-test_apply_C_dot()
-test_basis_recontraction()
-print('d')
+
+@pytest.mark.parametrize('spin', [0, 1])
+@pytest.mark.parametrize('name', ['KHF', 'KKS'])
+def test_kpoint_scf_factory(spin, name):
+    atom = 'H 0 0 0' if spin else 'He 0 0 0'
+    cpu = pbcgto.M(atom=atom, basis='sto-3g', spin=spin, verbose=0,
+                   a=np.eye(3)*4, mesh=[5, 5, 5])
+    cell = mole_gpu.Cell.from_cpu(cpu)
+    kpts = cpu.make_kpts([2, 1, 1])
+    kwargs = {'kpts': kpts, 'exxdiv': None, 'conv_tol': 3e-10}
+    if name == 'KKS':
+        kwargs['xc'] = 'pbe'
+    mf = getattr(cell, name)(**kwargs)
+    reference = getattr(cpu, name)(**kwargs).to_gpu()
+    assert type(mf) is type(reference)
+    np.testing.assert_allclose(cp.asnumpy(mf.kpts), kpts, atol=0, rtol=0)
+    assert mf.exxdiv is None
+    assert mf.conv_tol == 3e-10
+    if name == 'KKS':
+        assert mf.xc == 'pbe'
+
+@pytest.mark.parametrize('method', ['CT_dot_mat', 'C_dot_mat', 'mat_dot_C', 'mat_dot_CT'])
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_direct_complex_contraction_matrices(small_sorted_gto, method, ndim):
+    _, sorted_mol = small_sorted_gto
+    c = sorted_mol.ctr_coeff.get()
+    left = method in ('CT_dot_mat', 'C_dot_mat')
+    transform = c.T if method in ('CT_dot_mat', 'mat_dot_CT') else c
+    nin = transform.shape[1] if left else transform.shape[0]
+    shape = (nin,) if ndim == 1 else ((nin, 3) if left else (3, nin))
+    if ndim == 3:
+        shape = (2,) + shape
+    rng = np.random.default_rng(547)
+    data = rng.normal(size=shape) + 1j*rng.normal(size=shape)
+    mat = cp.asarray(data)[..., ::-1]
+    host = mat.get()
+    if ndim == 2:
+        mat = host
+    expected = transform @ host if left else host @ transform
+    # Vector interfaces are equivalent to the corresponding matrix product.
+    out = cp.empty(expected.shape, dtype=np.complex128) if ndim != 2 else None
+    actual = getattr(sorted_mol, method)(mat, out=out)
+    assert actual.shape == expected.shape and actual.dtype == np.complex128
+    if out is not None:
+        assert actual.data.ptr == out.data.ptr
+    np.testing.assert_allclose(actual.get(), expected, atol=2e-12, rtol=2e-12)
+    np.testing.assert_array_equal(cp.asnumpy(mat), host)

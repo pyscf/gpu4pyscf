@@ -126,6 +126,7 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True,
 
     if omega == 0:
         vj, vk = vhfopt.get_jk(dms, hermi, log)
+        assert lr_factor == 1
     else:
         if with_k:
             vk = vhfopt.get_k(dms, hermi, log, omega, lr_factor, sr_factor)
@@ -237,19 +238,16 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
     '''
     libgint = load_library('libgint')
     spherical_matrix = cp.asarray(spherical_matrix, order='C')
-    spherical_matrix_ndim = spherical_matrix.ndim
-    if spherical_matrix_ndim == 2:
-        spherical_matrix = spherical_matrix[None]
+    batch_shape = spherical_matrix.shape[:-2]
     n_spherical = mol.nao
-    assert spherical_matrix.shape[1] == n_spherical
-    assert spherical_matrix.shape[2] == n_spherical
+    assert spherical_matrix.shape[-2:] == (n_spherical, n_spherical)
+    spherical_matrix = spherical_matrix.reshape(-1, n_spherical, n_spherical)
     n_cartesian = sorted_mol.nao
 
     output_complex = False
     if spherical_matrix.dtype == np.complex128:
-        spherical_matrix = spherical_matrix.view(np.float64)
-        spherical_matrix = spherical_matrix.reshape(-1,n_spherical,n_spherical,2)
-        spherical_matrix = spherical_matrix.transpose(3,0,1,2).reshape(-1,n_spherical,n_spherical)
+        # Native kernels require contiguous real planes, not strided dtype views.
+        spherical_matrix = cp.concatenate((spherical_matrix.real, spherical_matrix.imag))
         output_complex = True
     else:
         assert spherical_matrix.dtype == np.float64
@@ -285,9 +283,7 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
         out = outR.astype(np.complex128)
         out.imag = outI
 
-    if spherical_matrix_ndim == 2:
-        out = out[0]
-    return out
+    return out.reshape(batch_shape + (n_cartesian, n_cartesian))
 
 def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
@@ -297,22 +293,21 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     '''
     libgint = load_library('libgint')
     cartesian_matrix = cp.asarray(cartesian_matrix, order='C')
-    cartesian_matrix_ndim = cartesian_matrix.ndim
-    if cartesian_matrix_ndim == 2:
-        cartesian_matrix = cartesian_matrix[None]
+    batch_shape = cartesian_matrix.shape[:-2]
     n_cartesian = sorted_mol.nao
-    assert cartesian_matrix.shape[1] == n_cartesian
-    assert cartesian_matrix.shape[2] == n_cartesian
+    assert cartesian_matrix.shape[-2:] == (n_cartesian, n_cartesian)
+    cartesian_matrix = cartesian_matrix.reshape(-1, n_cartesian, n_cartesian)
     n_spherical = mol.nao
 
     output_complex = False
     if cartesian_matrix.dtype == np.complex128:
-        cartesian_matrix = cartesian_matrix.view(np.float64)
-        cartesian_matrix = cartesian_matrix.reshape(-1,n_cartesian,n_cartesian,2)
-        cartesian_matrix = cartesian_matrix.transpose(3,0,1,2).reshape(-1,n_cartesian,n_cartesian)
+        cartesian_matrix = cp.concatenate((cartesian_matrix.real, cartesian_matrix.imag))
         output_complex = True
     else:
         assert cartesian_matrix.dtype == np.float64
+        if not mol.cart:
+            # The native cart2sph transform overwrites its input as scratch.
+            cartesian_matrix = cartesian_matrix.copy()
     counts = cartesian_matrix.shape[0]
 
     l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
@@ -345,9 +340,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
         out = outR.astype(np.complex128)
         out.imag = outI
 
-    if cartesian_matrix_ndim == 2:
-        out = out[0]
-    return out
+    return out.reshape(batch_shape + (n_spherical, n_spherical))
 
 def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
                       l_ctr_offsets, ao_idx, l_ctr_paddings=None):
@@ -357,18 +350,15 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
     '''
     libgint = load_library('libgint')
     right_matrix = cp.asarray(right_matrix, order='C')
-    ndim = right_matrix.ndim
-    if ndim == 2:
-        right_matrix = right_matrix[None]
-    nao, n_second = right_matrix.shape[1:]
+    batch_shape = right_matrix.shape[:-2]
+    nao, n_second = right_matrix.shape[-2:]
     assert nao == mol.nao
+    right_matrix = right_matrix.reshape(-1, nao, n_second)
     n_cartesian = sorted_mol.nao
 
     output_complex = False
     if right_matrix.dtype == np.complex128:
-        right_matrix = right_matrix.view(np.float64)
-        right_matrix = right_matrix.reshape(-1,nao,n_second,2)
-        right_matrix = right_matrix.transpose(3,0,1,2).reshape(-1,nao,n_second)
+        right_matrix = cp.concatenate((right_matrix.real, right_matrix.imag))
         output_complex = True
     else:
         assert right_matrix.dtype == np.float64
@@ -403,9 +393,7 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
         out = outR.astype(np.complex128)
         out.imag = outI
 
-    if ndim == 2:
-        out = out[0]
-    return out
+    return out.reshape(batch_shape + (n_cartesian, n_second))
 
 class _VHFOpt:
     def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
@@ -644,7 +632,7 @@ class _VHFOpt:
                                      shls_excludes=shls_excludes)
             vj1 = asarray(vs_h[0])
             vk1 = asarray(vs_h[1])
-            if hermi:
+            if hermi == 1:
                 vk1 = hermi_triu(vk1)
             vj += hermi_triu(vj1)
             vk += vk1

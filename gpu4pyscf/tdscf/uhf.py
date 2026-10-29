@@ -1209,18 +1209,23 @@ class SpinFlipTDA(TDBase):
                 float or ndarray
                 Oscillator strength(s) between the reference and target state(s).
         '''
+        assert 1 <= ref <= len(self.xy)
+        if state == ref:
+            raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
             states = np.atleast_1d(state)
         states = states[states != ref]
 
+        if states.size == 0:
+            return np.empty(0)
         trans_dip = self.transition_dipole(ref, states)
 
         ref -= 1
         states -= 1
         es = self.e[states] - self.e[ref]
-        f = (2./3.) * lib.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        f = (2./3.) * np.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
         if isinstance(state, int):
             return f[0]
         else:
@@ -1231,11 +1236,16 @@ class SpinFlipTDA(TDBase):
         Transition dipole moments between excited states for Spin-flip TDDFT/TDA.
         Only applicable to length gauge.
         '''
+        assert 1 <= ref <= len(self.xy)
+        if state == ref:
+            raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
             states = np.atleast_1d(state)
         states = states[states != ref]
+        if states.size == 0:
+            return np.empty((0, 3))
         ref -= 1
         states -= 1
 
@@ -1302,6 +1312,9 @@ class SpinFlipTDA(TDBase):
     def spin_square(self, state=None):
         r'''
         <S^2> of excited states for Spin-flip TDDFT/TDA.
+
+        state uses zero-based indices (unlike transition observables).
+        None selects all states.
         Ref: J. Chem. Phys. 2011, 134, 134101.
         '''
         mf = self._scf

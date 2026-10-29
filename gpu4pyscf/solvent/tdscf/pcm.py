@@ -167,7 +167,6 @@ class WithSolventTDSCFGradient:
         cls = self.__class__
         name_mixin = self.base.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCFGradient, name_mixin))
-        del obj.with_solvent
         return obj
 
     def solvent_response(self, dm):
@@ -215,7 +214,6 @@ class WithSolventTDSCFNacMethod:
         cls = self.__class__
         name_mixin = self.base.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCFNacMethod, name_mixin))
-        del obj.with_solvent
         return obj
 
     def solvent_response(self, dm):

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
 import ctypes
 import numpy as np
 import cupy as cp
 import pyscf
+import pytest
 from pyscf import lib, gto
 from gpu4pyscf.scf import jk
 from pyscf.scf.hf import get_jk
@@ -456,3 +456,144 @@ def test_jk_energy_per_atom():
     assert abs(ejk[0] - ref).max() < 5e-12
     ref = np.array([0.24806416996651, 1.11003753769514, 0.19967171093788])
     assert abs(ejk[0] - ref).max() < 1e-13
+
+
+@pytest.fixture(scope='module', params=[False, True], ids=['spd', 'high-angular'])
+def small_jk_model(request):
+    if request.param:
+        mol = gto.M(atom='He 0 0 0; H 0.2 -.1 1.2', charge=1,
+                    basis={'He': [[0, [1.2, 1.]], [5, [.8, 1.]]],
+                           'H': [[0, [.7, 1.]]]}, verbose=0)
+    else:
+        mol = gto.M(atom='He 0 0 0; H 0.2 -.1 1.2', charge=1,
+                    basis={'He': [[0, [1.2, 1.]], [1, [.9, 1.]], [2, [.8, 1.]]],
+                           'H': [[0, [.7, 1.]]]}, verbose=0)
+    vectors = np.random.default_rng(92).normal(size=(mol.nao, 3))
+    density = vectors @ vectors.T
+    density *= mol.nelectron / np.einsum('ij,ji', density, mol.intor('int1e_ovlp'))
+    transition = np.outer(vectors[:, 0], vectors[:, 1]) / mol.nao
+    return mol, density, transition
+
+
+@pytest.mark.parametrize('lr,sr', [(1., 0.), (0., 1.), (.7, .2)])
+def test_weighted_exchange_and_full_coulomb(small_jk_model, lr, sr):
+    mol, density, _ = small_jk_model
+    omega = .3
+    ref_j = get_jk(mol, density, hermi=1)[0]
+    ref_k = (lr * get_jk(mol, density, hermi=1, omega=omega)[1]
+             + sr * get_jk(mol, density, hermi=1, omega=-omega)[1])
+    before = density.copy()
+    opt = jk._VHFOpt(mol).build()
+    vj, vk = jk.get_jk(mol, density, hermi=1, vhfopt=opt,
+                       omega=omega, lr_factor=lr, sr_factor=sr)
+    np.testing.assert_allclose(vj.get(), ref_j, atol=1e-10, rtol=1e-10)
+    np.testing.assert_allclose(vk.get(), ref_k, atol=1e-10, rtol=1e-10)
+    separate = jk.get_k(mol, density, hermi=1, vhfopt=opt,
+                         omega=omega, lr_factor=lr, sr_factor=sr)
+    np.testing.assert_allclose(separate.get(), ref_k, atol=1e-10, rtol=1e-10)
+    np.testing.assert_array_equal(density, before)
+
+
+@pytest.mark.parametrize('hermi', [0, 1, 2])
+def test_jk_selectors_and_exchange_symmetry(small_jk_model, hermi):
+    mol, density, transition = small_jk_model
+    dm = [transition, density, transition - transition.T][hermi]
+    ref_j, ref_k = get_jk(mol, dm, hermi=0)
+    opt = jk._VHFOpt(mol).build()
+    for with_j, with_k in ((True, True), (True, False), (False, True)):
+        vj, vk = jk.get_jk(mol, cp.asarray(dm), hermi=hermi, vhfopt=opt,
+                           with_j=with_j, with_k=with_k)
+        if with_j:
+            np.testing.assert_allclose(vj.get(), ref_j, atol=1e-10, rtol=1e-10)
+        else:
+            assert vj is None
+        if with_k:
+            np.testing.assert_allclose(vk.get(), ref_k, atol=1e-10, rtol=1e-10)
+        else:
+            assert vk is None
+    separate = jk.get_k(mol, dm, hermi=hermi, vhfopt=opt)
+    np.testing.assert_allclose(separate.get(), ref_k, atol=1e-10, rtol=1e-10)
+    if hermi == 2:
+        np.testing.assert_allclose(separate.get() + separate.get().T, 0, atol=1e-12)
+
+
+def test_optimizer_lazy_density(small_jk_model):
+    import io
+    from gpu4pyscf.lib import logger
+    mol, density, _ = small_jk_model
+    ref_j, ref_k = get_jk(mol, density, hermi=1)
+    opt = jk._VHFOpt(mol)
+    stream = io.StringIO()
+    calls = []
+
+    def sorted_density():
+        calls.append(True)
+        return opt.apply_coeff_C_mat_CT(cp.asarray(density)[None])
+
+    with lib.temporary_env(mol, stdout=stream):
+        vj, vk = opt.get_jk(sorted_density, 1, logger.DEBUG1)
+        assert calls == [True]
+        np.testing.assert_allclose(opt.apply_coeff_CT_mat_C(vj)[0].get(),
+                                   ref_j, atol=1e-10, rtol=1e-10)
+        np.testing.assert_allclose(opt.apply_coeff_CT_mat_C(vk)[0].get(),
+                                   ref_k, atol=1e-10, rtol=1e-10)
+
+        calls.clear()
+        vj = opt.get_j(sorted_density, logger.DEBUG1)
+        assert calls == [True]
+        np.testing.assert_allclose(opt.apply_coeff_CT_mat_C(vj)[0].get(),
+                                   ref_j, atol=1e-10, rtol=1e-10)
+
+        calls.clear()
+        vk = opt.get_k(sorted_density, 1, logger.DEBUG1, None, None, None)
+        assert calls == [True]
+        np.testing.assert_allclose(opt.apply_coeff_CT_mat_C(vk)[0].get(),
+                                   ref_k, atol=1e-10, rtol=1e-10)
+
+    assert 'kernel launches' in stream.getvalue()
+
+
+def test_optimizer_geometry_reset(small_jk_model):
+    mol, density, _ = small_jk_model
+    original_coords = mol.atom_coords().copy()
+    opt = jk._VHFOpt(mol)
+    jk.get_jk(mol, density, hermi=1, vhfopt=opt)
+    assert opt.sorted_mol is not None
+    assert opt._rys_envs
+    moved = mol.set_geom_(original_coords + np.arange(mol.natm)[:, None] * [.1, -.05, .02], unit='Bohr', inplace=False)
+    opt.reset(moved)
+    assert opt.sorted_mol is None
+    assert opt._rys_envs == {}
+    actual = jk.get_jk(moved, density, hermi=1, vhfopt=opt)
+    expected = get_jk(moved, density, hermi=1)
+    for value, ref in zip(actual, expected):
+        np.testing.assert_allclose(value.get(), ref, atol=1e-10, rtol=1e-10)
+    np.testing.assert_array_equal(mol.atom_coords(), original_coords)
+
+
+@pytest.mark.parametrize('hermi', [0, 1])
+def test_range_separated_exchange_batch(small_jk_model, hermi):
+    mol, density, transition = small_jk_model
+    dm = density if hermi else density + .02*transition
+    batch = np.stack([dm, .4*dm])[:, None, ::-1, ::-1]
+    before = batch.copy()
+    _, actual = jk.get_jk(mol, batch, hermi=hermi, omega=.3,
+                          lr_factor=.7, sr_factor=.2, with_j=False)
+    expected = (.7*get_jk(mol, batch, hermi=0, omega=.3)[1]
+                + .2*get_jk(mol, batch, hermi=0, omega=-.3)[1])
+    assert actual.shape == batch.shape
+    np.testing.assert_allclose(actual.get(), expected, atol=1e-10, rtol=1e-10)
+    np.testing.assert_array_equal(batch, before)
+
+
+@pytest.mark.parametrize('complex_input', [False, True])
+def test_standalone_ao_transform_vector(standalone_ao_transform_metadata, complex_input):
+    args, padding, c, padded = standalone_ao_transform_metadata
+    vector = np.linspace(-.4, .7, c.shape[1])
+    if complex_input:
+        vector = vector + 1j*vector[::-1]
+    vector = vector[:, None]
+    actual = jk.apply_coeff_C_mat(vector, *args, l_ctr_paddings=padding)
+    assert actual.shape == (c.shape[0], 1)
+    np.testing.assert_allclose(actual.get(), c @ vector, atol=2e-12, rtol=2e-12)
+    np.testing.assert_array_equal(actual.get()[padded], 0)

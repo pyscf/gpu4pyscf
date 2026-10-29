@@ -34,7 +34,7 @@ def run(func, args=(), kwargs={}, non_blocking=False):
         non_blocking: If `True`, functions are executed in parallel using multi-threads.
     '''
     if num_devices == 1:
-        return [func(*args, *kwargs)]
+        return [func(*args, **kwargs)]
 
     synchronize()
 
@@ -58,7 +58,7 @@ def map(func, tasks, args=(), kwargs={}, schedule='dynamic') -> list:
             If 'dynamic', tasks are scheduled dynamically, with better load balance.
     '''
     if num_devices == 1:
-        return [func(t, *args, *kwargs) for t in tasks]
+        return [func(t, *args, **kwargs) for t in tasks]
 
     tasks = enumerate(tasks)
     if schedule == 'dynamic':

@@ -146,7 +146,7 @@ class Int3c2eOpt:
     @property
     def int3c2e_envs(self):
         _int3c2e_envs = self._int3c2e_envs
-        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device:
+        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device.id:
             return self._int3c2e_envs
         return _int3c2e_envs.copy()
 

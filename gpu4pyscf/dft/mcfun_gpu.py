@@ -141,6 +141,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
 
     if rho_tm.ndim == 2:
         nvar = 1
+        rho_tm = rho_tm[:,None]
     else:
         nvar = rho_tm.shape[1]
 
@@ -166,7 +167,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
         fxc_eff[0,:,0] = fxc[0,:,0]
         fz1 = cp.einsum('xyg,rg->rxyg', fxc[1,:,0], omega)
         fxc_eff[1:,:,0 ] = fz1
-        fxc_eff[0 ,:,1:] = fz1.transpose(1,0,2,3)
+        fxc_eff[0 ,:,1:] = fz1.transpose(2,0,1,3)
         tmp = cp.einsum('xyg,rg->rxyg', fxc[1,:,1,:], omega)
         fxc_eff[1:,:,1:] = cp.einsum('rxyg,sg->rxsyg', tmp, omega)
 

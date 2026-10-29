@@ -374,6 +374,7 @@ class UHF(hf.SCF):
 
     def init_guess_by_sap(self, mol=None, breaksym=None):
         if mol is None: mol = self.mol
+        assert breaksym is None
         sap_basis = process_sap_basis(self, mol, self.sap_basis)
 
         Vsap = make_sap(mol, sap_basis=sap_basis)

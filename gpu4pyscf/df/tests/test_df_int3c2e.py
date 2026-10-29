@@ -1,6 +1,8 @@
+
 import numpy as np
 import cupy as cp
 import scipy.linalg
+import pytest
 import pyscf
 from pyscf import lib
 from pyscf.df import incore
@@ -649,3 +651,63 @@ def test_short_range_contract_auxvec():
         actual = j_engine_3c2e.contract_int3c2e_auxvec(mol, auxmol, auxvec)
     ref = np.einsum('ijP,P->ij', eri, auxvec)
     assert abs(actual.get() - ref).max() < 1e-12
+
+@pytest.mark.parametrize('cart', [False, True])
+@pytest.mark.parametrize('reorder_aux', [False, True])
+def test_evaluator_clone_and_angular_batches(cart, reorder_aux):
+    mol = pyscf.M(atom='He .1 .2 0; He .7 -.2 .9', verbose=0, cart=cart,
+                  basis=[[0, [1.2, 1.]], [1, [.8, 1.]], [2, [.6, 1.]]])
+    auxmol = pyscf.df.addons.make_auxmol(mol,
+        {'He': [[0, [.9, 1.]], [1, [.7, 1.]], [2, [.5, 1.]]]})
+    opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
+    assert opt.int3c2e_envs is None
+    whole = opt.int3c2e_evaluator(cart=cart, pair_batch_by_l=True)[0]()
+    largest_group = 0
+    for (i, j), shells in opt.mol.iter_pair_by_l(opt.bas_ij_cache):
+        li, lj = opt.mol.uniq_l_ctr[[i, j], 0]
+        ni = (li+1)*(li+2)//2 if cart else 2*li+1
+        nj = (lj+1)*(lj+2)//2 if cart else 2*lj+1
+        largest_group = max(largest_group, len(shells)*ni*nj)
+    evaluator, sorting, pairs, aux, context = opt.int3c2e_evaluator(
+        ao_pair_batch_size=largest_group+1, aux_batch_size=7,
+        cart=cart, pair_batch_by_l=True, reorder_aux=reorder_aux,
+        return_clone_context=True)
+    clone, sorting2, pairs2, aux2 = opt.int3c2e_evaluator(
+        clone_context=context, reorder_aux=reorder_aux)
+    np.testing.assert_array_equal(pairs2, pairs)
+    np.testing.assert_array_equal(aux2, aux)
+    if reorder_aux:
+        np.testing.assert_array_equal(sorting2.get(), sorting.get())
+    else:
+        assert sorting2 == sorting
+    assert len(pairs) > 2 and len(aux) > 2
+    actual = cp.empty_like(whole)
+    storage = cp.empty(max(np.diff(pairs))*max(np.diff(aux)))
+    for i, (p0, p1) in enumerate(zip(pairs[:-1], pairs[1:])):
+        for k, (q0, q1) in enumerate(zip(aux[:-1], aux[1:])):
+            block = evaluator(i, k, out=storage)
+            assert block.data.ptr == storage.data.ptr
+            actual[p0:p1, q0:q1] = block
+            np.testing.assert_allclose(clone(i, k).get(), block.get(), atol=1e-12, rtol=0)
+    np.testing.assert_allclose(actual[:, sorting].get(), whole.get(), atol=1e-12, rtol=0)
+    addresses = opt.pair_and_diag_indices(cart=cart)[0].get()
+    transformed = actual[:, sorting].dot(opt.auxmol.ctr_coeff).get()
+    reference = incore.aux_e2(mol, auxmol).reshape(mol.nao**2, auxmol.nao)
+    np.testing.assert_allclose(transformed, reference[addresses], atol=1e-10, rtol=0)
+    # Same-device access should preserve the existing native environment object.
+    assert opt.int3c2e_envs is opt._int3c2e_envs
+
+
+def test_compressed_orbital_pair_cart2sph():
+    mol = pyscf.M(atom='He .1 .2 0; He .7 -.2 .9', verbose=0,
+                  basis=[[0, [1.2, 1.]], [1, [.8, 1.]], [2, [.6, 1.]]])
+    auxmol = pyscf.df.addons.make_auxmol(mol, {'He': [[0, [.9, 1.]], [1, [.7, 1.]]]})
+    opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    cart = opt.int3c2e_evaluator(cart=True, pair_batch_by_l=True)[0]()
+    sphere = opt.int3c2e_evaluator(cart=False, pair_batch_by_l=True)[0]()
+    converted = opt.orbital_pair_cart2sph(cart)
+    np.testing.assert_allclose(converted.get(), sphere.get(), atol=1e-11, rtol=0)
+    addresses = opt.pair_and_diag_indices(cart=False)[0].get()
+    reference = incore.aux_e2(mol, auxmol).reshape(mol.nao**2, auxmol.nao)
+    np.testing.assert_allclose(converted.dot(opt.auxmol.ctr_coeff).get(),
+                               reference[addresses], atol=1e-10, rtol=0)
