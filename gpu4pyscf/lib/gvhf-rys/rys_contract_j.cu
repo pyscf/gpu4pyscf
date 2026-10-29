@@ -838,7 +838,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 int npairs_ij, int npairs_kl, uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                uint32_t *pool, int *bas, double *env)
+                uint32_t *pool, int *bas, double *env, int nao_pairs)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -878,7 +878,6 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
 
     JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
 
@@ -906,6 +905,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
+            cudaMemset(head, 0, sizeof(int));
             LAUNCH_KERNEL( rys_j_with_gout_kernel, blocks, threads, buflen,
                 dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
@@ -926,9 +926,16 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
-                dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+            JKMatrix jk1 = jk;
+            jk1.n_dm = 1;
+            for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
+                jk1.dm = dm + (size_t)i_dm * nao_pairs;
+                jk1.vj = vj + (size_t)i_dm * nao_pairs;
+                cudaMemset(head, 0, sizeof(int));
+                LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
+                    dev_envs, jk1, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                    s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+            }
         }
     }
     cudaError_t err = cudaGetLastError();
