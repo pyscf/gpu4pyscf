@@ -14,6 +14,8 @@
 
 import itertools
 import functools
+import ctypes
+from ctypes.util import find_library
 import numpy as np
 import scipy.linalg
 import cupy
@@ -375,7 +377,36 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
         e_tot = e_tot.get()
     return e_tot
 
+def _is_non_blocking_stream(stream):
+    """Check the CUDA non-blocking flag across CuPy versions."""
+    # CuPy 14 exposes this directly; older CuPy versions do not.
+    if hasattr(stream, 'is_non_blocking'):
+        return stream.is_non_blocking
+
+    if stream.ptr == 0:
+        return False
+    if not hasattr(_is_non_blocking_stream, '_cu'):
+        library = find_library('cuda') or 'libcuda.so.1'
+        _is_non_blocking_stream._cu = ctypes.CDLL(library)
+        get_flags = _is_non_blocking_stream._cu.cuStreamGetFlags
+        get_flags.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+        get_flags.restype = ctypes.c_int
+        _is_non_blocking_stream._get_flags = get_flags
+    flags = ctypes.c_uint()
+    status = _is_non_blocking_stream._get_flags(
+        ctypes.c_void_p(stream.ptr), ctypes.byref(flags))
+    if status != 0:
+        raise RuntimeError(f'cuStreamGetFlags failed with CUDA driver status {status}')
+    return bool(flags.value & 1)  # CU_STREAM_NON_BLOCKING
+
 def scf(mf, dm0=None, **kwargs):
+    stream = cupy.cuda.get_current_stream()
+    if _is_non_blocking_stream(stream):
+        raise RuntimeError(
+            "GPU4PySCF SCF does not support non-blocking CuPy streams. "
+            "Run SCF on the default stream or a blocking CuPy stream."
+        )
+
     cput0 = logger.init_timer(mf)
 
     mf.dump_flags()
