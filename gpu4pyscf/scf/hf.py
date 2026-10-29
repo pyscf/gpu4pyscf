@@ -1243,7 +1243,6 @@ class SCF(pyscf_lib.StreamObject):
     density_fit              = NotImplemented
     newton                   = NotImplemented
     x2c = x2c1e = sfx2c1e    = NotImplemented
-    stability                = NotImplemented
     update_                  = NotImplemented
     istype                   = hf_cpu.SCF.istype
 
@@ -1476,6 +1475,10 @@ class SCF(pyscf_lib.StreamObject):
                 **kwargs):
         return self.to_cpu().analyze(
             verbose=verbose, with_meta_lowdin=with_meta_lowdin, **kwargs)
+
+    def stability(self, internal=True, external=False, verbose=None, return_status=False, **kwargs):
+        from gpu4pyscf.scf.stability import rhf_stability
+        return rhf_stability(self, internal, external, verbose, return_status, **kwargs)
 
     def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
         '''Mulliken population analysis
