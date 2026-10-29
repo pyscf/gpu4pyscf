@@ -17,7 +17,7 @@
 Field-effect with a charged sheet, barrier and dipole correction.
 
 Refs: Brumme et al., Phys. Rev. B 89, 245406 (2014).
-Lengths below are Bohr; barrier_height is Hartree. 
+Lengths below are Bohr; barrier_height is Hartree.
 '''
 
 import numpy as np

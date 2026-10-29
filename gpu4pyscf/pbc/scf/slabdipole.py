@@ -220,6 +220,8 @@ def _automatic_cut(cell, dm, kpts, mesh, rho_tol):
 
 
 class SlabDipoleCorrection:
+    __name_mixin__ = 'Dipole'
+
     _keys = {
         'z0', 'cut', 'dipole_rho_tol', 'dipole_width',
         'dipole_cut', 'dipole_z0', 'dipole_offset',

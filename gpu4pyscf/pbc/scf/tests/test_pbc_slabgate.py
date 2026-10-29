@@ -128,6 +128,39 @@ class KnownValues(unittest.TestCase):
                 self.assertAlmostEqual(e-e0, mf.scf_summary['egate'] +
                                        mf.scf_summary['ebarrier'], delta=1e-10)
 
+    def test_smearing_energy(self):
+        sigma, entropy = .02, 1.25
+        gate_kwargs = dict(zgate=17., barrier=True, barrier_start=15.,
+                           barrier_end=19., barrier_width=.7)
+        for name in ('RKS', 'UKS', 'KRKS', 'KUKS'):
+            cell = make_cell()
+            reference = gate_charge(make_mf(cell, name), **gate_kwargs)
+            dm = reference.get_init_guess()
+            h = reference.get_hcore()
+            v = reference.get_veff(dm=dm)
+            energy = reference.energy_tot(dm, h, v)
+            for gate_first in (False, True):
+                with self.subTest(name=name, gate_first=gate_first):
+                    mf = make_mf(cell, name)
+                    if gate_first:
+                        mf = gate_charge(mf, **gate_kwargs).smearing(sigma)
+                    else:
+                        mf = gate_charge(mf.smearing(sigma), **gate_kwargs)
+                    # Hold the density and entropy fixed to isolate energy
+                    # accounting from the occupation and SCF algorithms.
+                    mf.entropy = entropy
+                    for _ in range(2):
+                        self.assertAlmostEqual(mf.energy_tot(dm, h, v), energy,
+                                               delta=1e-10)
+                        self.assertAlmostEqual(mf.e_free, energy-sigma*entropy,
+                                               delta=1e-10)
+                        self.assertAlmostEqual(mf.e_zero, energy-sigma*entropy/2,
+                                               delta=1e-10)
+                        for key in ('egate', 'ebarrier'):
+                            self.assertAlmostEqual(mf.scf_summary[key],
+                                                   reference.scf_summary[key],
+                                                   delta=1e-10)
+
     def test_charge_per_cell(self):
         cell = make_cell()
         gamma = gate_charge(make_mf(cell))
