@@ -16,7 +16,7 @@
 
 
 __device__
-static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g, 
+static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, const double* g,
     const int ish, const int jsh, const int ksh)
 {
     int *ao_loc = c_bpcache.ao_loc;

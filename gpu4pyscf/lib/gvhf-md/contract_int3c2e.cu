@@ -187,7 +187,7 @@ void _dot_Et(double *out, double *Rt, double ai)
 
 template <int L> __device__ inline
 void _dot_aux(double& out, double *Rt, double *auxvec,
-              uint16_t *p1_ij, int nf3ij, int i, int nsp_per_block)
+              const uint16_t *p1_ij, int nf3ij, int i, int nsp_per_block)
 {
     if constexpr (L == 0) {
         out += Rt[p1_ij[0*nf3ij+i]*nsp_per_block] * auxvec[0];
@@ -375,7 +375,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
     extern __shared__ double shared_memory[];
     double *gamma_inc = shared_memory + sp_id;
     double *Rt = shared_memory + (order+1) * nsp_per_block + sp_id;
-    uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
+    const uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     for (int kp = 0; kp < kprim; ++kp) {
         __syncthreads();
@@ -597,7 +597,7 @@ void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
     double *auxvec_cache = shared_memory;
     double *gamma_inc = auxvec_cache + nf3k + sp_id;
     double *Rt = gamma_inc + (order+1) * nsp_per_block;
-    uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
+    const uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     const int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
     double *auxvec = jk.dm;
 
