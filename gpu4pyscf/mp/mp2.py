@@ -201,10 +201,14 @@ class MP2Base(lib.StreamObject):
     max_cycle = getattr(__config__, 'cc_ccsd_CCSD_max_cycle', 50)
     conv_tol = getattr(__config__, 'cc_ccsd_CCSD_conv_tol', 1e-7)
     conv_tol_normt = getattr(__config__, 'cc_ccsd_CCSD_conv_tol_normt', 1e-5)
+    # Keep the PySCF MP2 option available to shared integral and amplitude
+    # helpers.  Recent PySCF versions use it when initializing MP2 ERIs.
+    exclude_t1 = getattr(__config__, 'mp_mp2_exclude_t1', False)
 
     _keys = {
         'max_cycle', 'conv_tol', 'conv_tol_normt', 'mol', 'max_memory',
-        'frozen', 'level_shift', 'mo_coeff', 'mo_occ', 'e_hf', 'e_corr',
+        'frozen', 'level_shift', 'exclude_t1', 'mo_coeff', 'mo_occ', 'e_hf',
+        'e_corr',
         'e_corr_ss', 'e_corr_os', 't2',
     }
 
@@ -260,6 +264,18 @@ class MP2Base(lib.StreamObject):
     get_nocc = get_nocc
     get_nmo = get_nmo
     get_e_hf = get_e_hf
+
+    def _reference_is_canonical(self):
+        # Match PySCF's check for spin-paired orbitals with unequal alpha and
+        # beta occupations (for example ROHF orbitals passed to UMP2).
+        coeff = self.mo_coeff
+        if getattr(coeff, 'ndim', 0) != 3:
+            return True
+        occ = cupy.asarray(self.mo_occ)
+        if occ.ndim == 2 and not bool(cupy.array_equal(occ[0], occ[1])) and \
+                bool(cupy.allclose(coeff[0], coeff[1])):
+            return False
+        return True
 
     def set_frozen(self, method='auto', window=(-1000.0, 1000.0)):
         from pyscf import mp
