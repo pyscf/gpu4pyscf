@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
 
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
@@ -404,10 +403,10 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + reserved_shm_size;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
 while (1) {
     __syncthreads();
     if (t_id == 0) {

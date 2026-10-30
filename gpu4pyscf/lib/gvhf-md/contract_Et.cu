@@ -18,8 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 
 #define THREADS         256

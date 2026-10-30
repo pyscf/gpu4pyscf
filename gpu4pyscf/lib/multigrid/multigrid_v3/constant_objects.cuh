@@ -16,6 +16,11 @@
 
 #pragma once
 
+// CUDA headers shared by all multigrid_v3 sources.
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cuComplex.h>
+
 extern __constant__ double c_lattice_vectors[9];
 extern __constant__ double c_reciprocal_lattice_vectors[9]; // norm to 1
 extern __constant__ double c_dxyz_dabc[9];
