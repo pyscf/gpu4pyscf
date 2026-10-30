@@ -372,7 +372,7 @@ class SmallPhysicalProtocols(unittest.TestCase):
     def tearDownClass(cls):
         del cls.cpu, cls.gpu, cls.small_mol
 
-    def test_lazy_tda_gradient(self):
+    def test_tda_gradient_without_td_kernel(self):
         td = self.gpu.TDA().set(nstates=2, conv_tol=1e-10, lindep=1e-20)
         gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
         self.assertIsNone(td.xy)
@@ -384,7 +384,7 @@ class SmallPhysicalProtocols(unittest.TestCase):
         reference = np.array([[0., 0., -derivative], [0., 0., derivative]])
         np.testing.assert_allclose(actual, reference, atol=1e-6, rtol=0)
 
-    def test_tdhf_explicit_xy_state(self):
+    def test_tdhf_gradient_with_xy(self):
         td = self.gpu.TDHF().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
         self.assertTrue(all(td.converged))
         gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
@@ -397,7 +397,7 @@ class SmallPhysicalProtocols(unittest.TestCase):
         reference = [[0., 0., -0.10770852316910], [0., 0., 0.10770852316910]]
         np.testing.assert_allclose(selected, reference, atol=1e-6, rtol=0)
 
-    def test_state_zero_uses_ground_df_gradient(self):
+    def test_tda_gradient_state_zero(self):
         td = self.gpu.TDA()
         gradient = td.nuc_grad_method()
         actual = gradient.kernel(state=0)

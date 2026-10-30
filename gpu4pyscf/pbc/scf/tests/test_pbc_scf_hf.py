@@ -478,7 +478,7 @@ class RestrictedSCFProperties(unittest.TestCase):
     def test_get_rho_krks(self):
         self._check_density_dispatch('KRKS')
 
-    def test_default_fock_energy_gradient_and_canonicalization_krhf(self):
+    def test_krhf_default_fock(self):
         rotation = np.eye(self.cell.nao)
         angle = .13
         rotation[:2, :2] = [[np.cos(angle), -np.sin(angle)],

@@ -109,16 +109,9 @@ class KnownValues(unittest.TestCase):
             self.assertTrue(mf.converged)
             self.assertAlmostEqual(mf.e_tot, ref, 8)
 
-            gpu_mf = mf
-            gpu_integration = mf._numint
-            self.assertIsNotNone(gpu_integration)
-            expected_hcore = mf.get_hcore().get()
-            mf = mf.to_cpu()
-            self.assertIs(gpu_mf._numint, gpu_integration)
-            self.assertIsNone(getattr(mf, '_numint', None))
-            np.testing.assert_allclose(mf.get_hcore(), expected_hcore, atol=1e-8, rtol=0)
-            assert isinstance(mf, sfx2c1e_cpu.SFX2C1E_SCF)
-            assert isinstance(mf.with_x2c, sfx2c1e_cpu.SpinFreeX2CHelper)
+            # The multigrid integrator does not support conversion to CPU.
+            with self.assertRaises(TypeError):
+                mf.to_cpu()
 
             mf = cell.KRHF(kpts=cell.make_kpts([3,1,1])).sfx2c1e()
             mf.conv_tol = 1e-11
@@ -182,7 +175,7 @@ class SmallScalarX2C(unittest.TestCase):
                 np.testing.assert_array_equal(actual[..., n:, :n], 0.)
                 np.testing.assert_array_equal(actual[..., :n, :n], actual[..., n:, n:])
 
-    def test_helper_default_gamma_and_single_batch_shapes(self):
+    def test_helper_default_kpts_shape(self):
         helper = x2c1e.SpinFreeX2CHelper(self.cell)
         for method in (helper.get_hcore, helper.get_xmat):
             with self.subTest(method=method.__name__):
@@ -241,7 +234,7 @@ class SmallScalarX2C(unittest.TestCase):
         np.testing.assert_allclose(returned.get_hcore(kpts=kpts), cpu.get_hcore(kpts=kpts),
                                    atol=1e-12, rtol=0)
 
-    def test_orbital_pari_cart2sph(self):
+    def test_orbital_pair_cart2sph(self):
         cell = pyscf.M(atom='He .2 .3 .4', a=np.eye(3)*7, unit='Bohr',
                        basis=[[0, [.8, 1.]], [1, [.7, 1.]], [2, [.6, 1.]]],
                        precision=1e-10, verbose=0)

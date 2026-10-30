@@ -94,7 +94,7 @@ class EinsumFallback(unittest.TestCase):
         self.b = cupy.asarray([[-2., 4., 1.], [1., -1., 2.]])
         self.ref = numpy.einsum('ij,ij->', self.a.get(), self.b.get())
 
-    def test_scalar_result_can_be_used_as_energy(self):
+    def test_scalar_result(self):
         result = _contract_einsum('ij,ij->', self.a, self.b, 1.5, 0.)
         self.assertIsInstance(result, cupy.ndarray)
         self.assertEqual(result.shape, ())
@@ -114,21 +114,21 @@ class EinsumFallback(unittest.TestCase):
         self.assertEqual(result.dtype, numpy.dtype(numpy.complex128))
         numpy.testing.assert_array_equal(result.get(), ref)
 
-    def test_scalar_output_overwrites_when_beta_is_zero(self):
+    def test_scalar_output_beta_zero(self):
         out = cupy.asarray(numpy.nan)
         result = _contract_einsum('ij,ij->', self.a, self.b, 2., 0., out=out)
         self.assertIs(result, out)
         self.assertEqual(out.shape, ())
         self.assertEqual(float(out), 2 * self.ref)
 
-    def test_scalar_output_accumulates_alpha_and_beta(self):
+    def test_scalar_output_alpha_beta(self):
         out = cupy.asarray(7.)
         result = _contract_einsum('ij,ij->', self.a, self.b, 2., -3., out=out)
         self.assertIs(result, out)
         self.assertEqual(out.shape, ())
         self.assertEqual(float(out), 2 * self.ref - 3 * 7.)
 
-    def test_empty_contraction_preserves_scalar_shape(self):
+    def test_empty_scalar_contraction(self):
         a = cupy.empty((0, 3))
         b = cupy.empty((0, 3))
         # Empty operands also take this fallback when cuTENSOR is available.
@@ -136,14 +136,14 @@ class EinsumFallback(unittest.TestCase):
         self.assertEqual(result.shape, ())
         self.assertEqual(float(result), 0.)
 
-    def test_singleton_vector_is_not_squeezed(self):
+    def test_singleton_vector_shape(self):
         result = _contract_einsum('ij,j->i', self.a[:1], self.b[0], 1., 0.)
         ref = numpy.einsum('ij,j->i', self.a[:1].get(), self.b[0].get())
         self.assertEqual(result.shape, (1,))
         self.assertTrue(result.flags.c_contiguous)
         numpy.testing.assert_array_equal(result.get(), ref)
 
-    def test_output_overlaps_input_during_accumulation(self):
+    def test_output_input_overlap(self):
         a_host = numpy.array([[1., 2.], [3., 4.]])
         b_host = numpy.array([[2., 0.], [1., 3.]])
         a = cupy.asarray(a_host)
@@ -172,7 +172,7 @@ class EinsumFallback(unittest.TestCase):
         self.assertTrue(result.flags.c_contiguous)
         numpy.testing.assert_array_equal(result.get(), expected)
 
-    def test_empty_contraction_accumulates_existing_matrix(self):
+    def test_empty_contraction_with_output(self):
         # The native entry point deliberately uses its real einsum fallback
         # before requesting descriptors for unsupported empty operands.
         a = cupy.empty((2, 0), dtype=numpy.complex128)

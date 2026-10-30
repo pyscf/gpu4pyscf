@@ -36,7 +36,7 @@ class KnownValues(unittest.TestCase):
             fn()
         assert counts == 2
 
-    def test_reduce_promotes_dtype_and_forwards_arguments(self):
+    def test_reduce_mixed_dtypes_and_arguments(self):
         def term(value, offset, *, scale):
             dtype = cp.int32 if value == 1 else cp.float64
             return cp.asarray([value, value + offset], dtype=dtype) * scale
@@ -69,7 +69,7 @@ class KnownValues(unittest.TestCase):
                 self.assertEqual(result.device.id, 0)
                 np.testing.assert_array_equal(result.get(), expected)
 
-    def test_synchronize_waits_for_nondefault_stream(self):
+    def test_synchronize_nondefault_stream(self):
         array = cp.empty(4)
         stream = cp.cuda.Stream(non_blocking=True)
         event = cp.cuda.Event()

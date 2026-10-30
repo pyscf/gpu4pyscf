@@ -405,7 +405,7 @@ class KnownValues(unittest.TestCase):
                 expected_backing[2:6] = expected
                 np.testing.assert_array_equal(backing.get(), expected_backing)
 
-    def test_pinv_complex_positive_semidefinite_matrix(self):
+    def test_pinv_complex_singular_matrix(self):
         vectors = np.array([[1., 0.], [0., 2.], [1., 1j]])
         matrix = vectors @ vectors.conj().T
         expected = np.linalg.pinv(matrix, hermitian=True, rcond=1e-10)
@@ -413,7 +413,7 @@ class KnownValues(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=2e-13, atol=2e-13)
         np.testing.assert_allclose(matrix @ result @ matrix, matrix, rtol=2e-13, atol=2e-13)
 
-    def test_krylov_residual_below_requested_tolerance(self):
+    def test_krylov_initial_residual_below_tolerance(self):
         rhs = cupy.asarray([2e-6, -1e-6])
         result = krylov(lambda x: .125 * x, rhs, x0=None, tol=1e-4)
         np.testing.assert_array_equal(result.get(), np.zeros(2))

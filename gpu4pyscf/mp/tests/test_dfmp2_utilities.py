@@ -181,7 +181,7 @@ class DFMP2Utilities(unittest.TestCase):
         self.assertEqual(dfmp2_addons.balanced_split(10, 3), [4, 3, 3])
         self.assertEqual(dfmp2_addons.balanced_split(5, 10), [1, 1, 1, 1, 1, 0, 0, 0, 0, 0])
 
-    def test_three_center_whitening(self):
+    def test_decompose_j3c_gpu(self):
         cases = [(np.float32, False, 'cd'), (np.float32, True, 'eig'),
                  (np.float64, True, 'cd'), (np.float64, False, 'eig')]
         for dtype, host, algorithm in cases:
@@ -213,7 +213,7 @@ class DFMP2Utilities(unittest.TestCase):
                                                flat @ np.linalg.solve(metric, flat.T),
                                                atol=tolerance, rtol=tolerance)
 
-    def test_metric_decomposition_with_linear_dependence(self):
+    def test_get_j2c_decomp_linear_dependency(self):
         for on_gpu in [False, True]:
             with self.subTest(on_gpu=on_gpu):
                 metric = np.diag([4., -1e-5, 1.])
@@ -227,7 +227,7 @@ class DFMP2Utilities(unittest.TestCase):
                 np.testing.assert_allclose(factor @ factor.T, np.diag([4., 0., 1.]), atol=1e-14)
                 np.testing.assert_allclose(inverse @ factor, np.diag([1., 0., 1.]), atol=1e-14)
 
-    def test_host_device_pair_partition_matches_dense_contraction(self):
+    def test_dfmp2_pair_energy_host_device_partition(self):
         for modes in [(True, True, True), (False, False, False),
                       (True, False, None), (None, None, None)]:
             with self.subTest(modes=modes):

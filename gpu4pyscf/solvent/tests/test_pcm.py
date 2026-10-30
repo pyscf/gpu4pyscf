@@ -431,10 +431,10 @@ def _make_response_attachment(unrestricted):
 
 
 class SolventResponse(unittest.TestCase):
-    def test_attachment_equilibrium_response_matches_potential_derivative(self):
+    def test_equilibrium_solvent_response(self):
         self._check_attachment_response(True)
 
-    def test_attachment_nonequilibrium_response_matches_potential_derivative(self):
+    def test_nonequilibrium_solvent_response(self):
         self._check_attachment_response(False)
 
     def _check_attachment_response(self, equilibrium):
@@ -463,7 +463,7 @@ class SolventResponse(unittest.TestCase):
                 assert model.equilibrium_solvation is equilibrium
                 assert model.frozen is frozen
 
-    def test_attachment_fixed_density_and_identity(self):
+    def test_pcm_frozen_dm_and_reattachment(self):
         base, model, density, transition = _make_response_attachment(True)
         reference_energy, reference_potential = model.to_cpu().kernel(density.get())
         initial = pcm.PCM(base.mol)
@@ -487,10 +487,10 @@ class SolventResponse(unittest.TestCase):
         numpy.testing.assert_allclose(cupy.asnumpy(value.e_solvent), reference_energy, atol=1e-10)
         assert mf.PCM(model) is mf
 
-    def test_attachment_casida_equilibrium_factory_and_response(self):
+    def test_casida_equilibrium_solvent_response(self):
         self._check_attachment_casida_factory_and_response(True)
 
-    def test_attachment_casida_nonequilibrium_factory_and_response(self):
+    def test_casida_nonequilibrium_solvent_response(self):
         self._check_attachment_casida_factory_and_response(False)
 
     def _check_attachment_casida_factory_and_response(self, equilibrium):

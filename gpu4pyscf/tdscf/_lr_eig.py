@@ -493,7 +493,9 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         # Remove quasi linearly dependent bases, as they cause more numerical
         # errors in _symmetric_orth
         xt_norm = cp.linalg.norm(xt, axis=1)
-        xt_to_keep = (dx_norm > tol_residual) & (xt_norm > max(lindep**.5, tol_residual))
+        # Preconditioning changes the correction norm; convergence is measured
+        # by dx_norm, while only linear dependence should discard a correction.
+        xt_to_keep = (dx_norm > tol_residual) & (xt_norm > lindep**.5)
         xt = xt[xt_to_keep]
         if len(xt) > 0:
             xt /= xt_norm[xt_to_keep, None]

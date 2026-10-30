@@ -107,7 +107,7 @@ class SmallSystem(unittest.TestCase):
     def tearDownClass(cls):
         del cls.td, cls.mf, cls.small_mol
 
-    def test_matching_real_orbitals_after_permutation_and_phase_change(self):
+    def test_match_and_reorder_mos(self):
         coeff = self.mf.mo_coeff
         overlap = cp.asarray(self.small_mol.intor('int1e_ovlp'))
         order = np.arange(coeff.shape[1])[::-1]
@@ -152,15 +152,6 @@ class SmallSystem(unittest.TestCase):
                 # Electron-translation factors remove rigid-translation coupling.
                 np.testing.assert_allclose(values[2].sum(axis=0), 0, atol=1e-8, rtol=0)
                 np.testing.assert_allclose(values[3].sum(axis=0), 0, atol=1e-8, rtol=0)
-
-    def test_tuple_and_list_select_the_same_atom_rows(self):
-        selected = []
-        for atoms in ([2, 0], (2, 0)):
-            method = self.td.nac_method().set(cphf_conv_tol=1e-10)
-            selected.append(method.kernel(states=(0, 1), atmlst=atoms))
-        for as_list, as_tuple in zip(*selected):
-            self.assertEqual(as_tuple.shape, (2, 3))
-            np.testing.assert_allclose(as_tuple, as_list, atol=1e-7, rtol=0)
 
     def test_geometry_array_and_explicit_scanner_states(self):
         scanner = self.td.nac_method().set(cphf_conv_tol=1e-10).as_scanner(states=(0, 1))

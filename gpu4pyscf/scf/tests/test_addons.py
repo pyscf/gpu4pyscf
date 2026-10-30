@@ -282,10 +282,10 @@ class KnownValues(unittest.TestCase):
                     self.assertIsInstance(source, _DFHF)
                     self.assertIsNotNone(source.with_df)
 
-    def test_same_flavor_rhf_out(self):
+    def test_convert_to_rhf_same_type_out(self):
         self._check_same_flavor_out(rhf_ref, addons.convert_to_rhf, scf.RHF)
 
-    def test_same_flavor_uhf_out(self):
+    def test_convert_to_uhf_same_type_out(self):
         self._check_same_flavor_out(rhf_ref.to_uhf(), addons.convert_to_uhf, scf.UHF)
 
     def test_complex_orbitals_and_spin_order(self):

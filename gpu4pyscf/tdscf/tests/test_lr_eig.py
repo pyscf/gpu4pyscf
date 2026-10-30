@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 import pytest
 import scipy.linalg
+from pyscf.lib.linalg_helper import _eigs_cmplx2real
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import _lr_eig as lr
 
@@ -34,6 +35,9 @@ def positive_response_roots(w, v, nroots, env):
     # convergence, even though the stable full response has real eigenvalues.
     xp = cp.get_array_module(w)
     idx = xp.flatnonzero(w.real > 1e-8)
+    if env['dtype'] == np.float64:
+        idx = idx[abs(w[idx].imag) < 1e-8]
+        return _eigs_cmplx2real(w, v, idx, real_eigenvectors=True)
     idx = idx[xp.argsort(w[idx].real)]
     return w[idx], v[:, idx], idx
 
@@ -69,7 +73,7 @@ def response_matrix(n=6, complex_values=False):
     return a, b, np.block([[a, b], [-b.conj(), -a.conj()]])
 
 
-def test_eigh_accepts_single_vector_guess():
+def test_eigh_single_initial_guess():
     matrix = symmetric_matrix(6)
     a = cp.asarray(matrix)
     guess = cp.ones(6)
@@ -82,7 +86,7 @@ def test_eigh_accepts_single_vector_guess():
     np.testing.assert_allclose((vectors @ a.T - cp.asarray(values)[:, None] * vectors).get(), 0, atol=1e-9)
 
 
-def test_eigh_keeps_symmetry_sectors_separate():
+def test_eigh_with_symmetry():
     block = np.diag([2., 5., 8., 11.]) + .03 * (np.ones((4, 4)) - np.eye(4))
     matrix = scipy.linalg.block_diag(block, block + np.eye(4))
     a = cp.asarray(matrix)
@@ -99,7 +103,7 @@ def test_eigh_keeps_symmetry_sectors_separate():
 
 
 @pytest.mark.parametrize('complex_values', [False, True])
-def test_response_eig_matches_dense_operator(complex_values):
+def test_eig(complex_values):
     a, b, matrix = response_matrix(complex_values=complex_values)
     operator = cp.asarray(matrix)
     n = a.shape[0]
@@ -120,7 +124,7 @@ def test_response_eig_matches_dense_operator(complex_values):
 
 
 @pytest.mark.parametrize('complex_values', [False, True])
-def test_symmetric_orthogonalization_includes_conjugate_partners(complex_values):
+def test_symmetric_orth(complex_values):
     x = np.array([[1., .1, 0., .03, 0., .01], [.1, 1., .2, 0., .02, 0.]])
     if complex_values:
         x = x.astype(complex)
@@ -134,7 +138,7 @@ def test_symmetric_orthogonalization_includes_conjugate_partners(complex_values)
 
 
 @pytest.mark.parametrize('gram_schmidt', [False, True])
-def test_davidson_eigenpairs(gram_schmidt):
+def test_davidson(gram_schmidt):
     matrix = symmetric_matrix(6)
     a = cp.asarray(matrix, dtype=cp.float64)
     converged, values, vectors = lr.Davidson(lambda x: x @ a.T, cp.diag(a), N_states=2,
@@ -146,7 +150,7 @@ def test_davidson_eigenpairs(gram_schmidt):
 
 
 @pytest.mark.parametrize('gram_schmidt', [False, True])
-def test_davidson_casida_matches_dense_response(gram_schmidt):
+def test_davidson_casida(gram_schmidt):
     a, b, matrix = response_matrix(n=12)
     ag, bg = cp.asarray(a, dtype=cp.float64), cp.asarray(b, dtype=cp.float64)
 
@@ -167,7 +171,7 @@ def test_davidson_casida_matches_dense_response(gram_schmidt):
     np.testing.assert_allclose((x @ x.T - y @ y.T).get(), np.eye(2), atol=1e-9)
 
 
-def test_davidson_casida_reports_iteration_limit():
+def test_davidson_casida_iteration_limit():
     a, b, _ = response_matrix()
     ag, bg = cp.asarray(a), cp.asarray(b)
     output = io.StringIO()
@@ -181,7 +185,7 @@ def test_davidson_casida_reports_iteration_limit():
     assert 'not converged' in output.getvalue()
 
 
-def test_real_eig_uses_supplied_symmetry_labels():
+def test_real_eig_with_symmetry():
     a = scipy.linalg.block_diag(symmetric_matrix(3), symmetric_matrix(3) + .5*np.eye(3))
     b = np.eye(6) * .05
     matrix = cp.asarray(np.block([[a, b], [-b, -a]]))
@@ -199,7 +203,7 @@ def test_real_eig_uses_supplied_symmetry_labels():
 
 
 @pytest.mark.parametrize('complex_values', [False, True])
-def test_response_eig_preserves_independent_symmetry_sectors(complex_values):
+def test_eig_with_symmetry(complex_values):
     a0, b0, _ = response_matrix(n=3, complex_values=complex_values)
     a = scipy.linalg.block_diag(a0, a0 + .4*np.eye(3))
     b = scipy.linalg.block_diag(b0, b0*.8)
@@ -229,7 +233,7 @@ def test_response_eig_preserves_independent_symmetry_sectors(complex_values):
 
 
 @pytest.mark.parametrize('complex_values', [False, True])
-def test_nonsymmetric_davidson_single_guess_and_callback(complex_values):
+def test_davidson_nosym1_initial_guess_and_callback(complex_values):
     rng = np.random.default_rng(632)
     transform = np.eye(6)+.03*rng.normal(size=(6, 6))
     if complex_values:
@@ -254,7 +258,7 @@ def test_nonsymmetric_davidson_single_guess_and_callback(complex_values):
                                np.outer(reference, reference.conj()), atol=1e-9)
 
 
-def test_paired_orthogonalization_of_real_vectors():
+def test_symmetric_orth_real():
     initial = cp.asarray([[1., .1, 0., .03, 0., .01], [.1, 1., .2, 0., .02, 0.]])
     orth = lr._symmetric_orth(initial)
     augmented = cp.vstack([orth, cp.hstack([orth[:, 3:], orth[:, :3]])])
@@ -265,7 +269,7 @@ def test_paired_orthogonalization_of_real_vectors():
     np.testing.assert_allclose((augmented.T @ augmented).get(), q @ q.T, atol=1e-10)
 
 
-def test_complex_paired_orthogonalization_removes_duplicate_guesses():
+def test_symmetric_orth_complex_linear_dependency():
     initial = cp.asarray([[1., .1j, 0., .03, 0., .01]])
     orth = lr._symmetric_orth(cp.vstack([initial, initial]))
     assert orth.shape == (1, 6)
@@ -274,7 +278,7 @@ def test_complex_paired_orthogonalization_removes_duplicate_guesses():
 
 
 @pytest.mark.parametrize('solver', [lr.eigh, lr.eig, lr.real_eig, lr.davidson_nosym1])
-def test_solver_memory_limit_and_larger_expansion_block(solver, monkeypatch):
+def test_solver_restart_with_limited_memory(solver, monkeypatch):
     # MAX_SPACE_INC is a documented tuning option, not a numerical mock.
     monkeypatch.setattr(lr, 'MAX_SPACE_INC', 2)
     a, _, response = response_matrix(n=6)
@@ -305,7 +309,7 @@ def test_solver_memory_limit_and_larger_expansion_block(solver, monkeypatch):
 
 
 @pytest.mark.parametrize('solver', [lr.eigh, lr.eig, lr.real_eig])
-def test_exact_invariant_guess_does_not_invent_unavailable_roots(solver):
+def test_converged_initial_guess_with_insufficient_roots(solver):
     diagonal = cp.asarray([2., 3., 4.])
     if solver is not lr.eigh:
         diagonal = cp.hstack([diagonal, -diagonal])
@@ -323,7 +327,9 @@ def test_exact_invariant_guess_does_not_invent_unavailable_roots(solver):
     assert 'Not enough eigenvectors' in output.getvalue()
 
 
-def test_nonsymmetric_davidson_removes_redundant_exact_guesses():
+def test_converged_vector_as_initial_guess():
+    # Duplicate guesses exercise the QR rank filter (_lr_eig.py:1630-1634)
+    # and the len(xt) != x0len warning branch (_lr_eig.py:1681-1687).
     diagonal = cp.asarray([2., 3., 4.])
     output = io.StringIO()
     converged, values, vectors = lr.davidson_nosym1(
@@ -336,7 +342,8 @@ def test_nonsymmetric_davidson_removes_redundant_exact_guesses():
     assert 'QR decomposition removed 1 vectors' in output.getvalue()
 
 
-def test_response_restart_keeps_labels_for_extra_ritz_vectors(monkeypatch):
+def test_response_restart_linear_dependency(monkeypatch):
+    # Retain an extra Ritz vector and its symmetry label (_lr_eig.py:463-465).
     monkeypatch.setattr(lr, 'MAX_SPACE_INC', 3)
     a0, b0, _ = response_matrix(n=6, complex_values=True)
     a = scipy.linalg.block_diag(a0, a0+.4*np.eye(6))
@@ -348,12 +355,16 @@ def test_response_restart_keeps_labels_for_extra_ritz_vectors(monkeypatch):
         calls.append(len(x))
         dual = cp.hstack([x[:, 12:], x[:, :12]]).conj()
         paired = cp.vstack([x, dual])
+        # Check symmetry-sector reorthogonalization on restart (_lr_eig.py:373-384).
         np.testing.assert_allclose((paired.conj() @ paired.T).get(),
                                    np.eye(len(paired)), atol=1e-10)
         return x @ matrix.T
 
     diagonal_preconditioner = preconditioner(cp.diag(matrix))
 
+    # max_memory=0 triggers the restart condition (_lr_eig.py:531).
+    # Exercise the correction filter (_lr_eig.py:498-505): small independent
+    # corrections must survive while the residual exceeds tol_residual.
     converged, values, vectors = lr.eig(
         product, cp.eye(24, dtype=complex)[[0, 6]], diagonal_preconditioner,
         x0sym=[0, 1], nroots=2, max_memory=0, max_cycle=50,

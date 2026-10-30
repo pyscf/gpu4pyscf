@@ -809,10 +809,14 @@ class SortedGTO:
         counts, nrow, nao_sorted = mat.shape
         assert nao_sorted == self.p_ao_loc[-1]
         if mat_dtype == np.complex128:
-            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+            mat = mat.view(np.float64).reshape(counts, nrow, nao_sorted, 2)
+            mat = cp.asarray(mat.transpose(0, 3, 1, 2), order='C')
+            complex_out = ndarray((counts, nrow, nao), dtype=np.complex128, buffer=out)
+            out = cp.empty((counts, 2, nrow, nao))
+            nrow *= 2
         else:
             mat = cp.asarray(mat, dtype=np.float64, order='C')
-        out = ndarray((counts, nrow, nao), buffer=out)
+            out = ndarray((counts, nrow, nao), buffer=out)
         out[:] = 0.
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -833,10 +837,9 @@ class SortedGTO:
             assert err == 0
 
         if mat_dtype == np.complex128:
-            mat = None
-            out, tmp = cp.empty((counts, nrow, nao), dtype=np.complex128), out
-            out.real = tmp[:,:nrow]
-            out.imag = tmp[:,nrow:]
+            complex_out.real = out[:,0]
+            complex_out.imag = out[:,1]
+            out = complex_out
         if mat_ndim == 1:
             out = out[0,0]
         elif mat_ndim == 2:
@@ -860,10 +863,14 @@ class SortedGTO:
         counts, nrow, nao = mat.shape
         assert nao == self.mol.nao
         if mat_dtype == np.complex128:
-            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+            mat = mat.view(np.float64).reshape(counts, nrow, nao, 2)
+            mat = cp.asarray(mat.transpose(0, 3, 1, 2), order='C')
+            complex_out = ndarray((counts, nrow, nao_sorted), dtype=np.complex128, buffer=out)
+            out = cp.empty((counts, 2, nrow, nao_sorted))
+            nrow *= 2
         else:
             mat = cp.asarray(mat, dtype=np.float64, order='C')
-        out = ndarray((counts, nrow, nao_sorted), buffer=out)
+            out = ndarray((counts, nrow, nao_sorted), buffer=out)
         out[:] = 0.
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -884,10 +891,9 @@ class SortedGTO:
             assert err == 0
 
         if mat_dtype == np.complex128:
-            mat = None
-            out, tmp = cp.empty((counts, nrow, nao_sorted), dtype=np.complex128), out
-            out.real = tmp[:,:nrow]
-            out.imag = tmp[:,nrow:]
+            complex_out.real = out[:,0]
+            complex_out.imag = out[:,1]
+            out = complex_out
         if mat_ndim == 1:
             out = out[0,0]
         elif mat_ndim == 2:

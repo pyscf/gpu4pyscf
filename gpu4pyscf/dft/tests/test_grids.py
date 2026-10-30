@@ -317,7 +317,7 @@ class GridPartition(unittest.TestCase):
         for label in np.unique(labels):
             assert np.all(np.diff(np.flatnonzero(labels == label)) == 1)
 
-    def test_density_pruning_preserves_charge_and_metadata(self):
+    def test_prune_by_density(self):
         small_grid_mf = self.small_grid_mf
         molecule = small_grid_mf.mol
         grid = Grids_gpu(molecule).set(atom_grid=(30, 110))

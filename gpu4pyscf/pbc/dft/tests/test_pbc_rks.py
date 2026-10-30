@@ -608,7 +608,7 @@ class BeckeDensityPruning(unittest.TestCase):
         density = cp.asarray(2 / overlap)
         return mf, density
 
-    def test_initialize_prunes_charge_and_metadata_together(self):
+    def test_initialize_grids_density_pruning(self):
         mf, density = self._case((30, 110))
         reference = mf.grids.copy().build()
         rho = mf.get_rho(density, reference, mf.kpt)

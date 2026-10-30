@@ -182,7 +182,7 @@ class KSCFSmearing(unittest.TestCase):
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
                          'PySCF 2.8: older smearing optimizer and untagged effective potential')
-    def test_kuhf_spectral_occupations_and_entropy(self):
+    def test_kuhf_fermi_occupations_and_entropy(self):
         for fix_spin, mu in [(False, None), (False, .07), (True, None),
                              (True, .07), (True, (-.04, .12))]:
             with self.subTest(fix_spin=fix_spin, mu=mu):
@@ -228,7 +228,7 @@ class KSCFSmearing(unittest.TestCase):
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
                          'PySCF 2.8: older smearing optimizer and untagged effective potential')
-    def test_kuhf_smearing_energy_and_gradient_identities(self):
+    def test_kuhf_smearing_energy_and_gradient(self):
         small_kuhf = self.small_kuhf
         cpu_base, gpu_base = small_kuhf
         cpu = cpu_addons.smearing(cpu_base, .12, 'fermi', fix_spin=True)

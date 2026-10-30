@@ -282,7 +282,7 @@ class SmallMetricAndResponse(unittest.TestCase):
     def test_only_dfj_rsh_unrestricted_mixed_range(self):
         self._check_only_dfj_range_separated_exact_exchange(True, .3, .65, .19)
 
-    def test_duplicate_auxiliary_metric_j(self):
+    def test_get_j_linear_dependent_auxbasis(self):
         mol = self.mol
         basis = {'H': [[0, [.8, 1.]], [0, [.8, 1.]]]}
         aux = df.addons.make_auxmol(mol, basis)

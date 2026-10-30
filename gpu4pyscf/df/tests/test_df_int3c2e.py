@@ -654,7 +654,7 @@ def test_short_range_contract_auxvec():
 
 @pytest.mark.parametrize('cart', [False, True])
 @pytest.mark.parametrize('reorder_aux', [False, True])
-def test_evaluator_clone_and_angular_batches(cart, reorder_aux):
+def test_int3c2e_evaluator_clone_and_batches(cart, reorder_aux):
     mol = pyscf.M(atom='He .1 .2 0; He .7 -.2 .9', verbose=0, cart=cart,
                   basis=[[0, [1.2, 1.]], [1, [.8, 1.]], [2, [.6, 1.]]])
     auxmol = pyscf.df.addons.make_auxmol(mol,

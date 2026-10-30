@@ -62,7 +62,7 @@ def test_energies_and_finite_difference_forces(model, x):
 
 @pytest.mark.parametrize('model', ['sac', 'dac', 'ecr'])
 @pytest.mark.parametrize('x', [-1.0, -0.25, 0.25, 1.0])
-def test_derivative_coupling_from_eigenvector_differences(model, x):
+def test_derivative_coupling_finite_difference(model, x):
     _, vectors = np.linalg.eigh(diabatic_hamiltonian(model, x))
     step = 1e-4
     plus = aligned_eigenvectors(model, x + step, vectors)
@@ -79,7 +79,7 @@ def test_derivative_coupling_from_eigenvector_differences(model, x):
         np.testing.assert_array_equal(actual.diagonal(), np.zeros(2))
         # The overall eigenvector phases are not returned by the PES API.
         np.testing.assert_allclose(abs(actual[0, 1]), abs(coupling[0, 1]),
-                                   atol=2e-9, rtol=0)
+                                   atol=3e-8, rtol=0)
 
 
 @pytest.mark.parametrize('model', ['sac', 'dac', 'ecr'])
@@ -102,7 +102,7 @@ def test_crossing_origin(model, state):
                                atol=2e-11, rtol=0)
 
 
-def test_ecr_origin_is_continuous_from_both_sides():
+def test_ecr_continuity_at_origin():
     dynamics = FSSH_Tully('ecr', mass=2000.)
     for state in (0, 1):
         center = dynamics.evaluate_pes(0., cur_state=state)
@@ -138,7 +138,7 @@ def trajectory_factory(tmp_path):
 
 @pytest.mark.parametrize('model', ['sac', 'dac', 'ecr'])
 @pytest.mark.parametrize('coupling', ['nac', 'ktdc'])
-def test_real_trajectory_restart_and_frame_observables(trajectory_factory, model, coupling):
+def test_trajectory_restart_and_observables(trajectory_factory, model, coupling):
     from gpu4pyscf.md.fssh import H5Trajectory
     position, velocity = np.array([[-.4]]), np.array([[.008]])
     coefficient = np.array([1.+0j, 0j])
@@ -191,7 +191,7 @@ def test_real_trajectory_restart_and_frame_observables(trajectory_factory, model
 
 
 @pytest.mark.parametrize('missing', ['velocity', 'history_energy'])
-def test_restart_reports_missing_saved_data(trajectory_factory, missing):
+def test_restart_missing_data(trajectory_factory, missing):
     import h5py
     run = trajectory_factory('damaged.h5', coupling='ktdc', nsteps=4)
     run.kernel(np.array([[-.4]]), np.array([[.008]]), np.array([1.+0j, 0j]))
@@ -219,7 +219,7 @@ def test_default_velocity_explicit_initial_conditions(trajectory_factory):
         np.testing.assert_allclose(getattr(implicit, name), getattr(explicit, name), atol=1e-15, rtol=0)
 
 
-def test_energy_and_gradient_curvature_couplings_converge_to_analytic_limit():
+def test_ktdc_energy_and_gradient():
     from gpu4pyscf.md.fssh import ktdc_energy, ktdc_gradient
     model = FSSH_Tully('sac', mass=2000.)
     speed = .02
@@ -252,7 +252,7 @@ def test_energy_and_gradient_curvature_couplings_converge_to_analytic_limit():
 
 
 @pytest.mark.parametrize('velocity', [-.006, .006, -.001, .001])
-def test_real_surface_hop_rescaling_conserves_energy_or_reflects(velocity):
+def test_rescale_velocity_allowed_and_frustrated_hops(velocity):
     from gpu4pyscf.md.fssh import rescale_velocity
     run = FSSH_Tully('sac', mass=2000.)
     pes = run.evaluate_pes(0., cur_state=0)

@@ -830,7 +830,7 @@ def test_separate_dd_for_small_overlap():
             assert abs(dat - ref).max() < 1e-8
 
 @pytest.mark.parametrize('prefer_ed', [False, True])
-def test_real_coulomb_metric_factorization(prefer_ed):
+def test_decompose_j2c_linear_dependency(prefer_ed):
     basis = [[0, [.8, 1.]], [0, [.8, 1.]]]
     aux = pyscf.M(atom='He 0 0 0', basis=basis, verbose=0)
     metric = aux.intor('int2c2e')
@@ -850,7 +850,7 @@ def test_real_coulomb_metric_factorization(prefer_ed):
 
 
 @pytest.mark.parametrize('nk,j_only', [(1, False), (2, False), (3, False), (2, True), (3, True)])
-def test_real_builder_public_unpack_layout(nk, j_only):
+def test_unpack_cderi(nk, j_only):
     from pyscf.pbc import df as cpu_df
     cell = pyscf.M(atom='He .2 .3 .4', unit='Bohr',
                    a=np.diag([5., 5.5, 12.]), mesh=[11, 11, 25],

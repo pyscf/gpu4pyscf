@@ -101,7 +101,7 @@ class AFTProtocols(unittest.TestCase):
             expected = cpu_df.get_jk(dm, with_k=False)[0]
             np.testing.assert_allclose(actual.get(), expected, atol=1e-9, rtol=0)
 
-    def test_fractional_reset_and_range_cache(self):
+    def test_reset_scaled_kpts_and_range_cache(self):
         cell = self.cell
         scaled = np.array([[.13, -.07, .09], [-.13, .07, -.09]])
         mydf = aft.AFTDF(cell, cell.get_abs_kpts(scaled))
@@ -827,7 +827,7 @@ class FFTCoulombDerivative_high_cost(unittest.TestCase):
     def test_kpoint_coulomb_derivative(self):
         self._check_derivative(self.cell.make_kpts([2, 1, 1]))
 
-    def test_configured_kpoints_are_used_by_default(self):
+    def test_coulomb_derivative_default_kpts(self):
         kpts = self.cell.make_kpts([2, 1, 1])
         density = self._density(len(kpts))
         mydf = fft.FFTDF(self.cell, kpts=kpts)

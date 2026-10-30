@@ -16,6 +16,8 @@ import numpy as np
 import cupy as cp
 import pytest
 import scipy.linalg
+import pyscf
+from packaging.version import Version
 from pyscf.pbc import gto, scf, dft
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.scf import ghf, kghf
@@ -120,7 +122,7 @@ def cpu_jk(mf, dm):
     return vj, vk
 
 
-def _check_jk_matches_cpu_and_spin_rotation(spin_case):
+def _check_jk_matches(spin_case):
     gpu, cpu, base, rotated, _, rotation = spin_case
     j0, k0 = gpu.get_jk(None, cp.asarray(base), hermi=1)
     j, k = gpu.get_jk(None, cp.asarray(rotated), hermi=1)
@@ -139,12 +141,14 @@ def _check_jk_matches_cpu_and_spin_rotation(spin_case):
     assert float(veff.ecoul) == pytest.approx(expected_coulomb, abs=1e-10)
 
 
-def test_gamma_jk_matches_cpu_and_spin_rotation(gamma_spin_case):
-    _check_jk_matches_cpu_and_spin_rotation(gamma_spin_case)
+def test_gamma_jk_matches(gamma_spin_case):
+    _check_jk_matches(gamma_spin_case)
 
 
-def test_kpoint_jk_matches_cpu_and_spin_rotation(kpoint_spin_case):
-    _check_jk_matches_cpu_and_spin_rotation(kpoint_spin_case)
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                    reason='PySCF 2.8 shifted FFT exchange and J-only GDF cache limitations')
+def test_kpoint_jk_matches(kpoint_spin_case):
+    _check_jk_matches(kpoint_spin_case)
 
 
 def _check_jk_seperate_calls(spin_case):
@@ -166,6 +170,8 @@ def test_gamma_jk_seperate_calls(gamma_spin_case):
     _check_jk_seperate_calls(gamma_spin_case)
 
 
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                    reason='PySCF 2.8 shifted FFT exchange and J-only GDF cache limitations')
 def test_kpoint_jk_seperate_calls(kpoint_spin_case):
     _check_jk_seperate_calls(kpoint_spin_case)
 
@@ -187,10 +193,14 @@ def test_gamma_nonhermitian_spin_transition_density(gamma_spin_case):
     _check_nonhermitian_spin_transition_density(gamma_spin_case)
 
 
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                    reason='PySCF 2.8 shifted FFT exchange and J-only GDF cache limitations')
 def test_kpoint_nonhermitian_spin_transition_density(kpoint_spin_case):
     _check_nonhermitian_spin_transition_density(kpoint_spin_case)
 
 
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                    reason='PySCF 2.8 cannot rebuild a J-only GDF cache for exchange')
 def test_kpoint_gdf_j(cell):
     gpu, cpu, kpts = make_kpoint_pair(cell, 'gdf')
     base, _, rotation = occupied_spin_projectors(cell, kpts)
@@ -365,6 +375,8 @@ def test_gamma_hf_conversion(cell):
     np.testing.assert_allclose(actual_k.get(), expected_k, atol=2e-8, rtol=1e-8)
 
 
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                    reason='PySCF 2.8 cannot rebuild a J-only GDF cache for exchange')
 def test_kpoint_hf_conversion(cell):
     gpu, cpu_hf, kpts = make_kpoint_pair(cell, 'gdf')
     base, _, _ = occupied_spin_projectors(cell, kpts)
@@ -440,8 +452,9 @@ def test_kghf_reads_unrestricted_checkpoint(cell, tmp_path):
     assert source.converged
     reader = kghf.KGHF(cell, kpts, exxdiv=None)
     dm = reader.init_guess_by_chkfile(source.chkfile, project=False)
-    dm = source.make_rdm1()
-    expected = np.stack([scipy.linalg.block_diag(a, b) for a, b in zip(dm[0], dm[1])])
+    source_dm = source.make_rdm1()
+    expected = np.stack([scipy.linalg.block_diag(a, b)
+                         for a, b in zip(source_dm[0], source_dm[1])])
     np.testing.assert_allclose(dm.get(), expected, atol=1e-10)
 
 

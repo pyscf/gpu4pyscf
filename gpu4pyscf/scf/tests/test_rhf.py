@@ -366,7 +366,7 @@ class KnownValues(unittest.TestCase):
 
 
 class SmallPublicContracts(unittest.TestCase):
-    def test_cartesian_atomic_guess_matches_cpu(self):
+    def test_init_guess_by_atom_cartesian(self):
         mol = pyscf.M(atom='O 0 0 0; H .7 .6 0; H -.7 .6 .1',
                       basis='ccpvdz', cart=True, verbose=0)
         mf = scf.RHF(mol)
@@ -393,7 +393,7 @@ class SmallPublicContracts(unittest.TestCase):
         np.testing.assert_allclose(population, ref_population, atol=1e-11)
         np.testing.assert_allclose(charges, ref_charges, atol=1e-11)
 
-    def test_fixed_density_energy_preserves_orbitals(self):
+    def test_kernel_zero_cycles(self):
         mol = pyscf.M(atom='H 0 0 0; F .1 .2 1.1', basis='sto-3g', verbose=0)
         cpu = mol.RHF().run(conv_tol=1e-12)
         mf = cpu.to_gpu()
@@ -412,7 +412,7 @@ class SmallPublicContracts(unittest.TestCase):
         restored = accelerated.undo_soscf()
         np.testing.assert_allclose(restored.make_rdm1().get(), density.get(), atol=1e-12)
 
-    def test_module_scanner_implicit_and_explicit_density(self):
+    def test_as_scanner_initial_dm(self):
         mol = pyscf.M(atom='H 0 0 0; H 0 0 1.4', unit='Bohr', basis='sto-3g', verbose=0)
         mf = scf.RHF(mol)
         mf.chkfile = None

@@ -340,7 +340,7 @@ class X2COperators(unittest.TestCase):
         np.testing.assert_allclose(k.get(), k_ref.get(), atol=2e-11, rtol=2e-11)
         np.testing.assert_array_equal(molecule.atom_coords(), original_coords)
 
-    def test_overlap_roots_project_redundant_ao_combinations(self):
+    def test_sqrt_and_invsqrt_linear_dependency(self):
         for phase in [1., 1j]:
             with self.subTest(phase=phase):
                 molecule = gto.M(atom='H 0 0 0; H 0 0 1.4', unit='Bohr', basis='sto-3g', verbose=0)
@@ -363,7 +363,7 @@ class X2COperators(unittest.TestCase):
                 np.testing.assert_allclose(root @ null, 0., atol=2e-13)
                 np.testing.assert_allclose(inverse_root @ null, 0., atol=2e-13)
 
-    def test_scalar_transfer_to_ks_preserves_relativistic_helper(self):
+    def test_sfx2c_to_ks(self):
         molecule = gto.M(atom='H 0 0 0; F 0 0 1.7', unit='Bohr', basis='sto-3g', verbose=0)
         mf = scf.RHF(molecule).sfx2c1e()
         mf.conv_tol = 3e-10

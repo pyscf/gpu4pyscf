@@ -91,7 +91,7 @@ class UHFSmearing(unittest.TestCase):
     def tearDownClass(cls):
         del cls.small_uhf
 
-    def test_uhf_spectral_occupations_and_entropy(self):
+    def test_uhf_fermi_occupations_and_entropy(self):
         for fix_spin, mu in [(False, None), (False, .07), (True, None),
                   (True, .07), (True, (-.04, .12))]:
             with self.subTest(fix_spin=fix_spin, mu=mu):
@@ -151,7 +151,7 @@ class UHFSmearing(unittest.TestCase):
         np.testing.assert_array_equal(undone.get_occ(cp.asarray(SMALL_ENERGIES)).get(),
                                       gpu_base.get_occ(cp.asarray(SMALL_ENERGIES)).get())
 
-    def test_uhf_smearing_energy_and_gradient_identities(self):
+    def test_uhf_smearing_energy_and_gradient(self):
         small_uhf = self.small_uhf
         cpu_base, gpu_base = small_uhf
         cpu = cpu_addons.smearing(cpu_base, .12, 'fermi', fix_spin=True)

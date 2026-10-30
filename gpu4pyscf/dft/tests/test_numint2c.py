@@ -376,13 +376,13 @@ class MultiCollinearResponse(unittest.TestCase):
                 for a, b in zip(actual, expected):
                     np.testing.assert_allclose(a, b, atol=2e-11, rtol=2e-11)
 
-    def test_weak_spin_derivatives_match_mcfun_lda(self):
+    def test_mcfun_weak_spin_lda(self):
         self._check_weak_spin_derivatives_match_mcfun('LDA,VWN')
 
-    def test_weak_spin_derivatives_match_mcfun_gga(self):
+    def test_mcfun_weak_spin_gga(self):
         self._check_weak_spin_derivatives_match_mcfun('PBE')
 
-    def test_signed_collinear_pbe_matches_libxc_and_kernel_reciprocity(self):
+    def test_collinear_pbe_signed_spin_derivatives(self):
         xc = 'PBE'
         rho = self._density(xc, strong=True)
         total = rho[0]
@@ -436,10 +436,10 @@ class MultiCollinearResponse(unittest.TestCase):
                                        atol=2e-11, rtol=2e-11)
         np.testing.assert_array_equal(rho, before)
 
-    def test_mixed_threshold_points_match_individual_routes_lda(self):
+    def test_mcfun_mixed_collinear_threshold_lda(self):
         self._check_mixed_threshold_points_match_individual_routes('LDA,VWN')
 
-    def test_mixed_threshold_points_match_individual_routes_gga(self):
+    def test_mcfun_mixed_collinear_threshold_gga(self):
         self._check_mixed_threshold_points_match_individual_routes('PBE')
 
     def _check_spin_rotation_covariance(self, xc, strong):

@@ -360,8 +360,7 @@ def _project_spin_paxis(rho_tm, sgridz=None):
     assert rho_tm.ndim == 3
 
     norm = cp.linalg.norm(m[:, 0], axis=0)
-    axis = cp.zeros_like(m[:, 0])
-    axis = cp.divide(m[:, 0], norm, out=axis, where=norm != 0)
+    axis = m[:, 0] / cp.where(norm == 0, 1, norm)
     s = cp.einsum('axg,ag->xg', m, axis)
     s[0] = norm
 

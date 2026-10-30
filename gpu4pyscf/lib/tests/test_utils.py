@@ -18,17 +18,17 @@ from gpu4pyscf.lib import utils
 
 
 class KnownValues(unittest.TestCase):
-    def test_splits_by_blocksize_respects_group_boundaries(self):
+    def test_splits_by_blocksize_group_boundaries(self):
         offsets = numpy.array([0, 2, 5, 9], dtype=numpy.int32)
         self.assertEqual(utils.splits_by_blocksize(offsets, 5), [0, 2, 3])
         numpy.testing.assert_array_equal(offsets, [0, 2, 5, 9])
 
-    def test_splits_by_blocksize_keeps_oversized_group(self):
+    def test_splits_by_blocksize_oversized_group(self):
         # A single group cannot be divided, even when larger than the target.
         offsets = numpy.array([0, 8, 10], dtype=numpy.int32)
         self.assertEqual(utils.splits_by_blocksize(offsets, 3), [0, 1, 2])
 
-    def test_splits_by_blocksize_handles_empty_groups(self):
+    def test_splits_by_blocksize_empty_groups(self):
         offsets = numpy.array([0, 0, 3, 3, 7], dtype=numpy.int32)
         self.assertEqual(utils.splits_by_blocksize(offsets, 3), [0, 3, 4])
 
@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
         numpy.testing.assert_array_equal(upper, [[1, 2, 4, 4], [8, 8, 16, 16]])
         numpy.testing.assert_array_equal(counts, [[1, 2, 3, 4], [7, 8, 9, 16]])
 
-    def test_indices_within_groups_including_empty_group(self):
+    def test_indices_within_groups_empty_group(self):
         counts = [3, 0, 2, 1]
         indices = utils.indices_within_groups(counts)
         numpy.testing.assert_array_equal(indices, [0, 1, 2, 0, 1, 0])

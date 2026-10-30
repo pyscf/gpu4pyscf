@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
 
 
 class SmallLowMemoryContracts(unittest.TestCase):
-    def test_zero_cycle_and_existing_wavefunction(self):
+    def test_kernel_zero_cycles(self):
         mol = pyscf.M(atom='H 0 0 0; H 0 0 .8', basis='sto-3g', verbose=0)
         cpu = mol.RHF().run(conv_tol=1e-12)
         density = cupy.asarray(cpu.make_rdm1())

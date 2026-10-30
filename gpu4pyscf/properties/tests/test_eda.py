@@ -1038,7 +1038,7 @@ class EDAFragments(unittest.TestCase):
 
 
 class EDAResponse(unittest.TestCase):
-    def test_eda_uncoupled_ferf_cpu_subspace(self):
+    def test_uncoupled_ferf_subspace(self):
         for order, rank in [(1, 2), (2, 3)]:
             with self.subTest(order=order, rank=rank):
                 mol = pyscf.M(atom='H 0 0 -.7; H 0 0 .7', basis='6-31g', unit='Bohr', verbose=0)
@@ -1069,7 +1069,7 @@ class EDAResponse(unittest.TestCase):
                 np.testing.assert_allclose(actual.T @ actual, np.eye(rank), atol=1e-12, rtol=0)
                 np.testing.assert_allclose(actual @ actual.T, expected @ expected.T, atol=2e-10, rtol=0)
 
-    def test_eda_pbe0_charged_cpu_oracles_high_cost(self):
+    def test_eda_pbe0_charged_energy_and_gradient_high_cost(self):
         # Retain the charged pair's geometry; this is a separate, smaller basis/grid model.
         molecules = [pyscf.M(atom=mol.atom, unit=mol.unit, basis='sto-3g',
                              charge=mol.charge, spin=mol.spin, verbose=0)

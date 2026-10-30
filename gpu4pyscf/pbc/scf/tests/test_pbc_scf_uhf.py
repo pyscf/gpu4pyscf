@@ -312,7 +312,7 @@ class UnrestrictedSCFProperties(unittest.TestCase):
         self._check_density_dispatch('KUHF')
 
 
-    def test_default_fock_energy_gradient_and_canonicalization_kuhf(self):
+    def test_kuhf_default_fock(self):
         rotation = np.eye(self.cell.nao)
         angle = .13
         rotation[:2, :2] = [[np.cos(angle), -np.sin(angle)],

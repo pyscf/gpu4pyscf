@@ -297,7 +297,7 @@ def test_kpoint_scf_factory(spin, name):
 
 @pytest.mark.parametrize('method', ['CT_dot_mat', 'C_dot_mat', 'mat_dot_C', 'mat_dot_CT'])
 @pytest.mark.parametrize('ndim', [1, 2, 3])
-def test_direct_complex_contraction_matrices(method, ndim):
+def test_complex_ao_contraction(method, ndim):
     molecule = pyscf.M(atom='H 0 0 0; F 0 0 1', basis='ccpvdz', verbose=0)
     sorted_mol = mole_gpu.SortedGTO.from_mol(molecule)
     c = sorted_mol.ctr_coeff.get()
@@ -308,8 +308,7 @@ def test_direct_complex_contraction_matrices(method, ndim):
     if ndim == 3:
         shape = (2,) + shape
     rng = np.random.default_rng(547)
-    data = rng.normal(size=shape) + 1j*rng.normal(size=shape)
-    mat = cp.asarray(data)[..., ::-1]
+    mat = data = rng.normal(size=shape) + 1j*rng.normal(size=shape)
     host = mat.get()
     if ndim == 2:
         mat = host

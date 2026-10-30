@@ -402,7 +402,7 @@ class PenaltyDensityContracts(unittest.TestCase):
         np.testing.assert_allclose(potential.sum(axis=0),
                                    8 * charge_error * charge_w, atol=1e-13)
 
-    def test_penalty_fock_damping_and_spin_level_shifts_scalar(self):
+    def test_penalty_fock_damping_and_level_shift(self):
         damping, shift = 0.2, 0.3
         dm = cp.asarray(self.dm)
         raw = cp.asarray(self.mf.get_fock(dm=dm)).get()

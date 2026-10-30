@@ -270,7 +270,7 @@ class SolventTDResponse_high_cost(unittest.TestCase):
                     np.testing.assert_allclose(x.get(), old_x.get(), atol=0, rtol=0)
                 assert original.base is td and td.with_solvent is original_pcm
 
-    def test_pcm_triplet_response_matches_same_orbital_vacuum(self):
+    def test_pcm_triplet_solvent_response(self):
         small_pcm_td_reference = self.small_pcm_td_reference
         mf = small_pcm_td_reference._scf
         triplet = mf.TDA(equilibrium_solvation=True).set(

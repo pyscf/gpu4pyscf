@@ -751,7 +751,7 @@ class IntegrationProtocols(unittest.TestCase):
     def test_uks_first_order_orbital_response_gga(self):
         self._check_response_orbitals('PBE', True)
 
-    def test_response_requires_initialized_kernel(self):
+    def test_fxc_without_initialization(self):
         ni = NumInt()
         for method in ('nr_rks_fxc', 'nr_uks_fxc', 'nr_rks_fxc_st'):
             with self.subTest(method=method):
@@ -772,7 +772,7 @@ class IntegrationProtocols(unittest.TestCase):
                 np.testing.assert_allclose(actual[0].get(), expected.reshape(-1, len(self.grid.weights)),
                                            atol=2e-12, rtol=2e-12)
 
-    def test_grouped_blocks_build_real_quadrature_and_optimizer(self):
+    def test_grouped_block_loop_initialization(self):
         grids = gen_grid.Grids(self.molecule)
         grids.atom_grid = (10, 14)
         batches = list(numint._grouped_block_loop(NumInt(), self.molecule, grids, deriv=0))
@@ -787,7 +787,7 @@ class IntegrationProtocols(unittest.TestCase):
             np.testing.assert_allclose(ao.get(), expected.get(), atol=2e-13, rtol=2e-12)
             self.assertEqual(ao.shape[1], len(weights))
 
-    def test_density_contractions_accept_strided_ao_views(self):
+    def test_contract_rho_strided_ao(self):
         ao = NumInt().eval_ao(self.molecule, self.grid.coords, deriv=1, transpose=False)
         bra, ket = ao[0, :, ::2], ao[1, :, ::2]
         expected = np.einsum('ig,ig->g', bra.get(), ket.get())
