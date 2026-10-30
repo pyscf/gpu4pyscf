@@ -14,6 +14,8 @@
 
 import unittest
 
+import cupy as cp
+import numpy as np
 import pyscf
 from pyscf import ao2mo
 from pyscf import dft as cpu_dft

@@ -17,6 +17,7 @@ import tempfile
 from unittest import mock
 
 import cupy
+import numpy as np
 import pyscf
 from pyscf import dft, lib, mcscf as cpu_mcscf, scf
 from pyscf.fci import direct_spin1

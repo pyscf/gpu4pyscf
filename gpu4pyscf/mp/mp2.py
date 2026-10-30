@@ -101,7 +101,10 @@ def _gamma1_intermediates(mp, t2=None, eris=None):
     dm1vir = cupy.zeros((nvir,nvir), dtype=dtype)
     for i in range(nocc):
         if t2 is None:
-            gi = cupy.asarray(eris.ovov[i*nvir:(i+1)*nvir])
+            if eris.ovov.ndim == 4:
+                gi = cupy.asarray(eris.ovov[i])
+            else:
+                gi = cupy.asarray(eris.ovov[i*nvir:(i+1)*nvir])
             gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
             t2i = gi.conj()/(eia[:,:,None] + eia[i])
             #lib.direct_sum('jb+a->jba', eia, eia[i])
@@ -114,12 +117,38 @@ def _gamma1_intermediates(mp, t2=None, eris=None):
                 - _einsum('iab,jba->ij', l2i, t2i)
     return -dm1occ, dm1vir
 
+class _ChemistsERIs(mp2_cpu._ChemistsERIs):
+    def _common_init_(self, mp, mo_coeff=None):
+        if mo_coeff is None:
+            mo_coeff = mp.mo_coeff
+        if mo_coeff is None:
+            raise RuntimeError('mo_coeff, mo_energy are not initialized.\n'
+                               'You may need to call mf.kernel() to generate them.')
+
+        same_reference = mo_coeff is mp._scf.mo_coeff
+        mo_coeff = cupy.asarray(mo_coeff)
+        mask = mp.get_frozen_mask()
+        self.mo_coeff = mo_coeff[:,mask]
+        self.mol = mp.mol
+
+        # Keep restricted MP2 initialization independent of the CPU helper's
+        # singles-amplitude API, introduced in PySCF 2.14.
+        if same_reference and mp._scf.converged:
+            self.mo_energy = cupy.asarray(mp._scf.mo_energy)[mask]
+            self.fock = cupy.diag(self.mo_energy)
+        else:
+            dm = mp._scf.make_rdm1(mo_coeff, mp.mo_occ)
+            vhf = mp._scf.get_veff(mp.mol, dm)
+            fockao = mp._scf.get_fock(vhf=vhf, dm=dm)
+            self.fock = self.mo_coeff.conj().T.dot(fockao).dot(self.mo_coeff)
+            self.mo_energy = self.fock.diagonal().real
+        return self
+
+
 def _make_eris(mp, mo_coeff=None, ao2mofn=None, verbose=None):
     log = logger.new_logger(mp, verbose)
     time0 = (logger.process_clock(), logger.perf_counter())
-    eris = mp2_cpu._ChemistsERIs()
-    if isinstance(mo_coeff, np.ndarray):
-        mo_coeff = cupy.asarray(mo_coeff)
+    eris = _ChemistsERIs()
     eris._common_init_(mp, mo_coeff)
     mo_coeff = eris.mo_coeff
     nocc = mp.nocc

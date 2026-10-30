@@ -1,10 +1,31 @@
-# .coveragerc to control coverage.py
+# Measure package source, not tests or unrelated checkout files.
 [run]
 branch = True
-omit = */tests/*
+source = gpu4pyscf
+omit =
+    */tests/*
+    */test/*
 disable_warnings = include-ignored
 
 [report]
+omit = */test/*
+    */_patch_pyscf.py
+    *_experiment.py
+    */df/int3c2e.py
+    */nac/finite_diff.py
+    */pbc/dft/multigrid.py
+    */pbc/dft/multigrid_v2.py
+    */qmmm/pbc/*
+    */sem/*
+    */drivers/*
+    */tools/*
+    */tdscf/ris.py
+    */tdscf/math_helper.py
+    */tdscf/krylov.py
+    */tdscf/parameter.py
+    */tdscf/spectralib.py
+    */tdrks_ris*.py
+
 # Regexes for lines to exclude from consideration
 exclude_lines =
     # Have to re-enable the standard pragma
@@ -26,6 +47,7 @@ exclude_lines =
     except ImportError:
 
 ignore_errors = True
+precision = 2
 
 [html]
 directory = coverage_html_report

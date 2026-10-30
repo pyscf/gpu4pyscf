@@ -264,6 +264,109 @@ class KnownValues(unittest.TestCase):
         assert abs(n_s - n_u) < 2e-9
         assert abs(e_s - e_u) < 2e-9
 
+
+def _density_on_grid(mf, grids):
+    ao = cpu_dft.numint.eval_ao(mf.mol, cp.asnumpy(grids.coords))
+    return cpu_dft.numint.eval_rho(mf.mol, ao, mf.make_rdm1())
+
+
+class GridPartition(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        molecule = pyscf.M(atom='O .1 .2 0; H .8 .1 .5; H -.5 .7 .6',
+                           basis='sto-3g', verbose=0)
+        mf = scf.RHF(molecule).set(conv_tol=1e-12).run()
+        assert mf.converged
+        cls.small_grid_mf = mf
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.small_grid_mf
+
+    def test_atom_partition(self):
+        for scheme in ['original_becke', 'stratmann']:
+            with self.subTest(scheme=scheme):
+                small_grid_mf = self.small_grid_mf
+                molecule = small_grid_mf.mol
+                grid = Grids_gpu(molecule).set(atom_grid=(8, 50))
+                coords, weights = grid.get_partition(
+                    molecule, concat=False, becke_scheme=getattr(gen_grid_gpu, scheme))
+                table = gen_grid_cpu.gen_atomic_grids(molecule, atom_grid=(8, 50),
+                                                      radi_method=grid.radi_method)
+                ref_coords, ref_weights = gen_grid_cpu.get_partition(
+                    molecule, table, concat=False, becke_scheme=getattr(gen_grid_cpu, scheme))
+                assert len(coords) == len(weights) == molecule.natm
+                for c, w, rc, rw in zip(coords, weights, ref_coords, ref_weights):
+                    np.testing.assert_allclose(cp.asnumpy(c), rc, atol=1e-12, rtol=0)
+                    np.testing.assert_allclose(cp.asnumpy(w), rw, atol=1e-10, rtol=0)
+
+    def test_box_grouping(self):
+        small_grid_mf = self.small_grid_mf
+        molecule = small_grid_mf.mol
+        grid = Grids_gpu(molecule).set(atom_grid=(8, 50), alignment=1)
+        grid.build(sort_grids=False)
+        order = cp.asnumpy(gen_grid_gpu.arg_group_grids(molecule, grid.coords))
+        np.testing.assert_array_equal(np.sort(order), np.arange(grid.size))
+        atom_coords = molecule.atom_coords()
+        lower = atom_coords.min(axis=0) - gen_grid_gpu.GROUP_BOUNDARY_PENALTY
+        upper = atom_coords.max(axis=0) + gen_grid_gpu.GROUP_BOUNDARY_PENALTY
+        boxes = np.rint((upper - lower) / gen_grid_gpu.GROUP_BOX_SIZE).astype(int)
+        cells = np.floor((cp.asnumpy(grid.coords) - lower) / ((upper - lower) / boxes)).astype(int)
+        cells = np.clip(cells, -1, boxes)
+        labels = np.unique(cells, axis=0, return_inverse=True)[1][order]
+        for label in np.unique(labels):
+            assert np.all(np.diff(np.flatnonzero(labels == label)) == 1)
+
+    def test_prune_by_density(self):
+        small_grid_mf = self.small_grid_mf
+        molecule = small_grid_mf.mol
+        grid = Grids_gpu(molecule).set(atom_grid=(30, 110))
+        grid.build(with_non0tab=True, sort_grids=False)
+        density = _density_on_grid(small_grid_mf, grid)
+        before = {name: cp.asnumpy(getattr(grid, name)).copy()
+                  for name in ('coords', 'weights', 'atm_idx', 'quadrature_weights')}
+        population = density @ before['weights']
+        assert abs(population - molecule.nelectron) < gen_grid_gpu.NELEC_ERROR_TOL * population
+        grid.get_non0ao_idx()
+        cache = grid._non0ao_idx
+        assert cache is not None
+        assert grid.prune_by_density_(cp.asarray(density), threshold=0) is grid
+        assert grid._non0ao_idx is cache
+        threshold = 1e-5
+        retained = abs(density * before['weights']) > threshold / grid.size
+        assert 0 < retained.sum() < grid.size
+        grid.prune_by_density_(cp.asarray(density), threshold=threshold)
+        assert grid._non0ao_idx is None
+        n = retained.sum()
+        for name, original in before.items():
+            np.testing.assert_array_equal(cp.asnumpy(getattr(grid, name))[:n], original[retained])
+        assert grid.size % grid.alignment == 0
+        np.testing.assert_array_equal(cp.asnumpy(grid.weights)[n:], 0)
+        np.testing.assert_array_equal(cp.asnumpy(grid.quadrature_weights)[n:], 0)
+        np.testing.assert_array_equal(cp.asnumpy(grid.atm_idx)[n:], -1)
+        np.testing.assert_array_equal(grid.non0tab,
+                                      gen_grid_cpu.make_mask(molecule, cp.asnumpy(grid.coords)))
+        assert grid.screen_index is grid.non0tab
+        after_population = _density_on_grid(small_grid_mf, grid) @ cp.asnumpy(grid.weights)
+        # Each omitted weighted density is at most threshold / original grid count.
+        assert abs(after_population - population) <= threshold + 1e-10
+
+
+class AtomicGrids(unittest.TestCase):
+    def test_sg1_heavier_elements(self):
+        for element in ['S', 'Ca']:
+            with self.subTest(element=element):
+                molecule = pyscf.M(atom=f'{element} 0 0 0', basis='sto-3g', verbose=0)
+                actual = gen_grid_gpu.gen_atomic_grids(
+                    molecule, atom_grid=(8, 194), prune=gen_grid_gpu.sg1_prune)[element]
+                # GPU SG1 uses an unpruned 194-point rule beyond the SG1 radii table.
+                prune = gen_grid_cpu.sg1_prune if element == 'S' else None
+                reference = gen_grid_cpu.gen_atomic_grids(
+                    molecule, atom_grid=(8, 194), prune=prune)[element]
+                for value, expected in zip(actual, reference):
+                    np.testing.assert_allclose(cp.asnumpy(value), expected, atol=1e-12, rtol=0)
+
+
 if __name__ == "__main__":
     print("Full Tests for grids")
     unittest.main()

@@ -62,16 +62,16 @@ def _df_jk(mf, dm, hermi, kpts, kpts_band, with_j, with_k, omega):
 
     # FFTDF needs the full Hermitian density for J: taking the real part of
     # rho from dm.imag separately loses its contribution at nonzero k-points.
-    if not cp.iscomplexobj(dm) or not isinstance(mf.with_df, GDF):
+    if not isinstance(mf.with_df, GDF):
         return build(dm, hermi)
 
-    vjR, vkR = build(cp.asarray(dm.real))
-    vjI, vkI = build(cp.asarray(dm.imag))
-    vj = vk = None
-    if with_j:
-        vj = vjR + vjI * 1j
-    if with_k:
-        vk = vkR + vkI * 1j
+    vj, vk = build(cp.asarray(dm.real, order='C'), hermi)
+    if cp.iscomplexobj(dm):
+        vjI, vkI = build(cp.asarray(dm.imag, order='C'))
+        if with_j:
+            vj = vj + vjI * 1j
+        if with_k:
+            vk = vk + vkI * 1j
     return vj, vk
 
 def _get_jk(mf, dm, hermi, kpts, kpts_band, with_j, with_k, omega=None):
@@ -175,7 +175,6 @@ class GHF(pbchf.SCF):
     energy_elec = mol_hf.energy_elec
     init_guess_by_huckel = return_cupy_array(ghf_cpu.GHF.init_guess_by_huckel)
     init_guess_by_mod_huckel = return_cupy_array(ghf_cpu.GHF.init_guess_by_mod_huckel)
-    init_guess_by_chkfile = return_cupy_array(ghf_cpu.GHF.init_guess_by_chkfile)
     stability = gen_response = nuc_grad_method = Gradients = NotImplemented
     newton = canonicalize = NotImplemented
     smearing = NotImplemented
@@ -218,12 +217,25 @@ class GHF(pbchf.SCF):
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         assert isinstance(key, str)
-        if cell is None: cell = self.cell
-        dm = mol_ghf.GHF.get_init_guess(self, cell, key)
-        return pbchf.normalize_dm_(self, dm, s1e)
+        assert key.startswith(('minao', 'atom', '1e', 'hcore', 'chk'))
+        return mol_ghf.GHF.get_init_guess(self, cell, key)
 
-    init_guess_by_minao = mol_ghf.GHF.init_guess_by_minao
-    init_guess_by_atom = mol_ghf.GHF.init_guess_by_atom
+    def init_guess_by_chkfile(self, chkfile=None, project=None):
+        """Read periodic spinor orbitals at this object's single k-point."""
+        # The molecular reader expects inertia_moment and molecular overlaps.
+        # Reuse the periodic reader, retaining both complex spin components.
+        from gpu4pyscf.pbc.scf.kghf import KGHF
+        kpts = np.reshape(self.kpt, (1, 3))
+        dm = KGHF.init_guess_by_chkfile(self, chkfile, project, kpts)[0]
+        return pbchf.normalize_dm_(self, dm)
+
+    def init_guess_by_minao(self, mol=None):
+        dm = mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_minao(self, mol))
+        return pbchf.normalize_dm_(self, dm)
+
+    def init_guess_by_atom(self, mol=None):
+        dm = mol_ghf._from_rhf_init_dm(mol_hf.SCF.init_guess_by_atom(self, mol))
+        return pbchf.normalize_dm_(self, dm)
 
     def init_guess_by_1e(self, mol=None):
         if mol is None: mol = self.mol

@@ -677,7 +677,7 @@ class FSSH:
             velocity = self.velocity
         if velocity is None:
             velocity = np.zeros_like(position)
-            logger.warn("Velocity is set to zero if not provided")
+            logger.warn(self.mol, "Velocity is set to zero if not provided")
 
         if coefficient is None:
             coefficient = self.coefficient

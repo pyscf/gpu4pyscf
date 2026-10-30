@@ -219,7 +219,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
 
         # The first iteration of SCF
         fock = mf.get_fock(dm=bare_dm)
-        e, mo = mf.eig(fock, ovlp)
+        e, mo = mf.eig(cp.ascontiguousarray(fock), cp.ascontiguousarray(ovlp))
         local_occ = 0
         for c in C_inv:
             C_on_site = [c.dot(mo[0]), c.dot(mo[1])]

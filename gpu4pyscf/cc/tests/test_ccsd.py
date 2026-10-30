@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 import pyscf
-import pytest
 from gpu4pyscf.cc import ccsd_incore
 
 def setUpModule():
@@ -51,7 +50,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(mcc.t1 - ref.t1).max(), 0, 6)
         self.assertAlmostEqual(abs(mcc.t2 - ref.t2).max(), 0, 6)
 
-    def test_to_gpu(self):
+    def test_to_gpu_high_cost(self):
         mcc = ccsd_incore.CCSD(mf.to_gpu()).run()
         mcc = mcc.run()
         e_gpu = mcc.e_tot

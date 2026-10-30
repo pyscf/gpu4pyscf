@@ -356,7 +356,7 @@ def argsort_group(group_ids, ngroup):
     '''
     groups = []
     for i in range(ngroup):
-        groups.append(cupy.argwhere(group_ids==i)[0])
+        groups.append(cupy.where(group_ids == i)[0])
     return cupy.hstack(groups)
 
 def atomic_group_grids(mol, coords):
@@ -429,7 +429,7 @@ def _load_conf(mod, name, default):
     var = getattr(__config__, name, None)
     if var is None:
         var = default
-    elif isinstance(var):
+    elif isinstance(var, str):
         if mod is None:
             mod = sys.modules[__name__]
         var = getattr(mod, var)

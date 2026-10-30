@@ -141,6 +141,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
 
     if rho_tm.ndim == 2:
         nvar = 1
+        rho_tm = rho_tm[:,None]
     else:
         nvar = rho_tm.shape[1]
 
@@ -166,7 +167,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
         fxc_eff[0,:,0] = fxc[0,:,0]
         fz1 = cp.einsum('xyg,rg->rxyg', fxc[1,:,0], omega)
         fxc_eff[1:,:,0 ] = fz1
-        fxc_eff[0 ,:,1:] = fz1.transpose(1,0,2,3)
+        fxc_eff[0 ,:,1:] = fz1.transpose(2,0,1,3)
         tmp = cp.einsum('xyg,rg->rxyg', fxc[1,:,1,:], omega)
         fxc_eff[1:,:,1:] = cp.einsum('rxyg,sg->rxsyg', tmp, omega)
 
@@ -276,8 +277,8 @@ def _eval_xc_lebedev(func, rho_tm, deriv, spin_samples,
 
     # Strongly spin-polarized points (rho ~= |m|) can be considered as collinear spins
     if collinear_threshold is not None:
-        rho, s = _project_spin_paxis(rho_tm.reshape(4, nvar, ngrids)[:,0])
-        cs_idx = cp.where(s >= rho * collinear_threshold)[0]
+        rho, s = _project_spin_paxis(rho_tm.reshape(4, nvar, ngrids)[:, :1])
+        cs_idx = cp.where(s[0] >= rho[0] * collinear_threshold)[0]
         if cs_idx.size > 0:
             xc_cs = eval_xc_collinear_spin(func, rho_tm[...,cs_idx], deriv,
                                            collinear_samples)
@@ -356,22 +357,21 @@ def _project_spin_paxis(rho_tm, sgridz=None):
     rho = rho_tm[0]
     m = rho_tm[1:]
 
-    s = cp.linalg.norm(m, axis=0)
+    assert rho_tm.ndim == 3
+
+    norm = cp.linalg.norm(m[:, 0], axis=0)
+    axis = m[:, 0] / cp.where(norm == 0, 1, norm)
+    s = cp.einsum('axg,ag->xg', m, axis)
+    s[0] = norm
+
     if sgridz is None:
         rho_ts = cp.stack([rho, s])
     else:
         ngrids = rho.shape[-1]
         nsg = sgridz.shape[0]
-        if rho_tm.ndim == 2:
-            rho_ts = cp.empty((2, ngrids, nsg))
-            rho_ts[0] = rho[:,cp.newaxis]
-            rho_ts[1] = s[:,cp.newaxis] * sgridz
-            rho_ts = rho_ts.reshape(2, ngrids * nsg)
-        else:
-            nvar = rho_tm.shape[1]
-            rho_ts = cp.empty((2, nvar, ngrids, nsg))
-            rho_ts[0] = rho[:,:,cp.newaxis]
-            rho_ts[1] = s[:,:,cp.newaxis] * sgridz
-            rho_ts = rho_ts.reshape(2, nvar, ngrids * nsg)
+        nvar = rho_tm.shape[1]
+        rho_ts = cp.empty((2, nvar, ngrids, nsg))
+        rho_ts[0] = rho[:,:,cp.newaxis]
+        rho_ts[1] = s[:,:,cp.newaxis] * sgridz
+        rho_ts = rho_ts.reshape(2, nvar, ngrids * nsg)
     return rho_ts
-

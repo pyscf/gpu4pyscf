@@ -13,12 +13,15 @@
 # limitations under the License.
 
 import unittest
+import h5py
+from pathlib import Path
 import tempfile
 import numpy as np
 import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
+from gpu4pyscf.scf import hf as gpu_hf
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
 except ImportError:
@@ -355,13 +358,98 @@ class KnownValues(unittest.TestCase):
 
     # TODO:
     #test analyze
-    #test mulliken_pop
-    #test mulliken_meta
     #test stability
     #test newton
     #test x2c
-    #test dipole
     #test canonicalize
+
+
+
+class SmallPublicContracts(unittest.TestCase):
+    def test_init_guess_by_atom_cartesian(self):
+        mol = pyscf.M(atom='O 0 0 0; H .7 .6 0; H -.7 .6 .1',
+                      basis='ccpvdz', cart=True, verbose=0)
+        mf = scf.RHF(mol)
+        actual = mf.init_guess_by_atom()
+        expected = pyscf.scf.hf.init_guess_by_atom(mol)
+        np.testing.assert_allclose(actual.get(), expected, atol=1e-11, rtol=1e-11)
+        rebuilt = (actual.mo_coeff * actual.mo_occ) @ actual.mo_coeff.T
+        np.testing.assert_allclose(rebuilt.get(), actual.get(), atol=1e-12, rtol=1e-12)
+
+    def test_quadrupole_moment(self):
+        mol = pyscf.M(atom='H 0 0 0; F .1 .2 1.1', basis='sto-3g', verbose=0)
+        cpu = mol.RHF().run(conv_tol=1e-12)
+        mf = cpu.to_gpu()
+        actual = mf.quad_moment(verbose=0)
+        expected = cpu.quad_moment(verbose=0)
+        np.testing.assert_allclose(actual, expected, atol=1e-11)
+
+    def test_mulliken_population(self):
+        mol = pyscf.M(atom='H 0 0 0; F .1 .2 1.1', basis='sto-3g', verbose=0)
+        cpu = mol.RHF().run(conv_tol=1e-12)
+        mf = cpu.to_gpu()
+        population, charges = mf.mulliken_pop(verbose=0)
+        ref_population, ref_charges = cpu.mulliken_pop(verbose=0)
+        np.testing.assert_allclose(population, ref_population, atol=1e-11)
+        np.testing.assert_allclose(charges, ref_charges, atol=1e-11)
+
+    def test_kernel_zero_cycles(self):
+        mol = pyscf.M(atom='H 0 0 0; F .1 .2 1.1', basis='sto-3g', verbose=0)
+        cpu = mol.RHF().run(conv_tol=1e-12)
+        mf = cpu.to_gpu()
+        mf.max_cycle = 0
+        before = mf.mo_coeff.copy()
+        energy = mf.kernel(dm0=mf.make_rdm1())
+        np.testing.assert_allclose(energy, cpu.e_tot, atol=1e-10)
+        np.testing.assert_array_equal(mf.mo_coeff.get(), before.get())
+
+    def test_soscf_roundtrip_preserves_density(self):
+        mol = pyscf.M(atom='H 0 0 0; F .1 .2 1.1', basis='sto-3g', verbose=0)
+        mf = scf.RHF(mol).run(conv_tol=1e-12)
+        density = mf.make_rdm1()
+        accelerated = mf.soscf()
+        self.assertIs(accelerated.soscf(), accelerated)
+        restored = accelerated.undo_soscf()
+        np.testing.assert_allclose(restored.make_rdm1().get(), density.get(), atol=1e-12)
+
+    def test_as_scanner_initial_dm(self):
+        mol = pyscf.M(atom='H 0 0 0; H 0 0 1.4', unit='Bohr', basis='sto-3g', verbose=0)
+        mf = scf.RHF(mol)
+        mf.chkfile = None
+        mf.run(conv_tol=1e-11)
+        self.assertTrue(mf.converged)
+        original_coeff = mf.mo_coeff.get().copy()
+        previous_density = mf.make_rdm1().get()
+        scanner = gpu_hf.as_scanner(mf)
+        target = mol.set_geom_('H 0 0 0; H 0 0 1.7', inplace=False)
+        # max_cycle=0 is an actual fixed-density energy evaluation, not a claim
+        # of convergence. It distinguishes which initial guess was propagated.
+        scanner.max_cycle = 0
+        expected = target.RHF().energy_tot(dm=previous_density)
+        actual = scanner(target, dump_chk=False)
+        self.assertFalse(scanner.converged)
+        np.testing.assert_allclose(actual, expected, atol=1e-10, rtol=1e-10)
+        reference = target.RHF().run(conv_tol=1e-12)
+        theta = .25
+        rotation = np.array([[np.cos(theta), -np.sin(theta)],
+                             [np.sin(theta), np.cos(theta)]])
+        explicit = cupy.asarray(reference.make_rdm1(reference.mo_coeff @ rotation,
+                                                    reference.mo_occ))
+        before = explicit.get().copy()
+        expected = reference.energy_tot(dm=before)
+        self.assertGreater(abs(expected-actual), 1e-4)
+        kwargs = {'dm0': explicit, 'dump_chk': False}
+        actual = scanner(target, **kwargs)
+        np.testing.assert_allclose(actual, expected, atol=1e-10, rtol=1e-10)
+        np.testing.assert_array_equal(explicit.get(), before)
+        self.assertIs(kwargs['dm0'], explicit)
+        scanner.max_cycle = 50
+        actual = scanner(target, dump_chk=False)
+        self.assertTrue(scanner.converged)
+        np.testing.assert_allclose(actual, reference.e_tot, atol=1e-10, rtol=1e-10)
+        np.testing.assert_array_equal(mf.mo_coeff.get(), original_coeff)
+        np.testing.assert_allclose(mol.atom_coords()[1, 2], 1.4, atol=1e-14)
+
 
 if __name__ == "__main__":
     print("Full Tests for rhf")

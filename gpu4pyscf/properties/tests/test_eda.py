@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pyscf import scf as cpu_scf, dft as cpu_dft
+from pyscf.data import nist
+from gpu4pyscf import scf as gpu_scf, dft as gpu_dft
+from gpu4pyscf.properties import eda
 import unittest
 import pytest
 import numpy as np
@@ -494,7 +498,7 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
-    @pytest.mark.skip("Too slow, functionality roughly covered by corresponding density fitting test")
+    @unittest.skip("Too slow, functionality roughly covered by corresponding density fitting test")
     def test_almo_eda_2_wb97xv_tzvpp(self):
         ### Q-Chem input difference
         # $rem
@@ -594,7 +598,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_dft_energies[1:] - reference_dft_energies[1:])) < 1e-7
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_almo_eda_2_pbe0_charged(self):
+    def test_almo_eda_2_pbe0_charged_high_cost(self):
         ### Q-Chem input difference
         # $molecule
         # 0 1
@@ -922,6 +926,213 @@ class KnownValues(unittest.TestCase):
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+
+
+def _small_mf(mol, if_kernel=True, dispersion_free_xc=None):
+    assert dispersion_free_xc in (None, 'HF')
+    mf = gpu_scf.RHF(mol)
+    mf.conv_tol = 1e-11
+    mf.conv_tol_cpscf = 1e-10
+    mf.max_cycle = 60
+    if if_kernel:
+        mf.kernel()
+        assert mf.converged
+    return mf
+
+
+def _cpu_eda_pair_energy(basis_mol, eri, dm_i, dm_j, mol_i, mol_j):
+    e_ee = np.einsum('pqrs,pq,rs->', eri, dm_i, dm_j)
+    e_en = np.einsum('g,gij,ji->', mol_j.atom_charges(),
+                     basis_mol.intor('int1e_grids', grids=mol_j.atom_coords()), dm_i)
+    e_ne = np.einsum('g,gij,ji->', mol_i.atom_charges(),
+                     basis_mol.intor('int1e_grids', grids=mol_i.atom_coords()), dm_j)
+    distance = np.linalg.norm(mol_i.atom_coords()[:, None]-mol_j.atom_coords()[None], axis=2)
+    e_nn = np.sum(mol_i.atom_charges()[:, None]*mol_j.atom_charges()[None]/distance)
+    return e_ee-e_en-e_ne+e_nn
+
+
+class EDAFragments(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        centers = [np.zeros(3), np.array([5.5, .4, .2]), np.array([2., 5.3, .7])]
+        axes = [np.array([0., 0., 1.]), np.array([1., 0., 0.]), np.array([.6, .8, 0.])]
+        molecules = [pyscf.M(atom=[('H', center-.7*axis), ('H', center+.7*axis)],
+                            basis='sto-3g', unit='Bohr', verbose=0)
+                     for center, axis in zip(centers, axes)]
+        cls.tiny_eda_fragments = [_small_mf(mol) for mol in molecules]
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.tiny_eda_fragments
+
+    def test_eda_classical_pair_integrals_and_cache(self):
+        tiny_eda_fragments = self.tiny_eda_fragments
+        fragments = tiny_eda_fragments
+        merged = eda.merge_mol([mf.mol for mf in fragments])
+        eri = merged.intor('int2e')
+        offsets = np.cumsum([0]+[mf.mol.nao for mf in fragments])
+        density = []
+        for i, mf in enumerate(fragments):
+            dm = np.zeros((merged.nao, merged.nao))
+            dm[offsets[i]:offsets[i+1], offsets[i]:offsets[i+1]] = mf.make_rdm1().get()
+            density.append(dm)
+        expected = np.zeros((3, 3))
+        for i in range(3):
+            for j in range(i+1, 3):
+                expected[i, j] = _cpu_eda_pair_energy(merged, eri, density[i], density[j],
+                                                     fragments[i].mol, fragments[j].mol)
+        cache = {}
+        result = eda.get_eda_classical_electrostatic_energy(fragments, _small_mf, cache)
+        np.testing.assert_allclose(result, expected.sum(), atol=2e-11, rtol=0)
+        np.testing.assert_allclose(cache['classical_electrostatic_energy_pair'], expected, atol=2e-11, rtol=0)
+        cached_mol, cached_mf = cache['mol_sum'], cache['mf_sum']
+        np.testing.assert_allclose(eda.get_eda_classical_electrostatic_energy(fragments, _small_mf, cache),
+                                   result, atol=1e-13, rtol=0)
+        assert cache['mol_sum'] is cached_mol and cache['mf_sum'] is cached_mf
+
+    def test_eda_explicit_hessian_and_stage_accounting_high_cost(self):
+        tiny_eda_fragments = self.tiny_eda_fragments
+        fragments = tiny_eda_fragments
+        caches = []
+        values = []
+        for explicit in (False, True):
+            cache = {}
+            values.append(eda.get_eda_electrostatic_energy(fragments, _small_mf, cache,
+                                                           build_orbital_hessian=explicit))
+            caches.append(cache)
+        np.testing.assert_allclose(values[0], values[1], atol=2e-11, rtol=0)
+        cache = caches[1]
+        merged = cache['mol_sum']
+        eri = merged.intor('int2e')
+        occupied = cache['mocc_pauli'].get()
+        overlap = merged.intor('int1e_ovlp')
+        np.testing.assert_allclose(occupied.T @ overlap @ occupied, np.eye(3), atol=2e-12, rtol=0)
+        expected = np.zeros((3, 3))
+        density = [2*np.outer(occupied[:, i], occupied[:, i]) for i in range(3)]
+        for i in range(3):
+            for j in range(i+1, 3):
+                expected[i, j] = _cpu_eda_pair_energy(merged, eri, density[i], density[j],
+                                                     fragments[i].mol, fragments[j].mol)
+        np.testing.assert_allclose(cache['electrostatic_energy_pair'], expected, atol=2e-11, rtol=0)
+        # Keep computed physical orbitals, but let optional object caches rebuild.
+        dispersion_cache = {'mocc_pauli': cache['mocc_pauli']}
+        dispersion = eda.get_eda_dispersion_energy(fragments, _small_mf, dispersion_cache)
+        assert dispersion.shape == ()
+        np.testing.assert_allclose(float(dispersion), 0, atol=1e-12, rtol=0)  # HF is its own dispersion-free reference.
+        projectors = [eda._get_eda_polarization_FERF_subspace_projector(
+            mf, i, field_order=1, uncoupled_ferf=True) for i, mf in enumerate(fragments)]
+        polarized = {}
+        pol = eda.get_eda_polarization_energy(fragments, _small_mf, polarized, projectors)
+        assert pol <= 1e-10
+        transfer = {key: polarized[key] for key in ('mocc_polarized', 'total_frozen_energy', 'polarization_energy')}
+        ct = eda.get_eda_charge_transfer_energy(fragments, _small_mf, transfer)
+        assert ct <= 1e-10
+        reference = cpu_scf.RHF(merged).run(conv_tol=1e-12)
+        assert reference.converged
+        np.testing.assert_allclose(transfer['total_system_energy'], reference.e_tot, atol=2e-9, rtol=0)
+        np.testing.assert_allclose(transfer['total_frozen_energy']+pol+ct, reference.e_tot, atol=2e-9, rtol=0)
+        fragment_energy = sum(float(mf.e_tot) for mf in fragments)
+        interaction = transfer['total_frozen_energy']-fragment_energy+pol+ct
+        cpu_fragment_energy = sum(cpu_scf.RHF(mf.mol).run(conv_tol=1e-12).e_tot for mf in fragments)
+        np.testing.assert_allclose(interaction, reference.e_tot-cpu_fragment_energy, atol=2e-9, rtol=0)
+
+
+class EDAResponse(unittest.TestCase):
+    def test_uncoupled_ferf_subspace(self):
+        for order, rank in [(1, 2), (2, 3)]:
+            with self.subTest(order=order, rank=rank):
+                mol = pyscf.M(atom='H 0 0 -.7; H 0 0 .7', basis='6-31g', unit='Bohr', verbose=0)
+                reference = cpu_scf.RHF(mol).run(conv_tol=1e-12)
+                mf = reference.to_gpu()
+                actual = eda._get_eda_polarization_FERF_subspace_projector(mf, 0, field_order=order, uncoupled_ferf=True).get()
+                occupied = reference.mo_coeff[:, reference.mo_occ > 0]
+                virtual = reference.mo_coeff[:, reference.mo_occ == 0]
+                mass = mol.atom_mass_list()
+                origin = mass @ mol.atom_coords() / mass.sum()
+                with mol.with_common_orig(origin):
+                    fields = list(mol.intor('int1e_r'))
+                    if order == 2:
+                        quadrupoles = mol.intor('int1e_rr').reshape(3, 3, mol.nao, mol.nao)
+                        trace = np.einsum('xxij->ij', quadrupoles)
+                        quadrupoles = 1.5*(quadrupoles-np.eye(3)[:, :, None, None]*trace/3)
+                        # Redundant Cartesian traceless components span the same five fields.
+                        fields.extend(quadrupoles.reshape(9, mol.nao, mol.nao))
+                gap = reference.mo_energy[reference.mo_occ == 0, None]-reference.mo_energy[None, reference.mo_occ > 0]
+                vectors = [occupied]
+                for operator in fields:
+                    response = 2*(virtual.T @ operator @ occupied)/gap
+                    left, singular, _ = np.linalg.svd(response, full_matrices=False)
+                    vectors.append(virtual @ left[:, singular > 1e-4])
+                left, singular, _ = np.linalg.svd(np.concatenate(vectors, axis=1), full_matrices=False)
+                expected = left[:, singular > 1e-4]
+                assert actual.shape == expected.shape == (mol.nao, rank)
+                np.testing.assert_allclose(actual.T @ actual, np.eye(rank), atol=1e-12, rtol=0)
+                np.testing.assert_allclose(actual @ actual.T, expected @ expected.T, atol=2e-10, rtol=0)
+
+    def test_eda_pbe0_charged_energy_and_gradient_high_cost(self):
+        # Retain the charged pair's geometry; this is a separate, smaller basis/grid model.
+        molecules = [pyscf.M(atom=mol.atom, unit=mol.unit, basis='sto-3g',
+                             charge=mol.charge, spin=mol.spin, verbose=0)
+                     for mol in system_charged]
+        assert [mol.charge for mol in molecules] == [1, -1]
+        assert sum(mol.nao for mol in molecules) == 14
+        for mol, original in zip(molecules, system_charged):
+            np.testing.assert_allclose(mol.atom_coords(), original.atom_coords(), atol=1e-14, rtol=0)
+        grid = (30, 110)
+        # Tight SCF convergence controls density-sensitive gradient differences.
+        conv_tol = 1e-14
+        components, result = eval_ALMO_EDA_2_energies(
+            molecules, xc='PBE0', xc_grid=grid, conv_tol=conv_tol, conv_tol_cpscf=1e-9,
+            if_compute_gradient=True, grid_response=False, verbose=0)
+        merged = eda.merge_mol(molecules)
+        references = []
+        for mol in molecules + [merged]:
+            ref = cpu_dft.RKS(mol, xc='PBE0')
+            ref.grids.atom_grid = grid
+            ref.conv_tol = conv_tol
+            if mol is merged:
+                # The tight STO-3G charged complex has a small HOMO-LUMO gap. A
+                # small level shift preserves the converged state while making the
+                # local PySCF reference deterministic.
+                ref.level_shift = 0.1
+            template = gpu_dft.RKS(mol, xc='PBE0')
+            template.grids.atom_grid = grid
+            # Both implementations use the same physical quadrature definitions.
+            for setting in ('radi_method', 'radii_adjust', 'becke_scheme', 'prune'):
+                assert getattr(ref.grids, setting).__name__ == getattr(template.grids, setting).__name__
+            np.testing.assert_array_equal(ref.grids.atomic_radii, template.grids.atomic_radii)
+            ref.kernel()
+            assert ref.converged
+            references.append(ref)
+        energies = np.array([mf.e_tot for mf in references])
+        np.testing.assert_allclose(result['energy'], energies, atol=1e-9, rtol=0)
+        assert len(result['gradient']) == 3
+        for index, (ref, actual) in enumerate(zip(references, result['gradient'])):
+            gradient = ref.Gradients()
+            gradient.grid_response = False
+            expected = gradient.kernel()
+            actual = cp.asnumpy(actual)
+            assert actual.shape == (ref.mol.natm, 3)
+            np.testing.assert_allclose(actual, expected, atol=2e-7, rtol=0)
+        assert result['unit'] == 'au' and components['unit'] == 'kJ/mol'
+        factor = 1e-3*nist.HARTREE2J*nist.AVOGADRO
+        np.testing.assert_allclose(components['total'], (energies[-1]-sum(energies[:-1]))*factor,
+                                   atol=3e-6, rtol=0)
+        np.testing.assert_allclose(components['total'], components['frozen']+components['polarization']
+                                   + components['charge transfer'], atol=1e-8, rtol=0)
+        np.testing.assert_allclose(components['frozen'], components['electrostatic']
+                                   + components['dispersion']+components['pauli'], atol=1e-8, rtol=0)
+        assert components['polarization'] <= 1e-6 and components['charge transfer'] <= 1e-6
+        assert all(np.isfinite(value) for key, value in components.items() if key != 'unit')
+        offsets = np.cumsum([0]+[mol.nao for mol in molecules])
+        density = []
+        for begin, end, ref in zip(offsets[:-1], offsets[1:], references[:2]):
+            dm = np.zeros((merged.nao, merged.nao))
+            dm[begin:end, begin:end] = ref.make_rdm1()
+            density.append(dm)
+        classical = _cpu_eda_pair_energy(merged, merged.intor('int2e'), *density, *molecules)*factor
+        np.testing.assert_allclose(components['classical electrostatic'], classical, atol=3e-6, rtol=0)
+
 
 if __name__ == "__main__":
     print("Full Tests for ALMO EDA 2 energies")

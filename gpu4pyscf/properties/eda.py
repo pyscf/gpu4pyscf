@@ -915,7 +915,8 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache, G_projector_list):
             F_stoll_i = None
             S_stoll_i = None
 
-            F_S_list.append((F_stoll_i_ii, S_stoll_i_ii))
+            F_S_list.append((cp.asarray(F_stoll_i_ii, order='C'),
+                             cp.asarray(S_stoll_i_ii, order='C')))
             F_stoll_i_ii = None
             S_stoll_i_ii = None
 

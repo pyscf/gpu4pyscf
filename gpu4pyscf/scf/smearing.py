@@ -32,7 +32,7 @@ def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
     """Fermi-Dirac or Gaussian smearing"""
     if isinstance(mf, _SmearingSCF):
         mf.sigma = sigma
-        mf.method = method
+        mf.smearing_method = method
         mf.mu0 = mu0
         mf.fix_spin = fix_spin
         return mf
@@ -270,5 +270,5 @@ class _SmearingSCF:
 def from_cpu(method):
     from pyscf.scf.addons import _SmearingSCF
     assert isinstance(method, _SmearingSCF)
-    return smearing(method.undo_smearing().to_cpu(), method.sigma,
+    return smearing(method.undo_smearing().to_gpu(), method.sigma,
                     method.smearing_method, method.mu0, method.fix_spin)

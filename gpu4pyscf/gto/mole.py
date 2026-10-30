@@ -158,7 +158,7 @@ def sort_atoms(mol):
     """
     from scipy.spatial import distance_matrix
     charges = mol.atom_charges()
-    heavy_atoms = np.argwhere(charges != 1).ravel()
+    heavy_atoms = np.where(charges != 1)[0]
     if heavy_atoms.size == 0:
         return range(mol.natm)
 
@@ -179,7 +179,8 @@ def sort_atoms(mol):
         current_node = next_node
 
     # Assign Hydrogen atoms to heavy atoms
-    full_path = [[heavy_atoms[idx]] for idx in path]
+    # Hydrogen assignments use original heavy-atom indices, not traversal ranks.
+    full_path = [[idx] for idx in heavy_atoms]
     hydrogen_atoms = np.argwhere(charges == 1).ravel()
     if hydrogen_atoms.size > 0:
         dist = distance_matrix(atom_coords[hydrogen_atoms], atom_coords[heavy_atoms])
@@ -187,7 +188,7 @@ def sort_atoms(mol):
             heavy_idx = np.argmin(d)
             full_path[heavy_idx].append(hydrogen_atoms[i])
 
-    return [x for heavy_list in full_path for x in heavy_list]
+    return [x for idx in path for x in full_path[idx]]
 
 def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
                 sparse_coeff=False):
@@ -705,7 +706,7 @@ class SortedGTO:
         mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
-            return self.mat_dot_C(mat)
+            return self.mat_dot_C(mat, out)
         elif mat_ndim == 2:
             mat = mat[None]
 
@@ -752,7 +753,7 @@ class SortedGTO:
         mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
-            return self.mat_dot_CT(mat)
+            return self.mat_dot_CT(mat, out)
         elif mat_ndim == 2:
             mat = mat[None]
 
@@ -808,10 +809,14 @@ class SortedGTO:
         counts, nrow, nao_sorted = mat.shape
         assert nao_sorted == self.p_ao_loc[-1]
         if mat_dtype == np.complex128:
-            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+            mat = mat.view(np.float64).reshape(counts, nrow, nao_sorted, 2)
+            mat = cp.asarray(mat.transpose(0, 3, 1, 2), order='C')
+            complex_out = ndarray((counts, nrow, nao), dtype=np.complex128, buffer=out)
+            out = cp.empty((counts, 2, nrow, nao))
+            nrow *= 2
         else:
             mat = cp.asarray(mat, dtype=np.float64, order='C')
-        out = ndarray((counts, nrow, nao), buffer=out)
+            out = ndarray((counts, nrow, nao), buffer=out)
         out[:] = 0.
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -832,10 +837,9 @@ class SortedGTO:
             assert err == 0
 
         if mat_dtype == np.complex128:
-            mat = None
-            out, tmp = cp.empty((counts, nrow, nao), dtype=np.complex128), out
-            out.real = tmp[:,:nrow]
-            out.imag = tmp[:,nrow:]
+            complex_out.real = out[:,0]
+            complex_out.imag = out[:,1]
+            out = complex_out
         if mat_ndim == 1:
             out = out[0,0]
         elif mat_ndim == 2:
@@ -859,10 +863,14 @@ class SortedGTO:
         counts, nrow, nao = mat.shape
         assert nao == self.mol.nao
         if mat_dtype == np.complex128:
-            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+            mat = mat.view(np.float64).reshape(counts, nrow, nao, 2)
+            mat = cp.asarray(mat.transpose(0, 3, 1, 2), order='C')
+            complex_out = ndarray((counts, nrow, nao_sorted), dtype=np.complex128, buffer=out)
+            out = cp.empty((counts, 2, nrow, nao_sorted))
+            nrow *= 2
         else:
             mat = cp.asarray(mat, dtype=np.float64, order='C')
-        out = ndarray((counts, nrow, nao_sorted), buffer=out)
+            out = ndarray((counts, nrow, nao_sorted), buffer=out)
         out[:] = 0.
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -883,10 +891,9 @@ class SortedGTO:
             assert err == 0
 
         if mat_dtype == np.complex128:
-            mat = None
-            out, tmp = cp.empty((counts, nrow, nao_sorted), dtype=np.complex128), out
-            out.real = tmp[:,:nrow]
-            out.imag = tmp[:,nrow:]
+            complex_out.real = out[:,0]
+            complex_out.imag = out[:,1]
+            out = complex_out
         if mat_ndim == 1:
             out = out[0,0]
         elif mat_ndim == 2:

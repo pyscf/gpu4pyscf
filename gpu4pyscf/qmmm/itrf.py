@@ -46,6 +46,7 @@ def qmmm_for_scf(method, mm_mol):
 
     if isinstance(method, QMMM):
         method.mm_mol = mm_mol
+        method._e_nuc_ext = None
         return method
 
     cls = QMMMSCF
@@ -65,6 +66,8 @@ class QMMMSCF(QMMM):
         if mm_mol is None:
             mm_mol = gto.Mole()
         self.mm_mol = mm_mol
+        # A bare method returned by undo_qmmm may still carry an old private cache.
+        self._e_nuc_ext = None
 
     def undo_qmmm(self):
         obj = lib.view(self, lib.drop_class(self.__class__, QMMM))
@@ -87,7 +90,7 @@ class QMMMSCF(QMMM):
         if mol is None:
             mol = self.mol
         h1e = super().get_hcore(mol)
-        h1e -= _mm_charge_integrals(self.mm_mol, self.mol, int1e_grids)
+        h1e -= _mm_charge_integrals(self.mm_mol, mol, int1e_grids)
         return h1e
 
     def energy_nuc(self):
@@ -131,7 +134,8 @@ def add_mm_charges_grad(scf_grad, atoms_or_coords, charges, radii=None, unit=Non
     mm_mol = mm_mole.create_mm_mol(atoms_or_coords, charges,
                                    radii=radii, unit=unit)
     mm_grad = qmmm_grad_for_scf(scf_grad)
-    mm_grad.base.mm_mol = mm_mol
+    # Reuse the SCF update path so the nuclear/MM energy cache is invalidated.
+    qmmm_for_scf(mm_grad.base, mm_mol)
     return mm_grad
 
 mm_charge_grad = add_mm_charges_grad

@@ -239,6 +239,8 @@ class RHF(hf.RHF):
         '''Constructus the lower-triangular part of the Veff matrix.'''
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
+        if dm_or_wfn is None:
+            dm_or_wfn = self.make_wfn(self.mo_coeff, self.mo_occ)
 
         omega = mol.omega
         if omega in self._opt_gpu:
