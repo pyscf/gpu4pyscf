@@ -357,7 +357,6 @@ class KnownValues(unittest.TestCase):
     #test analyze
     #test mulliken_pop
     #test mulliken_meta
-    #test stability
     #test newton
     #test x2c
     #test dipole

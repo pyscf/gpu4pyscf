@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import numpy
-import scipy
-from functools import reduce
-from pyscf import lib
-from pyscf.lib import logger
-from pyscf.scf import hf, hf_symm, uhf_symm
-from pyscf.scf import _response_functions
-from pyscf.soscf import newton_ah
-from pyscf import __config__
+import numpy as np
+import cupy as cp
+from gpu4pyscf.lib import logger
+from gpu4pyscf.scf.soscf import gen_g_hop_rhf, gen_g_hop_uhf
+from gpu4pyscf.fci.direct_spin1 import davidson1
+from gpu4pyscf.scf.gdm import get_nocc, packed_apply_exp_U
+from gpu4pyscf import __config__
 
 STAB_NROOTS = getattr(__config__, 'stab_nroots', 3)
-STAB_TOL = getattr(__config__, 'stab_tol', 1e-4)
+STAB_TOL = getattr(__config__, 'stab_tol', 1e-6)
 
 def rhf_stability(mf, internal=True, external=False, verbose=None, return_status=False,
                   nroots=STAB_NROOTS, tol=STAB_TOL):
@@ -115,13 +113,6 @@ def rohf_stability(mf, internal=True, external=False, verbose=None, return_statu
                    nroots=STAB_NROOTS, tol=STAB_TOL):
     raise NotImplementedError('ROHF stability analysis is not available in GPU4PySCF yet.')
 
-def dump_status(log, stable, method_class, stab_type):
-    if not stable:
-        log.note(method_class + f' wavefunction has an {stab_type} instability')
-    else:
-        log.note(method_class + f' wavefunction is stable in the {stab_type} '
-                 'stability analysis')
-
 def ghf_stability(mf, verbose=None, return_status=False,
                   nroots=STAB_NROOTS, tol=STAB_TOL):
     raise NotImplementedError('GHF stability analysis is not available in GPU4PySCF yet.')
@@ -130,47 +121,58 @@ def dhf_stability(mf, verbose=None, return_status=False,
                   nroots=STAB_NROOTS, tol=STAB_TOL):
     raise NotImplementedError('DHF stability analysis is not available in GPU4PySCF yet.')
 
-def rhf_internal(mf, with_symmetry=True, verbose=None, return_status=False,
+def dump_status(log, stable, method_class, stab_type):
+    if not stable:
+        log.note(method_class + f' wavefunction has an {stab_type} instability')
+    else:
+        log.note(method_class + f' wavefunction is stable in the {stab_type} '
+                 'stability analysis')
+
+def rhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,
                  nroots=STAB_NROOTS, tol=STAB_TOL):
+    assert not with_symmetry
     log = logger.new_logger(mf, verbose)
-    g, hop, hdiag = newton_ah.gen_g_hop_rhf(mf, mf.mo_coeff, mf.mo_occ,
-                                            with_symmetry=with_symmetry)
+    g, hop, hdiag = gen_g_hop_rhf(mf, mf.mo_coeff, mf.mo_occ)
     hdiag *= 2
-    def precond(dx, e, x0):
-        hdiagd = hdiag - e
-        hdiagd[abs(hdiagd)<1e-8] = 1e-8
-        return dx/hdiagd
+    def precond(residuals, eigenvalues):
+        hdiagd = hdiag[None, :] - eigenvalues[:, None]
+        hdiagd[cp.abs(hdiagd)<1e-8] = 1e-8
+        return residuals / hdiagd
     # The results of hop(x) corresponds to a displacement that reduces
     # gradients g.  It is the vir-occ block of the matrix vector product
     # (Hessian*x). The occ-vir block equals to x2.T.conj(). The overall
     # Hessian for internal rotation is x2 + x2.T.conj(). This is
     # the reason we apply (.real * 2) below
-    def hessian_x(x):
-        return hop(x).real * 2
+    def hessian_x(xs):
+        return cp.stack([hop(x).real * 2 for x in xs])
 
-    x0 = numpy.zeros_like(g)
-    x0[g!=0] = 1. / hdiag[g!=0]
-    if not with_symmetry:  # allow to break point group symmetry
-        x0[numpy.argmin(hdiag)] = 1
-    e, v = lib.davidson(hessian_x, x0, precond, tol=tol, verbose=log, nroots=nroots)
+    nguess = min(nroots * 2, g.size)
+    order = cp.argsort(hdiag)
+    x0 = cp.zeros((nguess, g.size), dtype=hdiag.dtype)
+    x0[0, g!=0] = 1. / hdiag[g!=0]
+    for i_guess in range(nguess - 1):
+        x0[i_guess + 1, order[i_guess]] = 1
+
+    converged, e, v = davidson1(hessian_x, x0, precond, tol=tol, verbose=log, nroots=nroots)
+    assert np.all(converged), "rhf_internal stability analysis Davidson solver not converge"
+
     log.info('rhf_internal: lowest eigs of H = %s', e)
     if nroots != 1:
         e, v = e[0], v[0]
+
     stable = not (e < -1e-5)
     dump_status(log, stable, f'{mf.__class__}', 'internal')
     if stable:
         mo = mf.mo_coeff
     else:
-        mo = _rotate_mo(mf.mo_coeff, mf.mo_occ, v)
+        nmo = mf.mo_occ.shape[-1]
+        nocc = get_nocc(mf.mo_occ)
+        kappa = -v.reshape((nmo - nocc, nocc)).T # The kappa from gdm is the upper right corner (nocc, nvir), the kappa from soscf is the lower left corner (nvir, nocc).
+        mo = packed_apply_exp_U(mf.mo_coeff, nocc, kappa)
     if return_status:
         return mo, stable
     else:
         return mo
-
-def _rotate_mo(mo_coeff, mo_occ, dx):
-    dr = hf.unpack_uniq_var(dx, mo_occ)
-    u = newton_ah.expmat(dr)
-    return numpy.dot(mo_coeff, u)
 
 def _gen_hop_rhf_external(mf, with_symmetry=True, verbose=None):
     mol = mf.mol
