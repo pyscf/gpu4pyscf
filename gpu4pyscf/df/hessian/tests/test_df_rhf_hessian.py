@@ -235,6 +235,48 @@ class KnownValues(unittest.TestCase):
             e2 = eval_grad(i, x, -disp)
             assert abs((e1 - e2)/(2*disp) - ejk[i,:,x]).max() < 1e-5
 
+    def test_j_energy_buffer_sizes(self):
+        # buf0 and buf1, the cupy.einsum copy of buf1 (einsum_copy=True) and
+        # j3c_full must fit in 90% of the free memory
+        for word_avail, naux, nao, nao_pair in [
+                (37_100_000_000//8, 3122, 753, 283881),
+                (44_600_000_000//8, 3014, 716, 205348),
+                (180_000_000_000//8, 9000, 3000, 1500000),
+                (10**8, 500, 200, 20100)]:
+            for einsum_copy in (False, True):
+                batch_size, blksize = df_rhf_hess._j_energy_buffer_sizes(
+                    word_avail, naux, nao, nao_pair, einsum_copy)
+                assert 0 < blksize <= batch_size <= naux
+                nbuf = 3 if einsum_copy else 2
+                peak = nbuf*3*nao_pair*batch_size + 3*nao**2*blksize
+                assert peak <= word_avail * .9
+                # cuTENSOR keeps the sizes of 094af5a, cupy.einsum those of #992
+                ref = min(naux, int(word_avail*0.75) // (3*nao_pair*nbuf))
+                assert batch_size == ref
+                assert blksize == min(ref, int(word_avail*0.15) // (3*nao**2*8) * 8)
+
+    def test_j_energy_buffer_dispatch(self):
+        # _j_energy_per_atom reserves the einsum copy only when contract() is
+        # not cuTENSOR
+        from gpu4pyscf.lib import cutensor
+        pmol = SortedMole.from_mol(mol, decontract=True)
+        opt = int3c2e.Int3c2eOpt(pmol, auxmol).build()
+        dm = cp.eye(mol.nao) * .1
+
+        class Stop(Exception):
+            pass
+        def fake_sizes(word_avail, naux, nao, nao_pair, einsum_copy=False):
+            seen.append(einsum_copy)
+            raise Stop
+
+        for engine, einsum_copy in [(None, False), ('cupy', True)]:
+            seen = []
+            with lib.temporary_env(cutensor, contract_engine=engine), \
+                    lib.temporary_env(df_rhf_hess, _j_energy_buffer_sizes=fake_sizes):
+                with self.assertRaises(Stop):
+                    df_rhf_hess._j_energy_per_atom(opt, dm)
+            assert seen == [einsum_copy]
+
     def test_jk_ip1_finite_diff(self):
         from pyscf.df import incore
         mol2 = mol + mol
