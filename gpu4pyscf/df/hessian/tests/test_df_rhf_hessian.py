@@ -250,6 +250,32 @@ class KnownValues(unittest.TestCase):
                 nbuf = 3 if einsum_copy else 2
                 peak = nbuf*3*nao_pair*batch_size + 3*nao**2*blksize
                 assert peak <= word_avail * .9
+                # cuTENSOR keeps the sizes of 094af5a, cupy.einsum those of #992
+                ref = min(naux, int(word_avail*0.75) // (3*nao_pair*nbuf))
+                assert batch_size == ref
+                assert blksize == min(ref, int(word_avail*0.15) // (3*nao**2*8) * 8)
+
+    def test_j_energy_buffer_dispatch(self):
+        # _j_energy_per_atom reserves the einsum copy only when contract() is
+        # not cuTENSOR
+        from gpu4pyscf.lib import cutensor
+        pmol = SortedMole.from_mol(mol, decontract=True)
+        opt = int3c2e.Int3c2eOpt(pmol, auxmol).build()
+        dm = cp.eye(mol.nao) * .1
+
+        class Stop(Exception):
+            pass
+        def fake_sizes(word_avail, naux, nao, nao_pair, einsum_copy=False):
+            seen.append(einsum_copy)
+            raise Stop
+
+        for engine, einsum_copy in [(None, False), ('cupy', True)]:
+            seen = []
+            with lib.temporary_env(cutensor, contract_engine=engine), \
+                    lib.temporary_env(df_rhf_hess, _j_energy_buffer_sizes=fake_sizes):
+                with self.assertRaises(Stop):
+                    df_rhf_hess._j_energy_per_atom(opt, dm)
+            assert seen == [einsum_copy]
 
     def test_jk_ip1_finite_diff(self):
         from pyscf.df import incore
