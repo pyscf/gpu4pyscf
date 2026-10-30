@@ -295,24 +295,52 @@ def test_kpoint_scf_factory(spin, name):
     if name == 'KKS':
         assert mf.xc == 'pbe'
 
-@pytest.mark.parametrize('method', ['CT_dot_mat', 'C_dot_mat', 'mat_dot_C', 'mat_dot_CT'])
+@pytest.mark.parametrize('method', ['CT_dot_mat', 'C_dot_mat'])
 @pytest.mark.parametrize('ndim', [1, 2, 3])
-def test_sort_complex_ao(method, ndim):
+def test_sort_complex_ao_left_multiply(method, ndim):
     molecule = pyscf.M(atom='H 0 0 0; F 0 0 1', basis='ccpvdz', verbose=0)
     sorted_mol = mole_gpu.SortedGTO.from_mol(molecule)
     c = sorted_mol.ctr_coeff.get()
-    left = method in ('CT_dot_mat', 'C_dot_mat')
-    transform = c.T if method in ('CT_dot_mat', 'mat_dot_CT') else c
-    nin = transform.shape[1] if left else transform.shape[0]
-    shape = (nin,) if ndim == 1 else ((nin, 3) if left else (3, nin))
-    if ndim == 3:
-        shape = (2,) + shape
-    rng = np.random.default_rng(547)
-    mat = rng.normal(size=shape) + 1j*rng.normal(size=shape)
+    transform = c.T if method == 'CT_dot_mat' else c
+    nin = transform.shape[1]
+    if ndim == 1:
+        shape = (nin,)
+    elif ndim == 2:
+        shape = (nin, 3)
+    else:
+        shape = (2, nin, 3)
+    cp.random.seed(547)
+    mat = cp.random.rand(*shape) + 1j*cp.random.rand(*shape)
     host = mat.get()
-    if ndim == 2:
-        mat = host
-    expected = transform @ host if left else host @ transform
+    expected = transform @ host
+    # Vector interfaces are equivalent to the corresponding matrix product.
+    out = cp.empty(expected.shape, dtype=np.complex128) if ndim != 2 else None
+    actual = getattr(sorted_mol, method)(mat, out=out)
+    assert actual.shape == expected.shape and actual.dtype == np.complex128
+    if out is not None:
+        assert actual.data.ptr == out.data.ptr
+    np.testing.assert_allclose(actual.get(), expected, atol=2e-12, rtol=2e-12)
+    np.testing.assert_array_equal(cp.asnumpy(mat), host)
+
+
+@pytest.mark.parametrize('method', ['mat_dot_C', 'mat_dot_CT'])
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_sort_complex_ao_right_multiply(method, ndim):
+    molecule = pyscf.M(atom='H 0 0 0; F 0 0 1', basis='ccpvdz', verbose=0)
+    sorted_mol = mole_gpu.SortedGTO.from_mol(molecule)
+    c = sorted_mol.ctr_coeff.get()
+    transform = c.T if method == 'mat_dot_CT' else c
+    nin = transform.shape[0]
+    if ndim == 1:
+        shape = (nin,)
+    elif ndim == 2:
+        shape = (3, nin)
+    else:
+        shape = (2, 3, nin)
+    cp.random.seed(547)
+    mat = cp.random.rand(*shape) + 1j*cp.random.rand(*shape)
+    host = mat.get()
+    expected = host @ transform
     # Vector interfaces are equivalent to the corresponding matrix product.
     out = cp.empty(expected.shape, dtype=np.complex128) if ndim != 2 else None
     actual = getattr(sorted_mol, method)(mat, out=out)

@@ -35,7 +35,7 @@ def positive_response_roots(w, v, nroots, env):
     # convergence, even though the stable full response has real eigenvalues.
     xp = cp.get_array_module(w)
     idx = xp.flatnonzero(w.real > 1e-8)
-    if env['dtype'] == np.float64:
+    if env['heff'].dtype == np.float64:
         idx = idx[abs(w[idx].imag) < 1e-8]
         return _eigs_cmplx2real(w, v, idx, real_eigenvectors=True)
     idx = idx[xp.argsort(w[idx].real)]
