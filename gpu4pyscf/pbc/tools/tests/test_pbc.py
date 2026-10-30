@@ -2,6 +2,8 @@
 # Licensed under the Apache License, Version 2.0.
 """Fourier and truncated Coulomb contracts for physical boundary conditions."""
 import numpy as np
+import pyscf
+from packaging.version import Version
 import cupy as cp
 import pytest
 from pyscf.pbc import gto
@@ -10,6 +12,8 @@ from gpu4pyscf.pbc.tools import pbc
 
 
 @pytest.mark.parametrize('omega', [0., .8, -.8])
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                     reason='PySCF 2.8: no spherical 0D Coulomb cutoff')
 def test_isolated_cubic_coulomb_kernel(omega):
     cell = gto.M(atom='He 0 0 0', basis='sto-3g', a=np.eye(3)*8,
                  unit='Bohr', dimension=0, mesh=[7]*3, verbose=0)

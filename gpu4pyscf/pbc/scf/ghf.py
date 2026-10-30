@@ -62,16 +62,16 @@ def _df_jk(mf, dm, hermi, kpts, kpts_band, with_j, with_k, omega):
 
     # FFTDF needs the full Hermitian density for J: taking the real part of
     # rho from dm.imag separately loses its contribution at nonzero k-points.
-    if not cp.iscomplexobj(dm) or not isinstance(mf.with_df, GDF):
+    if not isinstance(mf.with_df, GDF):
         return build(dm, hermi)
 
-    vjR, vkR = build(cp.asarray(dm.real))
-    vjI, vkI = build(cp.asarray(dm.imag))
-    vj = vk = None
-    if with_j:
-        vj = vjR + vjI * 1j
-    if with_k:
-        vk = vkR + vkI * 1j
+    vj, vk = build(cp.asarray(dm.real, order='C'), hermi)
+    if cp.iscomplexobj(dm):
+        vjI, vkI = build(cp.asarray(dm.imag, order='C'))
+        if with_j:
+            vj = vj + vjI * 1j
+        if with_k:
+            vk = vk + vkI * 1j
     return vj, vk
 
 def _get_jk(mf, dm, hermi, kpts, kpts_band, with_j, with_k, omega=None):

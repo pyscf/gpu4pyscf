@@ -180,6 +180,8 @@ class KSCFSmearing(unittest.TestCase):
     def tearDownClass(cls):
         del cls.small_kuhf
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: older smearing optimizer and untagged effective potential')
     def test_kuhf_spectral_occupations_and_entropy(self):
         for fix_spin, mu in [(False, None), (False, .07), (True, None),
                              (True, .07), (True, (-.04, .12))]:
@@ -224,6 +226,8 @@ class KSCFSmearing(unittest.TestCase):
         np.testing.assert_allclose(gpu.entropy, entropy, atol=3e-13, rtol=3e-13)
         np.testing.assert_allclose(gpu.entropy, cpu.entropy, atol=2e-13, rtol=2e-13)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: older smearing optimizer and untagged effective potential')
     def test_kuhf_smearing_energy_and_gradient_identities(self):
         small_kuhf = self.small_kuhf
         cpu_base, gpu_base = small_kuhf

@@ -19,6 +19,7 @@ import cupy as cp
 from pyscf.pbc import gto as pbcgto
 from pyscf.x2c import x2c as x2c_cpu
 import pyscf
+from packaging.version import Version
 from pyscf import lib
 from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.x2c import sfx2c1e as sfx2c1e_cpu
@@ -188,10 +189,10 @@ class SmallScalarX2C(unittest.TestCase):
                 default = method()
                 single = method(kpts=np.zeros(3))
                 batch = method(kpts=np.zeros((1, 3)))
-                self.assertEqual(default.ndim, 2)
-                self.assertEqual(default.shape, single.shape)
+                self.assertEqual(default.ndim, 3)
+                self.assertEqual(default.shape, batch.shape)
                 self.assertEqual(batch.shape, (1, *single.shape))
-                np.testing.assert_allclose(default.get(), single.get(), atol=1e-12, rtol=0)
+                np.testing.assert_allclose(default.get(), batch.get(), atol=1e-12, rtol=0)
                 np.testing.assert_allclose(batch[0].get(), single.get(), atol=1e-12, rtol=0)
 
     def test_xmat_decoupling_and_hcore_reconstruction(self):
@@ -220,7 +221,9 @@ class SmallScalarX2C(unittest.TestCase):
             np.testing.assert_allclose(c.T @ primitive_h @ c, hcore[k], atol=1e-8, rtol=0)
         np.testing.assert_allclose(helper.get_xmat(kpts=kpts[1]).get(), x[1], atol=1e-12, rtol=0)
 
-    def test_standalone_helper_cpu_roundtrip(self):
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: standalone X2C helper has no to_gpu')
+    def test_to_cpu(self):
         cpu = sfx2c1e_cpu.SpinFreeX2CHelper(self.cell)
         cpu.approx = '1E'
         gpu = cpu.to_gpu()
@@ -232,8 +235,11 @@ class SmallScalarX2C(unittest.TestCase):
         self.assertIs(returned.cell, returned.mol)
         np.testing.assert_array_equal(returned.cell.atom_coords(), self.cell.atom_coords())
         self.assertEqual(returned.approx, '1E')
-        np.testing.assert_allclose(gpu.get_hcore().get(), cpu.get_hcore(), atol=1e-8, rtol=0)
-        np.testing.assert_allclose(returned.get_hcore(), cpu.get_hcore(), atol=1e-12, rtol=0)
+        kpts = np.zeros((1, 3))
+        np.testing.assert_allclose(gpu.get_hcore(kpts=kpts).get(), cpu.get_hcore(kpts=kpts),
+                                   atol=1e-8, rtol=0)
+        np.testing.assert_allclose(returned.get_hcore(kpts=kpts), cpu.get_hcore(kpts=kpts),
+                                   atol=1e-12, rtol=0)
 
     def test_orbital_pari_cart2sph(self):
         cell = pyscf.M(atom='He .2 .3 .4', a=np.eye(3)*7, unit='Bohr',

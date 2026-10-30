@@ -15,6 +15,8 @@
 import unittest
 import numpy as np
 import cupy as cp
+import pyscf
+from packaging.version import Version
 from pyscf import lib
 from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.pbc import dft
@@ -222,6 +224,8 @@ class KnownValues(unittest.TestCase):
         assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
         assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
 
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.14'),
+                     'Temporarily disabled for PySCF <= 2.14: CPU KUHF empty-beta occupations')
     def test_fully_polarized_kpoint_occupations(self):
         from pyscf.pbc.scf import KUHF as CpuKUHF
         cell = pbcgto.M(atom='H .2 .3 .4', spin=1, unit='Bohr',

@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import cupy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import lib
 from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.gto import mole as mole_gpu
@@ -274,6 +275,8 @@ C S
 
 @pytest.mark.parametrize('spin', [0, 1])
 @pytest.mark.parametrize('name', ['KHF', 'KKS'])
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                     reason='PySCF 2.8: missing _MoleLazyCallAdapter')
 def test_kpoint_scf_factory(spin, name):
     atom = 'H 0 0 0' if spin else 'He 0 0 0'
     cpu = pbcgto.M(atom=atom, basis='sto-3g', spin=spin, verbose=0,
@@ -294,8 +297,9 @@ def test_kpoint_scf_factory(spin, name):
 
 @pytest.mark.parametrize('method', ['CT_dot_mat', 'C_dot_mat', 'mat_dot_C', 'mat_dot_CT'])
 @pytest.mark.parametrize('ndim', [1, 2, 3])
-def test_direct_complex_contraction_matrices(small_sorted_gto, method, ndim):
-    _, sorted_mol = small_sorted_gto
+def test_direct_complex_contraction_matrices(method, ndim):
+    molecule = pyscf.M(atom='H 0 0 0; F 0 0 1', basis='ccpvdz', verbose=0)
+    sorted_mol = mole_gpu.SortedGTO.from_mol(molecule)
     c = sorted_mol.ctr_coeff.get()
     left = method in ('CT_dot_mat', 'C_dot_mat')
     transform = c.T if method in ('CT_dot_mat', 'mat_dot_CT') else c

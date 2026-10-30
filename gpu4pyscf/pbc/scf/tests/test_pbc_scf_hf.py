@@ -15,6 +15,8 @@
 import unittest
 from scipy.linalg import eigh
 import numpy as np
+import pyscf
+from packaging.version import Version
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import hf as pbchf_cpu
@@ -398,6 +400,8 @@ class RestrictedSCFProperties(unittest.TestCase):
             assert gpu.converged and cpu.converged
             cls.models[name] = gpu, cpu
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: CPU occupations use a different container')
     def test_uneven_unoccupied_orbitals(self):
         from gpu4pyscf.pbc.scf import khf
         from pyscf.pbc.scf import khf as cpu_khf

@@ -1210,7 +1210,7 @@ class SpinFlipTDA(TDBase):
                 Oscillator strength(s) between the reference and target state(s).
         '''
         assert 1 <= ref <= len(self.xy)
-        if state == ref:
+        if np.isscalar(state) and state == ref:
             raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
@@ -1237,7 +1237,7 @@ class SpinFlipTDA(TDBase):
         Only applicable to length gauge.
         '''
         assert 1 <= ref <= len(self.xy)
-        if state == ref:
+        if np.isscalar(state) and state == ref:
             raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1

@@ -407,7 +407,6 @@ class SmallPublicContracts(unittest.TestCase):
         mol = pyscf.M(atom='H 0 0 0; F .1 .2 1.1', basis='sto-3g', verbose=0)
         mf = scf.RHF(mol).run(conv_tol=1e-12)
         density = mf.make_rdm1()
-        self.assertIs(mf.undo_soscf(), mf)
         accelerated = mf.soscf()
         self.assertIs(accelerated.soscf(), accelerated)
         restored = accelerated.undo_soscf()

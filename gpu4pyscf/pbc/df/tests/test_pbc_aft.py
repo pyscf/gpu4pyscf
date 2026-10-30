@@ -16,6 +16,7 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import lib
 from pyscf.pbc import gto as pgto
 from pyscf.pbc import tools as pbc_tools
@@ -62,6 +63,8 @@ class AFTProtocols(unittest.TestCase):
                    'H': [[0, [.6, 1.]]]}, pseudo='gth-pade',
             precision=1e-9, verbose=0)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
     def test_gamma_matrices_and_cpu_conversion(self):
         cell = self.cell
         mydf = aft.AFTDF(cell)
@@ -133,6 +136,8 @@ class AFTProtocols(unittest.TestCase):
         self.assertIs(mydf.cell, moved)
         np.testing.assert_array_equal(mydf.mesh, original_mesh)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
     def test_symmetry_kpoints_reset(self):
         cell = self.cell
         points = cell.make_kpts([3, 1, 1], time_reversal_symmetry=True)
@@ -183,9 +188,13 @@ class AFTProtocols(unittest.TestCase):
                 np.testing.assert_allclose(actual.get(), expected * weight * lr,
                                            atol=1e-13, rtol=1e-12)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
     def test_long_range_mesh_and_weighted_kernels_gamma(self):
         self._check_long_range_mesh_and_weighted_kernels(np.zeros(3))
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
     def test_long_range_mesh_and_weighted_kernels_nonzero_kpoint(self):
         self._check_long_range_mesh_and_weighted_kernels(np.array([.13, -.07, .09]))
 

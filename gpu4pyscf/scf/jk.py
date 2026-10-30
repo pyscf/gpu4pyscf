@@ -923,11 +923,15 @@ class _VHFOpt:
             else:
                 scripts.append('jk->s1il')
             shls_excludes = [0, h_shls[0]] * 4
-            vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                     dms, 1, mol._atm, mol._bas, mol._env,
-                                     shls_excludes=shls_excludes)
+            assert (lr_factor == sr_factor == 1 or
+                    (lr_factor, sr_factor) == (0, 1) or
+                    (lr_factor, sr_factor) == (1, 0))
+            with mol.with_range_coulomb(omega):
+                vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
+                                         dms, 1, mol._atm, mol._bas, mol._env,
+                                         shls_excludes=shls_excludes)
             vk1 = asarray(vs_h[0])
-            if hermi:
+            if hermi == 1:
                 vk1 = hermi_triu(vk1)
             vk += vk1
         return vk

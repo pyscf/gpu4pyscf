@@ -458,7 +458,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
 
         x0 = _gen_x0(asarray(v), xs)
         ax0 = xt = _gen_ax0(asarray(v), ax)
-        xt -= w[:,None] * x0
+        xt -= cp.asarray(w)[:,None] * x0
         ax0 = None
         if x0sym is not None:
             xt_ir = v_ir[:space_inc]
@@ -500,7 +500,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
             if x0sym is None:
                 xt = _symmetric_orth(xt)
             else:
-                xt_ir = xt_ir[xt_to_keep]
+                xt_ir = xt_ir[xt_to_keep.get()]
                 xt_orth = []
                 xt_orth_ir = []
                 for ir in set(xt_ir):

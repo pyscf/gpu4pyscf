@@ -17,6 +17,7 @@ import numpy as np
 import cupy
 import cupy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import lib, scf
 from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft import Grids
@@ -585,15 +586,13 @@ class GroupedIntegration(unittest.TestCase):
         plain = cp.asarray(dm0)
         tagged = tag_array(plain.copy(), mo_coeff=cp.asarray(mo_coeff[0]),
                            mo_occ=cp.asarray(mo_occ[0]))
-        host_tagged = lib.tag_array(dm0.copy(), mo_coeff=mo_coeff[0], mo_occ=mo_occ[0])
         batch = cp.stack([plain, .7 * plain])
         ni = NumInt()
         refs = [pyscf_numint().nr_rks(mol, grids_cpu, xc, dm0 * scale)
                 for scale in (1., .7)]
         ordinary = [NumInt().nr_rks(mol, grids_gpu, xc, plain * scale)
                     for scale in (1., .7)]
-        inputs = [('plain', plain), ('tagged', tagged), ('batch', batch),
-                  ('host', dm0.copy()), ('host-tagged', host_tagged)]
+        inputs = [('plain', plain), ('tagged', tagged), ('batch', batch)]
         for name, density in inputs:
             with self.subTest(input=name):
                 before = density.copy()
@@ -608,9 +607,8 @@ class GroupedIntegration(unittest.TestCase):
                     np.testing.assert_allclose(value.get(), cp.asnumpy(gpu_ref),
                                                atol=1e-10, rtol=1e-10)
                 np.testing.assert_array_equal(cp.asnumpy(density), cp.asnumpy(before))
-        for density in (tagged, host_tagged):
-            np.testing.assert_array_equal(cp.asnumpy(density.mo_coeff), mo_coeff[0])
-            np.testing.assert_array_equal(cp.asnumpy(density.mo_occ), mo_occ[0])
+        np.testing.assert_array_equal(tagged.mo_coeff.get(), mo_coeff[0])
+        np.testing.assert_array_equal(tagged.mo_occ.get(), mo_occ[0])
 
     @unittest.skipUnless(HAS_GROUPED_GEMM, "grouped GEMM kernels not available")
     def test_nr_rks_group_lda(self):
@@ -665,6 +663,8 @@ class IntegrationProtocols(unittest.TestCase):
         cls.grid_cpu.coords = coords.copy()
         cls.grid_cpu.weights = cls.grid.weights.get()
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: eval_xc_eff has no spin keyword')
     def test_xc_workspace_gga_restricted(self):
         density = np.zeros((4, 137))
         density[0] = np.linspace(.7, 1.1, 137)

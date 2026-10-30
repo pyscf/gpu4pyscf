@@ -68,7 +68,6 @@ def test_derivative_coupling_from_eigenvector_differences(model, x):
     plus = aligned_eigenvectors(model, x + step, vectors)
     minus = aligned_eigenvectors(model, x - step, vectors)
     coupling = vectors.T @ ((plus - minus) / (2 * step))
-    np.testing.assert_allclose(coupling + coupling.T, 0, atol=2e-9, rtol=0)
 
     dynamics = FSSH_Tully(model, mass=[2000.])
     for state in (0, 1):

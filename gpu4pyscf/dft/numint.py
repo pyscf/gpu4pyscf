@@ -712,6 +712,8 @@ def nr_rks_group(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     if mo_coeff is not None:
         nao = nao0 = mo_coeff.shape[0]
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+        dm_shape = dms.shape
+        nset = 1
     else:
         nao = nao0 = dms.shape[-1]
         dms = cupy.asarray(dms)

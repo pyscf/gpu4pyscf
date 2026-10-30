@@ -459,7 +459,6 @@ def _orbital_pair_cart2sph(cell, arrays):
         # Input is a single 3-ndim matrix_kpts
         assert arrays.ndim == 3
         nkpts = len(arrays)
-        arrays = arrays.transpose(2,0,1)
     else:
         # Input is a list of 3-ndim matrix_kpts
         assert arrays[0].ndim == 3

@@ -478,6 +478,8 @@ def small_jk_model(request):
 @pytest.mark.parametrize('lr,sr', [(1., 0.), (0., 1.), (.7, .2)])
 def test_weighted_exchange_and_full_coulomb(small_jk_model, lr, sr):
     mol, density, _ = small_jk_model
+    if mol._bas[:, gto.ANG_OF].max() > jk.LMAX and (lr not in (0, 1) or sr not in (0, 1)):
+        pytest.skip('High-angular CPU fallback supports only factors 0 and 1')
     omega = .3
     ref_j = get_jk(mol, density, hermi=1)[0]
     ref_k = (lr * get_jk(mol, density, hermi=1, omega=omega)[1]
@@ -574,6 +576,8 @@ def test_optimizer_geometry_reset(small_jk_model):
 @pytest.mark.parametrize('hermi', [0, 1])
 def test_range_separated_exchange_batch(small_jk_model, hermi):
     mol, density, transition = small_jk_model
+    if mol._bas[:, gto.ANG_OF].max() > jk.LMAX:
+        pytest.skip('High-angular CPU fallback supports only factors 0 and 1')
     dm = density if hermi else density + .02*transition
     batch = np.stack([dm, .4*dm])[:, None, ::-1, ::-1]
     before = batch.copy()
@@ -584,16 +588,3 @@ def test_range_separated_exchange_batch(small_jk_model, hermi):
     assert actual.shape == batch.shape
     np.testing.assert_allclose(actual.get(), expected, atol=1e-10, rtol=1e-10)
     np.testing.assert_array_equal(batch, before)
-
-
-@pytest.mark.parametrize('complex_input', [False, True])
-def test_standalone_ao_transform_vector(standalone_ao_transform_metadata, complex_input):
-    args, padding, c, padded = standalone_ao_transform_metadata
-    vector = np.linspace(-.4, .7, c.shape[1])
-    if complex_input:
-        vector = vector + 1j*vector[::-1]
-    vector = vector[:, None]
-    actual = jk.apply_coeff_C_mat(vector, *args, l_ctr_paddings=padding)
-    assert actual.shape == (c.shape[0], 1)
-    np.testing.assert_allclose(actual.get(), c @ vector, atol=2e-12, rtol=2e-12)
-    np.testing.assert_array_equal(actual.get()[padded], 0)

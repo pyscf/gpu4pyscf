@@ -388,7 +388,7 @@ class MultiCollinearResponse(unittest.TestCase):
         total = rho[0]
         spin = np.einsum('a,axg->xg', self.direction, rho[1:])
         direct = pyscf_numint().eval_xc_eff(
-            xc, np.stack([.5*(total+spin), .5*(total-spin)]), deriv=2, spin=1)
+            xc, np.stack([.5*(total+spin), .5*(total-spin)]), deriv=2)
         transform = np.zeros((4, 2))
         transform[0, 0] = 1
         transform[1:, 1] = self.direction
@@ -414,7 +414,7 @@ class MultiCollinearResponse(unittest.TestCase):
                     sampled = np.stack([.5*(total[..., None]+spin[..., None]*z),
                                         .5*(total[..., None]-spin[..., None]*z)])
                     f = pyscf_numint().eval_xc_eff(xc, sampled.reshape(2, 4, -1),
-                                                  deriv=2, spin=1)[2]
+                                                  deriv=2)[2]
                     f = xc_deriv.ud2ts(f)[1, :, 1].reshape(4, 4, rho.shape[-1], 80)
                     reference = np.einsum('xygn,n->xyg', f, weights)
                     perpendicular = np.array([1., 0., -1.]) / np.sqrt(2)

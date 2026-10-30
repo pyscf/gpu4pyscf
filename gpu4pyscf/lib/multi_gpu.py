@@ -106,9 +106,10 @@ def reduce(func, tasks, args=(), kwargs={}, schedule='dynamic'):
         else:
             groups[device_id] += r
 
-    for i in num_devices:
+    for i in range(num_devices):
         if groups[i] is None:
-            groups[i] = cp.zeros(result[0].shape, dtype=dtype)
+            with cp.cuda.Device(i):
+                groups[i] = cp.zeros(result[0].shape, dtype=dtype)
     return array_reduce(groups, inplace=True)
 
 def array_broadcast(a):

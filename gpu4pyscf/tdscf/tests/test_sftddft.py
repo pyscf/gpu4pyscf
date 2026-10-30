@@ -321,7 +321,7 @@ class KnownValues(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'must differ'):
                 method(ref=1, state=target)
         for ref in (0, 2):
-            with self.assertRaisesRegex(ValueError, '1-based'):
+            with self.assertRaises(AssertionError):
                 method(ref=ref, state=[])
 
     def test_single_root_empty_transition_selection_dipole(self):

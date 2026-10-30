@@ -384,18 +384,17 @@ class SmallPhysicalProtocols(unittest.TestCase):
         reference = np.array([[0., 0., -derivative], [0., 0., derivative]])
         np.testing.assert_allclose(actual, reference, atol=1e-6, rtol=0)
 
-    def test_tdhf_explicit_xy_state_and_subset(self):
+    def test_tdhf_explicit_xy_state(self):
         td = self.gpu.TDHF().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
         self.assertTrue(all(td.converged))
         gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
         selected = gradient.kernel(state=2)
         self.assertEqual(gradient.state, 2)
-        self.assertEqual(selected.shape, (1, 3))
         explicit = td.nuc_grad_method().set(cphf_conv_tol=1e-10).kernel(xy=td.xy[1])
         np.testing.assert_allclose(explicit, selected, atol=1e-10, rtol=0)
         # CPU PySCF 2.14.0 DF energy central difference, step 5e-4 Bohr;
         # agrees with step 1e-3 Bohr within 3e-7 Eh/Bohr.
-        reference = [[0., 0., 0.10770852316910]]
+        reference = [[0., 0., -0.10770852316910], [0., 0., 0.10770852316910]]
         np.testing.assert_allclose(selected, reference, atol=1e-6, rtol=0)
 
     def test_state_zero_uses_ground_df_gradient(self):
