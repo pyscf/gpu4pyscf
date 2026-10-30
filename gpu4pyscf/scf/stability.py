@@ -17,11 +17,12 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.soscf import gen_g_hop_rhf, gen_g_hop_uhf
 from gpu4pyscf.fci.direct_spin1 import davidson1
-from gpu4pyscf.scf.gdm import get_nocc, packed_apply_exp_U
+from gpu4pyscf.scf.gdm import get_nocc, apply_exp_U
 from gpu4pyscf import __config__
 
 STAB_NROOTS = getattr(__config__, 'stab_nroots', 3)
 STAB_TOL = getattr(__config__, 'stab_tol', 1e-6)
+STAB_HESS_NUMERICAL_ZERO = 1e-8
 
 def rhf_stability(mf, internal=True, external=False, verbose=None, return_status=False,
                   nroots=STAB_NROOTS, tol=STAB_TOL):
@@ -128,6 +129,29 @@ def dump_status(log, stable, method_class, stab_type):
         log.note(method_class + f' wavefunction is stable in the {stab_type} '
                  'stability analysis')
 
+def get_davidson_initial_guess(hdiag, nroots, nguess):
+    assert nroots > 0
+    assert hdiag.ndim == 1
+    nvar = hdiag.size
+    assert nvar >= nroots
+    assert nguess >= nroots
+
+    nroots = min(nroots, nvar)
+    nguess = min(nguess, nvar)
+    order = cp.argsort(hdiag)
+    x0 = cp.zeros((nguess, nvar), dtype=hdiag.dtype)
+    x0[0, cp.abs(hdiag) > STAB_HESS_NUMERICAL_ZERO] = 1. / hdiag[cp.abs(hdiag) > STAB_HESS_NUMERICAL_ZERO]
+    for i_guess in range(nguess):
+        x0[i_guess, order[i_guess]] = 1
+    return x0
+
+def _rotate_mo(mo_coeff, mo_occ, v):
+    nmo = mo_occ.shape[-1]
+    nocc = get_nocc(mo_occ)
+    kappa = -v.reshape((nmo - nocc, nocc)).T # The kappa from gdm is the upper right corner (nocc, nvir), the kappa from soscf is the lower left corner (nvir, nocc).
+    new_mo = apply_exp_U(mo_coeff, nocc, kappa)
+    return new_mo
+
 def rhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,
                  nroots=STAB_NROOTS, tol=STAB_TOL):
     assert not with_symmetry
@@ -136,7 +160,7 @@ def rhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,
     hdiag *= 2
     def precond(residuals, eigenvalues):
         hdiagd = hdiag[None, :] - eigenvalues[:, None]
-        hdiagd[cp.abs(hdiagd)<1e-8] = 1e-8
+        hdiagd[cp.abs(hdiagd) < STAB_HESS_NUMERICAL_ZERO] = STAB_HESS_NUMERICAL_ZERO
         return residuals / hdiagd
     # The results of hop(x) corresponds to a displacement that reduces
     # gradients g.  It is the vir-occ block of the matrix vector product
@@ -146,138 +170,127 @@ def rhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,
     def hessian_x(xs):
         return cp.stack([hop(x).real * 2 for x in xs])
 
-    nguess = min(nroots * 2, g.size)
-    order = cp.argsort(hdiag)
-    x0 = cp.zeros((nguess, g.size), dtype=hdiag.dtype)
-    x0[0, g!=0] = 1. / hdiag[g!=0]
-    for i_guess in range(nguess - 1):
-        x0[i_guess + 1, order[i_guess]] = 1
-
+    x0 = get_davidson_initial_guess(hdiag, nroots, nroots * 2)
     converged, e, v = davidson1(hessian_x, x0, precond, tol=tol, verbose=log, nroots=nroots)
-    assert np.all(converged), "rhf_internal stability analysis Davidson solver not converge"
-
     log.info('rhf_internal: lowest eigs of H = %s', e)
-    if nroots != 1:
-        e, v = e[0], v[0]
+    if not converged[0]:
+        raise RuntimeError("rhf_internal stability analysis Davidson solver doesn't converge even the lowest energy root")
+    if not np.all(converged):
+        log.warn(f"rhf_internal stability analysis Davidson solver doesn't converge all roots ({converged})")
+
+    e, v = e[0], v[0]
 
     stable = not (e < -1e-5)
     dump_status(log, stable, f'{mf.__class__}', 'internal')
     if stable:
         mo = mf.mo_coeff
     else:
-        nmo = mf.mo_occ.shape[-1]
-        nocc = get_nocc(mf.mo_occ)
-        kappa = -v.reshape((nmo - nocc, nocc)).T # The kappa from gdm is the upper right corner (nocc, nvir), the kappa from soscf is the lower left corner (nvir, nocc).
-        mo = packed_apply_exp_U(mf.mo_coeff, nocc, kappa)
+        mo = _rotate_mo(mf.mo_coeff, mf.mo_occ, v)
     if return_status:
         return mo, stable
     else:
         return mo
 
-def _gen_hop_rhf_external(mf, with_symmetry=True, verbose=None):
+def _gen_hop_rhf_external(mf, with_symmetry=False, verbose=None):
+    assert not with_symmetry
     mol = mf.mol
     mo_coeff = mf.mo_coeff
     mo_occ = mf.mo_occ
-    occidx = numpy.where(mo_occ==2)[0]
-    viridx = numpy.where(mo_occ==0)[0]
-    nocc = len(occidx)
-    nvir = len(viridx)
-    orbv = mo_coeff[:,viridx]
-    orbo = mo_coeff[:,occidx]
+    nocc = get_nocc(mo_occ)
+    nvir = mo_coeff.shape[-1] - nocc
+    mocc = mo_coeff[:, :nocc]
+    mvir = mo_coeff[:, nocc:]
 
-    if with_symmetry and mol.symmetry:
-        orbsym = hf_symm.get_orbsym(mol, mo_coeff)
-        sym_forbid = orbsym[viridx].reshape(-1,1) != orbsym[occidx]
-
-    h1e = mf.get_hcore()
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    fock_ao = h1e + mf.get_veff(mol, dm0)
-    fock = reduce(numpy.dot, (mo_coeff.conj().T, fock_ao, mo_coeff))
-    foo = fock[occidx[:,None],occidx]
-    fvv = fock[viridx[:,None],viridx]
+    Fock_ao = mf.get_fock(dm = dm0)
+    Foo = mocc.conj().T @ Fock_ao @ mocc
+    Fvv = mvir.conj().T @ Fock_ao @ mvir
 
-    hdiag = fvv.diagonal().reshape(-1,1) - foo.diagonal()
-    if with_symmetry and mol.symmetry:
-        hdiag[sym_forbid] = 0
+    hdiag = Fvv.diagonal()[:, None] - Foo.diagonal()
     hdiag = hdiag.ravel()
 
     vrespz = mf.gen_response(singlet=None, hermi=2)
     def hop_real2complex(x1):
-        x1 = x1.reshape(nvir,nocc)
-        if with_symmetry and mol.symmetry:
-            x1 = x1.copy()
-            x1[sym_forbid] = 0
-        x2 = numpy.einsum('ps,sq->pq', fvv, x1)
-        x2-= numpy.einsum('ps,rp->rs', foo, x1)
+        x1 = x1.reshape(nvir, nocc)
+        x2 = cp.einsum('ps,sq->pq', Fvv, x1)
+        x2-= cp.einsum('ps,rp->rs', Foo, x1)
 
-        d1 = reduce(numpy.dot, (orbv, x1*2, orbo.conj().T))
+        d1 = 2 * mvir @ x1 @ mocc.conj().T
         dm1 = d1 - d1.conj().T
 # No Coulomb and fxc contribution for anti-hermitian DM
         v1 = vrespz(dm1)
-        x2 += reduce(numpy.dot, (orbv.conj().T, v1, orbo))
-        if with_symmetry and mol.symmetry:
-            x2[sym_forbid] = 0
+        x2 += mvir.conj().T @ v1 @ mocc
         return x2.ravel()
 
     vresp1 = mf.gen_response(singlet=False, hermi=1)
     def hop_rhf2uhf(x1):
         # See also rhf.TDA triplet excitation
         x1 = x1.reshape(nvir,nocc)
-        if with_symmetry and mol.symmetry:
-            x1 = x1.copy()
-            x1[sym_forbid] = 0
-        x2 = numpy.einsum('ps,sq->pq', fvv, x1)
-        x2-= numpy.einsum('ps,rp->rs', foo, x1)
+        x2 = cp.einsum('ps,sq->pq', Fvv, x1)
+        x2-= cp.einsum('ps,rp->rs', Foo, x1)
 
-        d1 = reduce(numpy.dot, (orbv, x1*2, orbo.conj().T))
+        d1 = 2 * mvir @ x1 @ mocc.conj().T
         dm1 = d1 + d1.conj().T
         v1ao = vresp1(dm1)
-        x2 += reduce(numpy.dot, (orbv.conj().T, v1ao, orbo))
-        if with_symmetry and mol.symmetry:
-            x2[sym_forbid] = 0
+        x2 += mvir.conj().T @ v1ao @ mocc
         return x2.real.ravel()
 
     return hop_real2complex, hdiag, hop_rhf2uhf, hdiag
 
 
-def rhf_external(mf, with_symmetry=True, verbose=None, return_status=False,
+def rhf_external(mf, with_symmetry=False, verbose=None, return_status=False,
                  nroots=STAB_NROOTS, tol=STAB_TOL):
+    assert not with_symmetry
     log = logger.new_logger(mf, verbose)
     hop1, hdiag1, hop2, hdiag2 = _gen_hop_rhf_external(mf, with_symmetry)
 
-    def precond(dx, e, x0):
-        hdiagd = hdiag1 - e
-        hdiagd[abs(hdiagd)<1e-8] = 1e-8
-        return dx/hdiagd
-    x0 = numpy.zeros_like(hdiag1)
-    x0[hdiag1>1e-5] = 1. / hdiag1[hdiag1>1e-5]
-    if not with_symmetry:  # allow to break point group symmetry
-        x0[numpy.argmin(hdiag1)] = 1
-    e1, v1 = lib.davidson(hop1, x0, precond, tol=tol, verbose=log, nroots=nroots)
+    def precond1(residuals, eigenvalues):
+        hdiagd = hdiag1[None, :] - eigenvalues[:, None]
+        hdiagd[cp.abs(hdiagd) < STAB_HESS_NUMERICAL_ZERO] = STAB_HESS_NUMERICAL_ZERO
+        return residuals / hdiagd
+    def hessian1(xs):
+        return cp.stack([hop1(x) for x in xs])
+
+    x0_1 = get_davidson_initial_guess(hdiag1, nroots, nroots * 2)
+
+    converged1, e1, v1 = davidson1(hessian1, x0_1, precond1, tol=tol, verbose=log, nroots=nroots)
     log.info('rhf_real2complex: lowest eigs of H = %s', e1)
-    if nroots != 1:
-        e1, v1 = e1[0], v1[0]
+    if not converged1[0]:
+        raise RuntimeError("rhf_external real2complex stability analysis Davidson solver doesn't converge even the lowest energy root")
+    if not np.all(converged1):
+        log.warn(f"rhf_external real2complex stability analysis Davidson solver doesn't converge all roots ({converged1})")
+
+    e1, v1 = e1[0], v1[0]
     stable1 = not (e1 < -1e-5)
     dump_status(log, stable1, f'{mf.__class__}', 'real -> complex')
 
-    def precond(dx, e, x0):
-        hdiagd = hdiag2 - e
-        hdiagd[abs(hdiagd)<1e-8] = 1e-8
-        return dx/hdiagd
-    x0 = numpy.zeros_like(hdiag2)
-    x0[hdiag2>1e-5] = 1. / hdiag2[hdiag2>1e-5]
-    e3, v3 = lib.davidson(hop2, x0, precond, tol=tol, verbose=log, nroots=nroots)
-    log.info('rhf_external: lowest eigs of H = %s', e3)
-    if nroots != 1:
-        e3, v3 = e3[0], v3[0]
-    stable = not (e3 < -1e-5)
-    dump_status(log, stable, f'{mf.__class__}', 'RHF/RKS -> UHF/UKS')
-    if stable:
+    def precond2(residuals, eigenvalues):
+        hdiagd = hdiag2[None, :] - eigenvalues[:, None]
+        hdiagd[cp.abs(hdiagd) < STAB_HESS_NUMERICAL_ZERO] = STAB_HESS_NUMERICAL_ZERO
+        return residuals / hdiagd
+    def hessian2(xs):
+        return cp.stack([hop2(x) for x in xs])
+
+    x0_2 = get_davidson_initial_guess(hdiag2, nroots, nroots * 2)
+
+    converged3, e3, v3 = davidson1(hessian2, x0_2, precond2, tol=tol, verbose=log, nroots=nroots)
+    log.info('rhf_rhf2uhf: lowest eigs of H = %s', e3)
+    if not converged3[0]:
+        raise RuntimeError("rhf_external rhf2uhf stability analysis Davidson solver doesn't converge even the lowest energy root")
+    if not np.all(converged3):
+        log.warn(f"rhf_external rhf2uhf stability analysis Davidson solver doesn't converge all roots ({converged3})")
+
+    e3, v3 = e3[0], v3[0]
+    stable3 = not (e3 < -1e-5)
+    dump_status(log, stable3, f'{mf.__class__}', 'RHF/RKS -> UHF/UKS')
+
+    if stable3:
         mo = (mf.mo_coeff, mf.mo_coeff)
     else:
         mo = (_rotate_mo(mf.mo_coeff, mf.mo_occ, v3), mf.mo_coeff)
+    mo = cp.stack(mo)
     if return_status:
-        return mo, stable
+        return mo, stable3
     else:
         return mo
 
@@ -328,10 +341,10 @@ def _gen_hop_uhf_external(mf, with_symmetry=True, verbose=None):
     noccb = len(occidxb)
     nvira = len(viridxa)
     nvirb = len(viridxb)
-    orboa = mo_coeff[0][:,occidxa]
-    orbob = mo_coeff[1][:,occidxb]
-    orbva = mo_coeff[0][:,viridxa]
-    orbvb = mo_coeff[1][:,viridxb]
+    mocca = mo_coeff[0][:,occidxa]
+    moccb = mo_coeff[1][:,occidxb]
+    mvira = mo_coeff[0][:,viridxa]
+    mvirb = mo_coeff[1][:,viridxb]
 
     if with_symmetry and mol.symmetry:
         orbsyma, orbsymb = uhf_symm.get_orbsym(mol, mo_coeff)
@@ -367,13 +380,13 @@ def _gen_hop_uhf_external(mf, with_symmetry=True, verbose=None):
         x2b = numpy.einsum('pr,rq->pq', fvvb, x1b)
         x2b-= numpy.einsum('qs,ps->pq', foob, x1b)
 
-        d1a = reduce(numpy.dot, (orbva, x1a, orboa.conj().T))
-        d1b = reduce(numpy.dot, (orbvb, x1b, orbob.conj().T))
+        d1a = reduce(numpy.dot, (mvira, x1a, mocca.conj().T))
+        d1b = reduce(numpy.dot, (mvirb, x1b, moccb.conj().T))
         dm1 = numpy.array((d1a-d1a.conj().T, d1b-d1b.conj().T))
 
         v1 = vrespz(dm1)
-        x2a += reduce(numpy.dot, (orbva.conj().T, v1[0], orboa))
-        x2b += reduce(numpy.dot, (orbvb.conj().T, v1[1], orbob))
+        x2a += reduce(numpy.dot, (mvira.conj().T, v1[0], mocca))
+        x2b += reduce(numpy.dot, (mvirb.conj().T, v1[1], moccb))
         x2 = numpy.hstack((x2a.ravel(), x2b.ravel()))
         if with_symmetry and mol.symmetry:
             x2[sym_forbid1] = 0
@@ -403,12 +416,12 @@ def _gen_hop_uhf_external(mf, with_symmetry=True, verbose=None):
         x2ba = numpy.einsum('pr,rq->pq', fvvb, x1ba)
         x2ba-= numpy.einsum('qs,ps->pq', fooa, x1ba)
 
-        d1ab = reduce(numpy.dot, (orbva, x1ab, orbob.conj().T))
-        d1ba = reduce(numpy.dot, (orbvb, x1ba, orboa.conj().T))
+        d1ab = reduce(numpy.dot, (mvira, x1ab, moccb.conj().T))
+        d1ba = reduce(numpy.dot, (mvirb, x1ba, mocca.conj().T))
         dm1 = numpy.array((d1ab+d1ba.conj().T, d1ba+d1ab.conj().T))
         v1 = vresp1(dm1)
-        x2ab += reduce(numpy.dot, (orbva.conj().T, v1[0], orbob))
-        x2ba += reduce(numpy.dot, (orbvb.conj().T, v1[1], orboa))
+        x2ab += reduce(numpy.dot, (mvira.conj().T, v1[0], moccb))
+        x2ba += reduce(numpy.dot, (mvirb.conj().T, v1[1], mocca))
         x2 = numpy.hstack((x2ab.real.ravel(), x2ba.real.ravel()))
         if with_symmetry and mol.symmetry:
             x2[sym_forbid2] = 0
