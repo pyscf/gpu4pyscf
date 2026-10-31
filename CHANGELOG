@@ -1,3 +1,17 @@
+v1.9.1 (2026-11-04)
+-------------------
+* New Features
+  - Geometric direct minimization for SCF calculations. (#978)
+  - GPU SAP and VSAP initial guesses. (#997)
+* Fixes
+  - GPU OOM in density-fitted Hessian calculations. (#973, #992)
+  - Range-separated Coulomb matrices with multiple density matrices. (#990)
+  - Multigrid v3 synchronization and grid bounds for density and kinetic energy density evaluation. (#986, #995)
+  - Screened four-center integral buffers and range-separation arguments in AO-to-MO transformations and in-core CCSD. (#995)
+  - CUDA kernel synchronization, indexing, and integral screening issues. (#995)
+  - CUDA stream and launch configuration bugs in one-electron integrals. (#1003)
+
+
 v1.9.0 (2026-10-07)
 -------------------
 * New Features (PBC systems)
