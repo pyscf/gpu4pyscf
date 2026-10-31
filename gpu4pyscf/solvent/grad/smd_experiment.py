@@ -22,7 +22,7 @@ from pyscf.data import radii
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf.solvent import smd_experiment as smd
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
-from gpu4pyscf.solvent.smd import (
+from gpu4pyscf.solvent.smd_experiment import (
     sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, switch_function,
     hartree2kcal, solvent_db)
 
@@ -33,10 +33,10 @@ def grad_switch_function(R, r, dr):
         return 0.0
 
 def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
-    '''
-    - list of atomic symbols
-    - atomic coordinates in Anstrong
-    - solvent descriptors: n, alpha, beta
+    '''Atomic-tension derivatives in cal/(mol Angstrom**3).
+
+    Coordinates are in Angstrom. Output axes are (tension atom, derivative
+    atom, Cartesian), with shape (natm, natm, 3).
     '''
 
     def get_bond_tension(bond):
@@ -186,12 +186,13 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
     return cupy.asarray(tensions)
 
 def get_cds(smdobj):
+    '''Differentiate the educational surface energy, in Hartree per Bohr.'''
     mol = smdobj.mol
-    solvent_descriptors = smdobj.solvent_descriptors or solvent_db[smdobj.solvent]
+    solvent_descriptors = smdobj.get_solvent_descriptors()
     n, _, alpha, beta, gamma, _, phi, psi = solvent_descriptors
     symbols = [mol.atom_symbol(ia) for ia in range(mol.natm)]
     coords = mol.atom_coords(unit='A')
-    if smdobj._solvent.lower() != 'water':
+    if smdobj.solvent != 'water':
         grad_tension = atomic_surface_tension(symbols, coords, n, alpha, beta, water=False)
         atm_tension = smd.atomic_surface_tension(symbols, coords, n, alpha, beta, water=False)
         mol_tension = smd.molecular_surface_tension(beta, gamma, phi, psi)
@@ -204,6 +205,8 @@ def get_cds(smdobj):
     rad = radii.VDW + 0.4/radii.BOHR
     surface = pcm.gen_surface(mol, ng=smdobj.sasa_ng, rad=rad)
     _, grad_area = pcm_grad.get_dF_dA(surface)
+    # PCM exposes (Cartesian, surface point, atom); sum each atom's point slice.
+    grad_area = grad_area.transpose(1, 2, 0)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
     SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice]).get()

@@ -705,10 +705,9 @@ class _SecondOrderUHF(_CIAH_SOSCF):
 
     def kernel(self, mo_coeff=None, mo_occ=None, dm0=None):
         if isinstance(mo_coeff, cp.ndarray) and mo_coeff.ndim == 2:
-            mo_coeff = (mo_coeff, mo_coeff)
+            mo_coeff = cp.stack((mo_coeff, mo_coeff))
         if isinstance(mo_occ, cp.ndarray) and mo_occ.ndim == 1:
-            mo_occ = (cp.asarray(mo_occ >0, dtype=np.float64),
-                      cp.asarray(mo_occ==2, dtype=np.float64))
+            mo_occ = cp.asarray((mo_occ > 0, mo_occ == 2), dtype=np.float64)
         return _CIAH_SOSCF.kernel(self, mo_coeff, mo_occ, dm0)
 
 class _SecondOrderRHF(_CIAH_SOSCF):

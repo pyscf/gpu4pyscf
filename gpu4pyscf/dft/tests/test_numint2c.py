@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import unittest
+from importlib.metadata import version
+from packaging.version import Version
+from pyscf.dft import xc_deriv
 import numpy as np
 import pyscf
 import cupy
@@ -331,6 +334,142 @@ class KnownValues(unittest.TestCase):
             
             # CPU vs GPU check
             self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
+
+
+@unittest.skipIf(mcfun is None or Version(version('mcfun')) < Version('0.2.6'),
+                 'requires mcfun >= 0.2.6 for the corrected CPU reference')
+class MultiCollinearResponse(unittest.TestCase):
+    direction = np.array([2., -1., 2.]) / 3
+
+    @staticmethod
+    def _adapter(xc, cpu=False, threshold=.99):
+        ni = pyscf_numint2c() if cpu else NumInt2C()
+        ni.collinear = 'mcol'
+        ni.spin_samples = 86
+        ni.collinear_samples = 80
+        ni.collinear_thrd = threshold
+        return ni.mcfun_eval_xc_adapter(xc)
+
+    @classmethod
+    def _density(cls, xc, strong=False):
+        nvar = 1 if xc == 'LDA,VWN' else 4
+        total = np.array([[1.1, .8], [.08, .04], [-.05, -.03], [.02, -.01]])[:nvar]
+        spin = np.array([[1.1, .8], [.04, .02], [-.03, -.01], [.01, -.006]])[:nvar]
+        spin[0] *= .995 if strong else .3
+        rho = np.concatenate([total[None], cls.direction[:, None, None] * spin[None]])
+        if not strong and nvar > 1:
+            rho[1:, 1:] += np.random.default_rng(17).normal(scale=.005, size=(3, 3, 2))
+        return rho
+
+    @staticmethod
+    def _evaluate(adapter, xc, rho, deriv):
+        return [cupy.asnumpy(a) for a in adapter(xc, cupy.asarray(rho), deriv=deriv)]
+
+    def _check_weak_spin_derivatives_match_mcfun(self, xc):
+        rho = self._density(xc)
+        gpu, cpu = self._adapter(xc), self._adapter(xc, cpu=True)
+        for deriv in range(3):
+            with self.subTest(xc=xc, deriv=deriv):
+                actual = self._evaluate(gpu, xc, rho, deriv)
+                expected = cpu(xc, rho, deriv=deriv)
+                self.assertEqual(len(actual), deriv + 1)
+                for a, b in zip(actual, expected):
+                    np.testing.assert_allclose(a, b, atol=2e-11, rtol=2e-11)
+
+    def test_mcfun_weak_spin_lda(self):
+        self._check_weak_spin_derivatives_match_mcfun('LDA,VWN')
+
+    def test_mcfun_weak_spin_gga(self):
+        self._check_weak_spin_derivatives_match_mcfun('PBE')
+
+    def test_collinear_pbe_signed_spin_derivatives(self):
+        xc = 'PBE'
+        rho = self._density(xc, strong=True)
+        total = rho[0]
+        spin = np.einsum('a,axg->xg', self.direction, rho[1:])
+        direct = pyscf_numint().eval_xc_eff(
+            xc, np.stack([.5*(total+spin), .5*(total-spin)]), deriv=2)
+        transform = np.zeros((4, 2))
+        transform[0, 0] = 1
+        transform[1:, 1] = self.direction
+        adapter = self._adapter(xc)
+        for deriv in range(3):
+            with self.subTest(deriv=deriv):
+                actual = self._evaluate(adapter, xc, rho, deriv)
+                np.testing.assert_allclose(actual[0], direct[0], atol=2e-13, rtol=2e-13)
+                if deriv > 0:
+                    projected = np.einsum('as,axg->sxg', transform, actual[1])
+                    np.testing.assert_allclose(projected, xc_deriv.ud2ts(direct[1]),
+                                               atol=2e-12, rtol=2e-12)
+                if deriv > 1:
+                    projected = np.einsum('as,axbyg,bt->sxtyg', transform, actual[2], transform)
+                    np.testing.assert_allclose(projected, xc_deriv.ud2ts(direct[2]),
+                                               atol=2e-10, rtol=2e-11)
+                    np.testing.assert_allclose(actual[2], actual[2].transpose(2, 3, 0, 1, 4),
+                                               atol=2e-11, rtol=2e-11)
+                    # The MCfun collinear-limit transverse kernel is an axis
+                    # integral, not the Hessian of just E(t, |m|, grad|m|).
+                    z, weights = np.polynomial.legendre.leggauss(80)
+                    z, weights = .5*(z+1), .5*weights
+                    sampled = np.stack([.5*(total[..., None]+spin[..., None]*z),
+                                        .5*(total[..., None]-spin[..., None]*z)])
+                    f = pyscf_numint().eval_xc_eff(xc, sampled.reshape(2, 4, -1),
+                                                  deriv=2)[2]
+                    f = xc_deriv.ud2ts(f)[1, :, 1].reshape(4, 4, rho.shape[-1], 80)
+                    reference = np.einsum('xygn,n->xyg', f, weights)
+                    perpendicular = np.array([1., 0., -1.]) / np.sqrt(2)
+                    projected = np.einsum('a,axbyg,b->xyg', perpendicular,
+                                           actual[2][1:, :, 1:], perpendicular)
+                    np.testing.assert_allclose(projected, reference, atol=2e-10, rtol=2e-11)
+
+    def _check_mixed_threshold_points_match_individual_routes(self, xc):
+        rho = self._density(xc)
+        rho[..., 1:] = self._density(xc, strong=True)[..., 1:]
+        before = rho.copy()
+        adapter = self._adapter(xc)
+        spherical = self._adapter(xc, threshold=None)
+        actual = self._evaluate(adapter, xc, rho, 2)
+        weak = self._evaluate(spherical, xc, rho[..., :1], 2)
+        strong = self._evaluate(adapter, xc, rho[..., 1:], 2)
+        for result, a, b in zip(actual, weak, strong):
+            np.testing.assert_allclose(result, np.concatenate([a, b], axis=-1),
+                                       atol=2e-11, rtol=2e-11)
+        np.testing.assert_array_equal(rho, before)
+
+    def test_mcfun_mixed_collinear_threshold_lda(self):
+        self._check_mixed_threshold_points_match_individual_routes('LDA,VWN')
+
+    def test_mcfun_mixed_collinear_threshold_gga(self):
+        self._check_mixed_threshold_points_match_individual_routes('PBE')
+
+    def _check_spin_rotation_covariance(self, xc, strong):
+        axis = np.array([1., 2., -1.]) / np.sqrt(6)
+        skew = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]],
+                         [-axis[1], axis[0], 0]])
+        rotation = np.eye(3) + np.sin(.37)*skew + (1-np.cos(.37))*(skew @ skew)
+        transform = np.eye(4)
+        transform[1:, 1:] = rotation
+        adapter = self._adapter(xc)
+        rho = self._density(xc, strong=strong)
+        values = self._evaluate(adapter, xc, rho, 2)
+        rotated = np.einsum('ab,bxg->axg', transform, rho)
+        actual = self._evaluate(adapter, xc, rotated, 2)
+        expected = [values[0], np.einsum('ab,bxg->axg', transform, values[1]),
+                    np.einsum('ab,bxcyg,dc->axdyg', transform, values[2], transform)]
+        for a, b in zip(actual, expected):
+            np.testing.assert_allclose(a, b, atol=2e-9, rtol=2e-9)
+
+    def test_spin_rotation_covariance_lda_weak_spin(self):
+        self._check_spin_rotation_covariance('LDA,VWN', False)
+
+    def test_spin_rotation_covariance_lda_strong_spin(self):
+        self._check_spin_rotation_covariance('LDA,VWN', True)
+
+    def test_spin_rotation_covariance_gga_weak_spin(self):
+        self._check_spin_rotation_covariance('PBE', False)
+
+    def test_spin_rotation_covariance_gga_strong_spin(self):
+        self._check_spin_rotation_covariance('PBE', True)
 
 
 if __name__ == "__main__":

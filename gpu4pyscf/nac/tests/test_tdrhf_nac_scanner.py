@@ -94,6 +94,86 @@ class KnownValues(unittest.TestCase):
         assert abs(tdrhf_nac._wfn_overlap(mo1, mo2, x0, x1, s) - -1) < 1e-9
 
 
+class SmallSystem(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.small_mol = pyscf.M(atom=atom, basis='6-31g', verbose=0)
+        cls.mf = scf.RHF(cls.small_mol).to_gpu().set(conv_tol=1e-12).run()
+        # Keep trial-vector filtering below the requested residual tolerance.
+        cls.td = cls.mf.TDA().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
+        assert cls.mf.converged and all(cls.td.converged)
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.td, cls.mf, cls.small_mol
+
+    def test_match_and_reorder_mos(self):
+        coeff = self.mf.mo_coeff
+        overlap = cp.asarray(self.small_mol.intor('int1e_ovlp'))
+        order = np.arange(coeff.shape[1])[::-1]
+        phases = np.where(np.arange(coeff.shape[1]) % 2, -1., 1.)
+        changed = coeff[:, order] * cp.asarray(phases)
+        reordered, indices, signs = tdrhf_nac.match_and_reorder_mos(
+            overlap, coeff, changed)
+        np.testing.assert_array_equal(indices, np.argsort(order))
+        np.testing.assert_array_equal(signs, phases[indices])
+        np.testing.assert_allclose(cp.asnumpy(reordered) * signs,
+                                   cp.asnumpy(coeff), atol=1e-12, rtol=0)
+
+    def test_ground_cis_orthogonality_and_cis_phase(self):
+        coeff = self.mf.mo_coeff
+        overlap = self.small_mol.intor('int1e_ovlp')
+        amplitudes = self.td.xy[0][0]
+        for left, right in ((None, amplitudes), (amplitudes, None)):
+            value = tdrhf_nac._wfn_overlap(
+                coeff, coeff, left, right, overlap,
+                num_to_consider=amplitudes.size)
+            self.assertLess(abs(value), 1e-10)
+        # With all determinants retained, a normalized state overlaps itself
+        # by one; changing the electronic phase reverses the overlap sign.
+        for phase in (1., -1.):
+            value = tdrhf_nac._wfn_overlap(
+                coeff, coeff, amplitudes, phase * amplitudes, overlap,
+                num_to_consider=amplitudes.size)
+            self.assertAlmostEqual(value, phase, delta=1e-10)
+
+    def test_converged_highest_requested_root(self):
+        for states in ((0, 2), (1, 2)):
+            with self.subTest(states=states):
+                scanner = self.td.nac_method().as_scanner(states=states)
+                self.assertIs(scanner.as_scanner(), scanner)
+                self.assertTrue(scanner.converged)
+
+    def test_etf_translation(self):
+        for states in ((0, 1), (1, 2)):
+            with self.subTest(states=states):
+                method = self.td.nac_method().set(cphf_conv_tol=1e-10)
+                values = method.kernel(states=states)
+                # Electron-translation factors remove rigid-translation coupling.
+                np.testing.assert_allclose(values[2].sum(axis=0), 0, atol=1e-8, rtol=0)
+                np.testing.assert_allclose(values[3].sum(axis=0), 0, atol=1e-8, rtol=0)
+
+    def test_geometry_array_and_explicit_scanner_states(self):
+        scanner = self.td.nac_method().set(cphf_conv_tol=1e-10).as_scanner(states=(0, 1))
+        # The molecule was built in Angstrom; scanner array inputs use that unit.
+        geometry = self.small_mol.atom_coords(unit='Angstrom')
+        geometry[1, 2] += 0.002
+        result = scanner(geometry, states=(1, 2))
+        self.assertTrue(scanner.converged)
+        self.assertEqual(scanner.states, (1, 2))
+        np.testing.assert_allclose(scanner.mol.atom_coords(unit='Angstrom'),
+                                   geometry, atol=1e-12, rtol=0)
+        cpu_mf = scf.RHF(scanner.mol).set(conv_tol=1e-12).run()
+        cpu_td = cpu_mf.TDA().set(nstates=2, conv_tol=1e-10).run()
+        self.assertTrue(cpu_mf.converged and all(cpu_td.converged))
+        np.testing.assert_allclose(cp.asnumpy(result[0]), cpu_td.e_tot, atol=1e-8, rtol=0)
+        direct = scanner.base.nac_method().set(cphf_conv_tol=1e-10)
+        reference = direct.kernel(states=(1, 2))
+        for actual, expected in zip(result[1:], reference):
+            np.testing.assert_allclose(actual, scanner.sign * expected,
+                                       atol=1e-7, rtol=0)
+
+
 if __name__ == "__main__":
     print("Full Tests for TD-RHF nonadiabatic coupling vectors scanner.")
     unittest.main()

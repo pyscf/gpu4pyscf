@@ -90,6 +90,7 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
+    if mol is None: mol = mf.mol
     if dm is None: dm = mf.make_rdm1()
     ddm = cupy.asarray(dm)
     if dm_last is not None and mf.direct_scf:

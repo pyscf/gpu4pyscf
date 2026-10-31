@@ -1762,9 +1762,9 @@ def get_veff_ip1(
         else:
             rhoG = density[:,0].sum(axis=0)
         if cell._pseudo:
-            grad_pp = _pploc_derivatives(cell, rhoG, Gv_bases)[0]
+            grad_pp = _pploc_derivatives(cell, rhoG, Gv_bases)[:cell.natm]
         else:
-            grad_pp = _ne_derivatives(cell, rhoG, Gv_bases)[0]
+            grad_pp = _ne_derivatives(cell, rhoG, Gv_bases)[:cell.natm]
         rhoG = None
 
     Gv = get_Gv(cell, mesh)

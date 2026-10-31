@@ -47,6 +47,26 @@ class KnownValues(unittest.TestCase):
     def tearDownClass(cls):
         cls.mol1.stdout.close()
 
+    def check_multipoles(self, td, expect_y):
+        # Keep the converged amplitudes/phases fixed for the CPU comparison.
+        cpu_td = td.to_cpu()
+        if expect_y:
+            self.assertGreater(sum(float(cp.linalg.norm(y)) for _, ys in td.xy for y in ys), 1e-6)
+        for name in ('transition_dipole', 'transition_velocity_dipole',
+                     'transition_magnetic_dipole', 'transition_quadrupole',
+                     'transition_velocity_quadrupole', 'transition_magnetic_quadrupole',
+                     'transition_octupole', 'transition_velocity_octupole'):
+            with self.subTest(observable=name, solver=type(td).__name__):
+                np.testing.assert_allclose(getattr(td, name)(), getattr(cpu_td, name)(),
+                                           atol=1e-10, rtol=1e-10)
+        np.testing.assert_allclose(td.transition_dipole(xy=[td.xy[1]]),
+                                   cpu_td.transition_dipole(xy=[cpu_td.xy[1]]), atol=1e-10)
+        dipole = td.transition_dipole()
+        expected = (2./3.) * td.e * np.einsum('nx,nx->n', dipole.conj(), dipole).real
+        np.testing.assert_allclose(td.oscillator_strength(), expected, atol=1e-12)
+        np.testing.assert_allclose(td.oscillator_strength(gauge='velocity'),
+                                   cpu_td.oscillator_strength(gauge='velocity'), atol=1e-10)
+
     def test_tda(self):
         mf = self.mf
         td = mf.TDA()
@@ -78,6 +98,7 @@ class KnownValues(unittest.TestCase):
         e = td.kernel()[0]
         ref = [ 3.3211349, 18.5597821, 21.0147390, 21.6150240, 25.0938938]
         self.assertAlmostEqual(abs(e * 27.2114 - ref).max(), 0, 4)
+        self.check_multipoles(td, expect_y=False)
         ref = td.to_cpu().kernel()[0]
         self.assertAlmostEqual(abs(e - ref).max(), 0, 4)
 
@@ -89,6 +110,7 @@ class KnownValues(unittest.TestCase):
         e = td.kernel()[0]
         ref = [ 3.3126683, 18.4954862, 20.8493515, 21.5480882,]
         self.assertAlmostEqual(abs(e * 27.2114 - ref).max(), 0, 4)
+        self.check_multipoles(td, expect_y=True)
         ref = td.to_cpu().kernel()[0]
         self.assertAlmostEqual(abs(e - ref).max(), 0, 4)
 
@@ -145,6 +167,60 @@ class KnownValues(unittest.TestCase):
         td_scan.max_cycle = 1
         td_scan(mol)
         self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, 6)
+
+
+class UHFRestart(unittest.TestCase):
+    def test_uhf_lazy_scf_restart_and_transition_density(self):
+        for method in ['TDA', 'TDHF']:
+            with self.subTest(method=method):
+                mol = gto.M(atom='Li 0 0 0; H 0 0 1.6', charge=1, spin=1,
+                            basis='sto-3g', verbose=0)
+                mf = mol.UHF().to_gpu()
+                mf.conv_tol = 1e-12
+                assert mf.mo_energy is None
+                td = getattr(mf, method)().set(nstates=2, conv_tol=1e-10, lindep=1e-24)
+                td.kernel()
+                assert mf.converged and np.all(td.converged)
+                aa, bb = td.get_ab()
+                na = aa[0].shape[0]*aa[0].shape[1]
+                nb = aa[2].shape[0]*aa[2].shape[1]
+                a = np.block([[aa[0].reshape(na, na), aa[1].reshape(na, nb)],
+                              [aa[1].reshape(na, nb).T, aa[2].reshape(nb, nb)]])
+                b = np.block([[bb[0].reshape(na, na), bb[1].reshape(na, nb)],
+                              [bb[1].reshape(na, nb).T, bb[2].reshape(nb, nb)]])
+                dense = a if method == 'TDA' else np.block([[a, b], [-b, -a]])
+                roots = np.linalg.eigvals(dense)
+                assert np.max(np.abs(roots.imag)) < 1e-10
+                expected = np.sort(roots.real[roots.real > td.positive_eig_threshold])[:2]
+                np.testing.assert_allclose(cp.asnumpy(td.e), expected, atol=1e-10, rtol=0)
+                reference_e = cp.asnumpy(td.e).copy()
+                td.max_cycle = 1
+                td.kernel()
+                assert np.all(td.converged)
+                np.testing.assert_allclose(cp.asnumpy(td.e), reference_e, atol=1e-10, rtol=0)
+
+                r = mol.intor('int1e_r', comp=3)
+                dipoles = []
+                for energy, (xs, ys) in zip(cp.asnumpy(td.e), td.xy):
+                    xs = [cp.asnumpy(x) for x in xs]
+                    ys = [cp.asnumpy(y) if isinstance(y, (np.ndarray, cp.ndarray)) else np.zeros_like(x)
+                          for x, y in zip(xs, ys)]
+                    vector = np.concatenate([x.ravel() for x in xs])
+                    if method == 'TDHF':
+                        vector = np.r_[vector, np.concatenate([y.ravel() for y in ys])]
+                    assert np.linalg.norm(dense @ vector - energy*vector) < 1e-10
+                    density = np.zeros((mol.nao, mol.nao))
+                    for spin in range(2):
+                        co = mf.mo_coeff[spin][:, mf.mo_occ[spin] > 0].get()
+                        cv = mf.mo_coeff[spin][:, mf.mo_occ[spin] == 0].get()
+                        density += co @ xs[spin] @ cv.T + cv @ ys[spin].T @ co.T
+                    dipoles.append(np.einsum('kpq,pq->k', r, density))
+                dipoles = np.asarray(dipoles)
+                np.testing.assert_allclose(td.transition_dipole(), dipoles, atol=1e-11)
+                oscillator = (2/3)*cp.asnumpy(td.e)*np.sum(dipoles**2, axis=1)
+                np.testing.assert_allclose(td.oscillator_strength(), oscillator, atol=1e-12)
+                np.testing.assert_allclose(td.transition_dipole(), td.to_cpu().transition_dipole(), atol=1e-11)
+
 
 if __name__ == "__main__":
     print("Full Tests for uhf-TDA and uhf-TDHF")

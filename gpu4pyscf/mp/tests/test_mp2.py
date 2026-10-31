@@ -15,7 +15,7 @@
 import unittest
 from functools import reduce
 import numpy
-import pytest
+import cupy
 from pyscf import lib
 from pyscf import gto
 from pyscf import scf
@@ -46,6 +46,51 @@ def tearDownModule():
     global mol, mf
     mol.stdout.close()
     del mol, mf
+
+class OrbitalInitialization(unittest.TestCase):
+    def assert_eris_matches_cpu(self, cpu_mf, pt, coeff=None, gpu_coeff=None):
+        cpu_pt = mp_cpu.mp2.MP2(cpu_mf, frozen=pt.frozen)
+        ref = mp_cpu.mp2._ChemistsERIs()._common_init_(cpu_pt, coeff)
+        original_coeff = pt.mo_coeff
+        eris = pt.ao2mo(gpu_coeff)
+        self.assertIs(eris.mol, pt.mol)
+        self.assertIs(pt.mo_coeff, original_coeff)
+        numpy.testing.assert_array_equal(pt.mo_coeff.get(), cpu_mf.mo_coeff)
+        for name in ('mo_coeff', 'mo_energy', 'fock'):
+            array = getattr(eris, name)
+            self.assertIsInstance(array, cupy.ndarray)
+            self.assertEqual(array.dtype, getattr(ref, name).dtype)
+            numpy.testing.assert_allclose(array.get(), getattr(ref, name),
+                                          atol=1e-9, rtol=0)
+        return eris
+
+    def rotated_virtuals(self):
+        # Rotating virtual orbitals leaves the density unchanged but creates
+        # off-diagonal MO Fock elements, so a diagonal shortcut is incorrect.
+        nocc = mol.nelectron // 2
+        rotation = numpy.eye(mf.mo_energy.size)
+        c, s = numpy.cos(0.2), numpy.sin(0.2)
+        rotation[nocc:nocc+2,nocc:nocc+2] = [[c, -s], [s, c]]
+        return mf.mo_coeff.dot(rotation)
+
+    def test_default_eris_with_frozen_orbitals(self):
+        pt = mp_gpu.mp2.MP2(mf.to_gpu(), frozen=[0, mf.mo_energy.size-1])
+        # This shared-array path triggered the PySCF 2.14 helper-contract error.
+        self.assertIs(pt.mo_coeff, pt._scf.mo_coeff)
+        self.assert_eris_matches_cpu(mf, pt)
+
+    def test_old_df_default_eris_with_frozen_orbitals(self):
+        mf_df = mf.density_fit('weigend')
+        pt = mp_gpu.dfmp2_old.DFMP2(mf_df.to_gpu(), frozen=[0, mf.mo_energy.size-1])
+        self.assertIs(pt.mo_coeff, pt._scf.mo_coeff)
+        self.assert_eris_matches_cpu(mf_df, pt)
+
+    def test_explicit_numpy_orbitals_rebuild_fock(self):
+        coeff = self.rotated_virtuals()
+        pt = mp_gpu.mp2.MP2(mf.to_gpu(), frozen=[0, mf.mo_energy.size-1])
+        eris = self.assert_eris_matches_cpu(mf, pt, coeff, coeff)
+        self.assertGreater(abs(eris.fock[pt.nocc,pt.nocc+1].item()), 1e-4)
+
 
 class KnownValues(unittest.TestCase):
     def test_mp2(self):
@@ -148,6 +193,77 @@ class KnownValues(unittest.TestCase):
         pt = pt.to_gpu()
         e_gpu = pt.kernel()[0]
         assert abs(e_cpu - e_gpu) < 1e-6
+
+class MP2Amplitudes(unittest.TestCase):
+    def test_mp2_energy_and_gamma_utilities(self):
+        import copy
+        small_mol = gto.M(atom='O 0 0 0; H .7 0 .6; H -.7 0 .6',
+                          basis='sto-3g', verbose=0)
+        reference = scf.RHF(small_mol).run(conv_tol=1e-12)
+        assert reference.converged
+        cpu = mp_cpu.MP2(reference, frozen=1)
+        cpu.kernel()
+        gpu = mp_gpu.mp2.MP2(reference.to_gpu(), frozen=1)
+        original_eris = gpu.ao2mo()
+        energy, original_t2 = mp_gpu.mp2.kernel(gpu, eris=original_eris)
+        numpy.testing.assert_allclose(original_t2.get(), cpu.t2, atol=2e-12, rtol=2e-11)
+        assert abs(float(energy) - cpu.e_corr) < 2e-12
+        for layout in ['matrix', 'tensor']:
+            for complex_phase in [False, True]:
+                with self.subTest(layout=layout, complex_phase=complex_phase):
+                    eris = copy.copy(original_eris)
+                    nocc, nmo = gpu.nocc, gpu.nmo
+                    nvir = nmo - nocc
+                    t2 = original_t2.copy()
+                    integrals = original_eris.ovov.reshape(nocc, nvir, nocc, nvir).copy()
+                    phase = numpy.ones(nmo, dtype=complex)
+                    if complex_phase:
+                        # These are equivalent complex canonical orbitals, not arbitrary complex
+                        # tensors: the amplitudes acquire the conjugate two-electron phase.
+                        phase = numpy.exp(1j * numpy.linspace(.1, 1.2, nmo))
+                        occupied, virtual = cupy.asarray(phase[:nocc]), cupy.asarray(phase[nocc:])
+                        factor = (occupied.conj()[:, None, None, None] * virtual[None, :, None, None]
+                                  * occupied.conj()[None, None, :, None] * virtual[None, None, None, :])
+                        integrals = integrals * factor
+                        t2 = t2 * factor.transpose(0, 2, 1, 3).conj()
+                        eris.mo_coeff = eris.mo_coeff * cupy.asarray(phase)
+                    eris.ovov = integrals if layout == 'tensor' else integrals.reshape(nocc*nvir, nocc*nvir)
+                    saved_t2, saved_eri = t2.copy(), eris.ovov.copy()
+                    result = mp_gpu.mp2.energy(gpu, t2, eris)
+                    assert abs(float(result) - cpu.e_corr) < 2e-12
+                    assert abs(float(result.e_corr_ss) - cpu.e_corr_ss) < 2e-12
+                    assert abs(float(result.e_corr_os) - cpu.e_corr_os) < 2e-12
+
+                    actual = mp_gpu.mp2._gamma1_intermediates(gpu, t2=t2)
+                    reference = mp_cpu.mp2._gamma1_intermediates(cpu, t2=t2.get())
+                    real_reference = mp_cpu.mp2._gamma1_intermediates(cpu, t2=cpu.t2)
+                    for block, expected, real_block, orbital_phase in zip(
+                            actual, reference, real_reference, [phase[:nocc], phase[nocc:]]):
+                        numpy.testing.assert_allclose(block.get(), expected, atol=2e-13, rtol=2e-11)
+                        numpy.testing.assert_allclose(block.get(), block.get().conj().T, atol=2e-13)
+                        transformed = orbital_phase.conj()[:, None] * real_block * orbital_phase[None, :]
+                        numpy.testing.assert_allclose(block.get(), transformed, atol=2e-13, rtol=2e-11)
+                    assert abs(float((cupy.trace(actual[0]) + cupy.trace(actual[1])).real)) < 2e-13
+                    assert numpy.linalg.eigvalsh(actual[0].get()).max() < 2e-13
+                    assert numpy.linalg.eigvalsh(actual[1].get()).min() > -2e-13
+
+                    # The lower-storage helper must reconstruct the same unrelaxed density
+                    # correction directly from physical integrals without retaining T2.
+                    stored = copy.copy(gpu)
+                    stored.t2 = t2
+                    for a, b in zip(mp_gpu.mp2._gamma1_intermediates(stored), actual):
+                        numpy.testing.assert_allclose(a.get(), b.get(), atol=2e-13, rtol=2e-11)
+                    no_amplitudes = copy.copy(gpu)
+                    no_amplitudes.t2 = None
+                    reconstructed = mp_gpu.mp2._gamma1_intermediates(no_amplitudes, eris=eris)
+                    for a, b in zip(reconstructed, actual):
+                        numpy.testing.assert_allclose(a.get(), b.get(), atol=2e-13, rtol=2e-11)
+                    if not complex_phase:
+                        for a, b in zip(mp_gpu.mp2._gamma1_intermediates(no_amplitudes), actual):
+                            numpy.testing.assert_allclose(a.get(), b.get(), atol=2e-13, rtol=2e-11)
+                    numpy.testing.assert_array_equal(t2.get(), saved_t2.get())
+                    numpy.testing.assert_array_equal(eris.ovov.get(), saved_eri.get())
+
 
 if __name__ == "__main__":
     print("Full Tests for mp2")

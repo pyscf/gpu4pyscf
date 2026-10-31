@@ -81,6 +81,7 @@ class WithSolventGrad:
         return smd.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        assert atmlst is None or len(atmlst) == self.mol.natm
         logger.debug(self, 'Compute gradients from solutes')
         self.de_solute  = super().kernel(*args, **kwargs)
 

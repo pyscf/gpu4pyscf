@@ -15,9 +15,9 @@
 import unittest
 import numpy
 import cupy
-import pytest
 import pyscf
 from pyscf import gto
+from pyscf.solvent import smd as cpu_smd
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import smd
 from packaging import version
@@ -297,6 +297,8 @@ H -0.646 -0.464 -0.804
     """
 
     @unittest.skipIf(pyscf_211, 'requires pyscf 2.11 or higher')
+    @unittest.skipIf(cpu_smd.libsolvent is None,
+                     'CPU SMD reference requires PySCF built with ENABLE_SMD=ON')
     def test_to_gpu_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         e_gpu = mf.kernel()

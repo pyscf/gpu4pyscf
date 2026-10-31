@@ -277,7 +277,7 @@ def determine_hcore_cutoff(mol, mm_coords, a, mm_charges, rcut_min, dm, rcut_ste
             if coords2.size != 0:
                 err_icell += energy_octupole(qm_coords, coords2, qm_octupoles, mm_charges[mask])
         err_tot += err_icell
-        if abs(err_icell) < rs_precision:
+        if abs(err_icell) < rs_precision and icell > 0:
             break
         icell += 1
 
