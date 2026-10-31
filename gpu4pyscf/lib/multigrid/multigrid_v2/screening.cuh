@@ -633,6 +633,8 @@ __global__ void put_pairs_on_blocks_kernel(
       }
     }
     n_filtered_pairs_on_shared_memory += aggregated_block;
+    // The next iteration's BlockScan reuses the same temporary storage.
+    __syncthreads();
   }
   if (n_filtered_pairs_on_shared_memory > 0) {
     __syncthreads();
