@@ -15,6 +15,8 @@
 import unittest
 import numpy
 import cupy
+from pyscf import lib
+from gpu4pyscf.lib import cutensor
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cutensor import _contract_einsum, contraction
 
@@ -87,6 +89,144 @@ class KnownValues(unittest.TestCase):
         out2 = _contract_einsum('Lpq,Lkz->kpqz', veff, expLkz, 2., 0.)
         assert out2.flags.c_contiguous
         assert cupy.linalg.norm(out2 - 2*ref) < 1e-12
+
+    def test_einsum_fallback_slicing(self):
+        cupy.random.seed(1)
+        sizes = []
+        def einsum(pattern, a, b):
+            out = cupy.einsum(pattern, a, b)
+            sizes.append(a.size + b.size + out.size)
+            return out
+
+        with lib.temporary_env(cutensor, EINSUM_MAX_SIZE=1024):
+            for pattern, shape_a, shape_b in [
+                    ('pqr,qi->pri', (20, 20, 16), (20, 8)),
+                    ('pqr, qi -> pri', (20, 20, 16), (20, 8)),
+                    ('pqr,nqi->npri', (20, 20, 16), (2, 20, 8)),
+                    ('rs,pir->spi', (24, 24), (30, 8, 24)),
+                    ('npri,rniq->npq', (2, 20, 16, 8), (16, 2, 8, 20)),
+                    ('xpr,p->xr', (3, 1000, 16), (1000,)),
+                    ('pqr,pq->r', (20, 20, 16), (20, 20)),
+                    ('pxr,qyr->pqxy', (4, 3, 300), (4, 3, 300)),
+                    ('pq,rs->pqrs', (16, 16), (8, 8)),
+                    ('pq,qr->pr', (1, 2000), (2000, 2)),
+                    ('ab,ac->a', (10, 100), (10, 100)),
+                    ('ab,cd->ac', (10, 100), (10, 100)),
+                    ('ppq,qr->pr', (8, 8, 500), (500, 4)),
+                    ('ij,ij->', (64, 64), (64, 64))]:
+                a = cupy.random.rand(*shape_a)
+                b = cupy.random.rand(*shape_b)
+                ref = cupy.einsum(pattern, a, b)
+
+                sizes.clear()
+                out = _contract_einsum(pattern, a, b, 2., 0., einsum=einsum)
+                assert len(sizes) > 1, pattern
+                assert max(sizes) <= 1024, pattern
+                assert out.flags.c_contiguous, pattern
+                assert abs(out - 2*ref).max() < 1e-11, pattern
+
+                # beta has no meaning without an output array
+                out = _contract_einsum(pattern, a, b, 2., 3., einsum=einsum)
+                assert abs(out - 2*ref).max() < 1e-11, pattern
+
+                out = cupy.random.rand(*ref.shape)
+                ref1 = out*3 + ref*2
+                res = _contract_einsum(pattern, a, b, 2., 3., out=out, einsum=einsum)
+                assert res is out
+                assert abs(out - ref1).max() < 1e-11, pattern
+
+            a = cupy.random.rand(40, 40) + cupy.random.rand(40, 40)*1j
+            b = cupy.random.rand(40, 40)
+            out = _contract_einsum('ij,jk->ik', a, b, 1j, 0., einsum=einsum)
+            assert abs(out - 1j*a.dot(b)).max() < 1e-11
+
+            # The only output index is repeated, so the summed one is split
+            a = cupy.random.rand(100, 100, 8)
+            b = cupy.random.rand(8)
+            sizes.clear()
+            out = _contract_einsum('iip,p->i', a, b, 1., 0., einsum=einsum)
+            assert len(sizes) == 8
+            assert abs(out - cupy.einsum('iip,p->i', a, b)).max() < 1e-11
+
+            # The index is chosen to reduce the largest tensors first
+            for pattern, shape_a, shape_b, ncalls in [
+                    ('pq,qr->pr', (4, 300), (300, 300), 300),
+                    ('pq,qr->pr', (6, 400), (400, 6), 5),
+                    ('ab,ac->a', (10, 100), (10, 100), 2),
+                    ('ab,cd->ac', (10, 100), (10, 100), 8),
+                    ('xpr,xp->xr', (8, 256, 8), (8, 256), 20),
+                    ('xpq,xqr->xpr', (128, 64, 16), (128, 16, 8), 256),
+                    ('xpq,xqr->xpr', (8, 4, 16), (8, 16, 64), 16)]:
+                a = cupy.random.rand(*shape_a)
+                b = cupy.random.rand(*shape_b)
+                sizes.clear()
+                out = _contract_einsum(pattern, a, b, 1., 0., einsum=einsum)
+                assert abs(out - cupy.einsum(pattern, a, b)).max() < 1e-11, pattern
+                assert len(sizes) <= ncalls, pattern
+
+    def test_einsum_fallback_one_call(self):
+        cupy.random.seed(1)
+        sizes = []
+        def einsum(pattern, a, b):
+            sizes.append(a.size + b.size)
+            return cupy.einsum(pattern, a, b)
+
+        a = cupy.random.rand(64, 64)
+        b = cupy.random.rand(64, 64)
+        ref = a.dot(b)
+        c = a + 1j*b
+        with lib.temporary_env(cutensor, EINSUM_MAX_SIZE=1024):
+            for args, ref1 in [
+                    (('ij,jk', a, b), ref),
+                    (('...j,jk->...k', a, b), ref),
+                    (('ij,ij->ij', a, b[:1]), a*b[:1]),
+                    (('ij,jk->ik', a.get(), b), ref),
+                    (('ij,jk->ik', a, b.get()), ref)]:
+                for out in (None, cupy.empty_like(ref1)):
+                    sizes.clear()
+                    res = _contract_einsum(*args, 1., 0., out=out, einsum=einsum)
+                    assert len(sizes) == 1 and abs(res - ref1).max() < 1e-11
+
+            # An output of another dtype takes the cast of the result once
+            sizes.clear()
+            out = cupy.empty_like(a, dtype=numpy.float32)
+            _contract_einsum('ij,kj->ik', a, b, 1., 0., out=out, einsum=einsum)
+            assert len(sizes) == 1 and abs(out - a.dot(b.T)).max() < 1e-3
+            sizes.clear()
+            out = cupy.empty_like(a)
+            _contract_einsum('ij,kj->ik', c, b, 1., 0., out=out, einsum=einsum)
+            assert len(sizes) == 1 and abs(out - c.dot(b.T).real).max() < 1e-11
+
+            # So does an output that takes the result by broadcasting
+            sizes.clear()
+            out = cupy.empty((2, 64, 64))
+            _contract_einsum('ij,jk->ik', a, b, 1., 0., out=out, einsum=einsum)
+            assert len(sizes) == 1 and abs(out - ref).max() < 1e-11
+
+            # The output overlapping an operand cannot be written in pieces
+            sizes.clear()
+            b0 = b.copy()
+            _contract_einsum('ij,jk->ik', a, b0, 1., 0., out=b0, einsum=einsum)
+            assert len(sizes) == 1 and abs(b0 - ref).max() < 1e-11
+            sizes.clear()
+            _contract_einsum('ij,jk->ik', a, b, 1., 0., out=a, einsum=einsum)
+            assert len(sizes) == 1 and abs(a - ref).max() < 1e-11
+
+    def test_einsum_fallback_slicing_random(self):
+        rng = numpy.random.default_rng(5)
+        with lib.temporary_env(cutensor, EINSUM_MAX_SIZE=16):
+            for _ in range(500):
+                labels = list(rng.choice(list('ijklm'), rng.integers(1, 6), replace=False))
+                dims = {k: int(rng.integers(1, 6)) for k in labels}
+                sub_a = ''.join(rng.choice(labels, rng.integers(1, 5)))
+                sub_b = ''.join(rng.choice(labels, rng.integers(1, 5)))
+                sub_c = ''.join(k for k in sorted(set(sub_a + sub_b)) if rng.random() < .6)
+                pattern = f'{sub_a},{sub_b}->{sub_c}'
+                a = rng.random([dims[k] for k in sub_a])
+                b = rng.random([dims[k] for k in sub_b])
+                ref = numpy.einsum(pattern, a, b)
+                out = _contract_einsum(pattern, cupy.asarray(a), cupy.asarray(b), 2., 0.)
+                assert abs(out.get() - 2*ref).max() < 1e-10, pattern
 
 class EinsumFallback(unittest.TestCase):
     def setUp(self):

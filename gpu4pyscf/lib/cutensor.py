@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import numpy as np
 import cupy
 from gpu4pyscf.lib import logger
@@ -52,7 +53,76 @@ def _create_tensor_descriptor(a):
         a = cupy.ndarray(a.shape, a.dtype, a.data, strides)
     return cutensor.create_tensor_descriptor(a)
 
+# Approximate limit on the elements in the operands and the output of one einsum
+# call. cupy.einsum can copy its operands to the layout matmul needs and allocates
+# its own output, while the memory budgets in the code assume contractions as in
+# cuTENSOR.
+EINSUM_MAX_SIZE = 1 << 24
+
+def _einsum_slicing(pattern, a, b, out):
+    '''Find the index to slice along when the temporaries of einsum exceed
+    EINSUM_MAX_SIZE. Returns None if the contraction should be done in one call.
+    '''
+    if '->' not in pattern or '.' in pattern:
+        return None
+    if not all(isinstance(x, cupy.ndarray) for x in (a, b)):
+        return None
+    # One einsum call casts to out, the slices of a summed index are added to it
+    if out is not None and np.result_type(a.dtype, b.dtype) != out.dtype:
+        return None
+    sub_a, rest = pattern.replace(' ', '').split(',')
+    sub_b, sub_c = rest.split('->')
+    dims = dict(zip(sub_a, a.shape))
+    if any(dims.get(k, n) != n for k, n in zip(sub_b, b.shape)):
+        return None # broadcasting
+    dims.update(zip(sub_b, b.shape))
+    out_size = math.prod(dims[k] for k in sub_c)
+    tmp_size = a.size + b.size + out_size
+    if tmp_size <= EINSUM_MAX_SIZE:
+        return None
+    if out is not None and (out.shape != tuple(dims[k] for k in sub_c) or
+                            cupy.may_share_memory(out, a) or
+                            cupy.may_share_memory(out, b)):
+        return None
+
+    def can_slice(k):
+        return dims[k] > 1 and sub_a.count(k) < 2 and sub_b.count(k) < 2
+    labels = [k for k in sub_c if can_slice(k)]
+    # A summed index reduces both operands, but each slice has the full output
+    summed = [k for k in sub_a if k in sub_b and k not in sub_c and can_slice(k)]
+    if summed and (not labels or min(a.size, b.size) > out_size):
+        labels = summed
+    if not labels:
+        return None
+    # Prefer the index that reduces the most data
+    k = max(labels, key=lambda k: (k in sub_a) * a.size + (k in sub_b) * b.size)
+    step = max(dims[k] // math.ceil(tmp_size / EINSUM_MAX_SIZE), 1)
+    return k, step, sub_a, sub_b, sub_c, dims
+
+def _slice_along(a, subscripts, k, start, stop):
+    if k not in subscripts:
+        return a
+    idx = [slice(None)] * a.ndim
+    idx[subscripts.index(k)] = slice(start, stop)
+    return a[tuple(idx)]
+
 def _contract_einsum(pattern, a, b, alpha, beta, out=None, einsum=cupy.einsum):
+    slicing = _einsum_slicing(pattern, a, b, out)
+    if slicing is not None:
+        k, step, sub_a, sub_b, sub_c, dims = slicing
+        if out is None:
+            out = cupy.empty([dims[x] for x in sub_c],
+                             dtype=np.result_type(a.dtype, b.dtype))
+            beta = 0.
+        for i0 in range(0, dims[k], step):
+            i1 = i0 + step
+            _contract_einsum(pattern, _slice_along(a, sub_a, k, i0, i1),
+                             _slice_along(b, sub_b, k, i0, i1), alpha, beta,
+                             _slice_along(out, sub_c, k, i0, i1), einsum)
+            if k not in sub_c:
+                beta = 1
+        return out
+
     if out is None:
         out = cupy.asarray(einsum(pattern, a, b), order='C')
         out *= alpha
