@@ -23,7 +23,7 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, ndarray, get_avail_mem, empty_aligned)
+    contract, asarray, tag_array, ndarray, get_avail_mem, empty_aligned)
 from gpu4pyscf.gto.mole import RysIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern, get_ao_pair_loc
 from gpu4pyscf.df.grad.rhf import factorize_dm
@@ -65,6 +65,25 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     assert bvk_ncells == 1, 'Gamma derivatives require a one-cell BvK mesh'
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
+
+    nspin = dm.shape[0]
+    if hermi == 1 and j_factor == 0 and nspin == 2:
+        # Exchange is additive over spins.
+        log.info('Evaluate Gamma-point exchange one spin at a time')
+        ejk_sigma = np.zeros((cell.natm+3, 3))
+        for spin in range(2):
+            dm_spin = asarray(dm[spin:spin+1])
+            if hasattr(dm, 'mo_coeff'):
+                dm_spin = tag_array(
+                    dm_spin, mo_coeff=asarray(dm.mo_coeff[spin:spin+1]),
+                    mo_occ=asarray(dm.mo_occ[spin:spin+1]))
+
+            ejk_sigma += _get_ejk_derivatives(
+                int3c2e_opt, dm_spin, hermi, 0, k_factor, exxdiv,
+                omega, verbose, linear_dep_threshold)
+            if spin == 0:
+                cp.get_default_memory_pool().free_all_blocks()
+        return ejk_sigma
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
@@ -112,7 +131,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         max_aux_batch = int(np.diff(aux_offsets).max())
         buf = cp.empty((max_aux_batch, n_compact_pairs))
         buf1 = cp.empty((blksize, nocc, nao))
-        j3c_oo = cp.empty((2, naux, nocc, nocc))
+        j3c_oo = cp.empty((nspin, naux, nocc, nocc))
         for kbatch in range(aux_batches):
             compressed = eval_j3c(aux_batch_id=kbatch, out=buf)[:,0,:]
             naux_in_batch = compressed.shape[1]
@@ -122,10 +141,10 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 j3c = j3c_full[:,:,:dk]
                 j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
                 tmp = ndarray((nocc, nao, dk), buffer=buf1)
-                contract('pqr,pi->iqr', j3c, dm_factor_r[0], out=tmp)
-                contract('iqr,qj->rij', tmp, dm_factor_l[0], out=j3c_oo[0,aux0:aux1])
-                contract('pqr,pi->iqr', j3c, dm_factor_r[1], out=tmp)
-                contract('iqr,qj->rij', tmp, dm_factor_l[1], out=j3c_oo[1,aux0:aux1])
+                for spin in range(nspin):
+                    contract('pqr,pi->iqr', j3c, dm_factor_r[spin], out=tmp)
+                    contract('iqr,qj->rij', tmp, dm_factor_l[spin],
+                             out=j3c_oo[spin,aux0:aux1])
         j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
         return j3c_oo
 
@@ -133,7 +152,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         j3c_oo = sr_int3c2e()
         t0 = log.timer_debug1('contract sr_int3c2e dm', *t0)
     else:
-        j3c_oo = cp.zeros((2, naux, nocc, nocc))
+        j3c_oo = cp.zeros((nspin, naux, nocc, nocc))
 
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals.
@@ -217,8 +236,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             pqG = ndarray((nao,nao,nGv), dtype=np.complex128, buffer=buf)
             symmetric_scatter(pqG, i_addr, j_addr, pqG_compressed)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
-            ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            tmp = ndarray((nspin,nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((nspin,nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
             contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
             contract('rG,nijG->nrij', auxG, ijG, beta=1, out=j3c_oo)
@@ -320,8 +339,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # Note: PBC_ft_aopair_ek_deriv kernel only processes the tril part.
             # dm_oo must be symmetric
             dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
-            dm_ooG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
-            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            dm_ooG = ndarray((nspin,nocc,nocc,nGv*2), buffer=buf)
+            tmp = ndarray((nspin,nocc,nao,nGv*2), buffer=buf1)
             contract('nrji,rG->njiG', dm_oo, auxG_conj, out=dm_ooG)
             contract('njiG,nqi->njqG', dm_ooG, dm_factor_r, out=tmp)
             beta = 0
@@ -383,8 +402,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
                 beta = j_factor
             # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqGw, c, c, dm_oo, 1j*Gv, conj(auxG))
-            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
-            ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            tmp = ndarray((nspin,nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((nspin,nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,npi->niqG', pqGw, dm_factor_r, out=tmp)
             contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
             # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
@@ -490,7 +509,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 dk = k1 - k0
                 aux0, aux1 = aux1, aux1 + dk
                 dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
-                tmp = ndarray((2,nocc,nao,dk), buffer=buf2)
+                tmp = ndarray((nspin,nocc,nao,dk), buffer=buf2)
                 beta = 0
                 if j_factor != 0:
                     cp.multiply(dm_sorted[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
