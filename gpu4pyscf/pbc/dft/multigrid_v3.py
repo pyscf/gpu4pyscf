@@ -640,7 +640,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
 
     ke_upper = float(pair_ke.max().get())
-    ke_upper = min(ke_upper, ke_max)
+    ke_upper = min(ke_upper, float(ke_max))
     mesh = mesh_max = np.minimum(ke_to_mesh(a, ke_upper), ni.mesh)
     ke_lower = ke_upper * 0.6
 
@@ -2251,7 +2251,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             rhoG += rhoGb
             tauG = tauGb = None # release memory
             if dm_sc.nbytes * 10 > mem:
-                dm_sc = None
+                # Keep one optional output buffer per spin after releasing the DM.
+                dm_sc = [None, None]
 
             wv = cp.einsum('axg,axbyg->byg', rho1, fxc).reshape(2, nvar, *mesh)
             rho1 = None

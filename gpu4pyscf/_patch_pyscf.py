@@ -168,6 +168,8 @@ if pyscf_version <= 11:
                 unit = 1.
             else:
                 unit = 1/lib.param.BOHR
+        else:
+            unit = 1./unit
         return unit
 
     def set_geom_(self, atoms_or_coords=None, unit=None, symmetry=None,
@@ -296,6 +298,15 @@ if pyscf_version <= 11:
         return out
     lib.to_gpu = misc.to_gpu = to_gpu
 
+    from pyscf.hessian.rhf import HessianBase
+    _hessian_to_gpu_old = HessianBase.to_gpu
+    def _hessian_to_gpu(self):
+        # Older PySCF constructs a fresh Hessian and loses explicit settings.
+        # Keep its class/mean-field initialization, then transfer the state.
+        out = _hessian_to_gpu_old(self)
+        return misc.to_gpu(self, out=out)
+    HessianBase.to_gpu = _hessian_to_gpu
+
     from pyscf.solvent.grad import pcm as pcm_grad
     if hasattr(pcm_grad, 'WithSolventGrad'):
         def _pcm_grad_to_gpu(self):
@@ -344,7 +355,7 @@ if pyscf_version <= 12:
         if not hasattr(gpu_obj, "surface_discretization_method"):
             gpu_obj.surface_discretization_method = "SWIG"
         return gpu_obj
-    PCM.to_gpu = _smd_to_gpu
+    SMD.to_gpu = _smd_to_gpu
 
 from pyscf.data import elements
 if not hasattr(elements, 'NEUTRAL_ATOM_SPIN'):

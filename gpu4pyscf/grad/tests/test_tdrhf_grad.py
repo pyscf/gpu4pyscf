@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import pyscf
 import numpy as np
 import cupy as cp
@@ -21,6 +22,7 @@ import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.grad.tdrhf import _jk_energies_per_atom
 from gpu4pyscf.nac.finite_diff import diagonalize, diagonalize_tda
 

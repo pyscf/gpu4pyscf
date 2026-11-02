@@ -102,6 +102,7 @@ def _get_jk(mf, mol, dm, hermi=0, with_j=True, with_k=True, jkbuild=None,
             dm_k = cp.stack((dmaa, dmbb, dmab, dmba))
             ktmp = jkbuild(mf, mol, dm_k, hermi=0, with_j=False, omega=omega,
                            lr_factor=lr_factor, sr_factor=sr_factor)[1]
+            ktmp = ktmp.reshape(4, n_dm, nao, nao)
             vk = cp.zeros((n_dm, nso, nso), dtype=dm.dtype)
             # K from the last 4 DMs
             vk[:, :nao, :nao] = ktmp[0]

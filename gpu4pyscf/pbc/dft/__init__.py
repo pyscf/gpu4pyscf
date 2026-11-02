@@ -56,3 +56,10 @@ def KS(cell, *args, **kwargs):
         return RKS(cell, *args, **kwargs)
     else:
         return UKS(cell, *args, **kwargs)
+
+def KKS(cell, *args, **kwargs):
+    '''K-point KS, restricted for spin zero and unrestricted otherwise.'''
+    if cell.spin == 0:
+        return KRKS(cell, *args, **kwargs)
+    else:
+        return KUKS(cell, *args, **kwargs)

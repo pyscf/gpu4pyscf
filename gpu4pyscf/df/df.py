@@ -73,7 +73,7 @@ class DF(lib.StreamObject):
         self._rsh_parameters = None
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('intopt', '_cderi'))
+        excludes=('intopt', 'j_engine', '_cderi'))
 
     @property
     def auxbasis(self):
@@ -82,6 +82,7 @@ class DF(lib.StreamObject):
     def auxbasis(self, x):
         if self._auxbasis != x:
             self.reset()
+            self.auxmol = None
             self._auxbasis = x
 
     to_gpu = utils.to_gpu
@@ -514,7 +515,8 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                         k0 = aux_ao_loc[cp_kl_id]
                         k1 = aux_ao_loc[cp_kl_id+1]
-                        int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
+                        # Preserve the Coulomb block until the LR subtraction.
+                        int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices_lr[k0:k1], omega=omega)
                     ints_slices -= ints_slices_lr
             else:
                 # Initialization is required due to cutensor operations later

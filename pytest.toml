@@ -1,4 +1,7 @@
 [pytest]
+# Test directories are namespace packages. Resolve their parents through Python
+# before importlib collection so pytest does not re-execute initialized packages.
+consider_namespace_packages = true
 markers = [
     "slow", "benchmark", "high_memory", "special",
 ]

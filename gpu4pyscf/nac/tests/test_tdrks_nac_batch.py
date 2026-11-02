@@ -19,7 +19,6 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
-import pytest
 
 atom = """
 O 0. 0. 0.1174; H -0.757 0. -0.4696; H 0.757 0. -0.4696
@@ -37,6 +36,98 @@ def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
+
+
+class NACGradients_high_cost(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Three roots suffice for ground/excited and excited/excited batches.
+        cls.small_mol = pyscf.M(atom=atom, basis='6-31g', verbose=0)
+        cls._td_cache = {}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td_cache.clear()
+        del cls.small_mol
+
+    def _get_td(self, xc='b3lyp', full_td=False):
+        key = (xc, full_td)
+        if key not in self._td_cache:
+            mf = dft.RKS(self.small_mol, xc=xc).to_gpu()
+            mf.conv_tol = 1e-12
+            mf.kernel()
+            self.assertTrue(mf.converged)
+            td = mf.TDDFT() if full_td else mf.TDA()
+            td.nstates = 3
+            td.conv_tol = 1e-10
+            if full_td:
+                # The cutoff acts on squared trial-vector norms; retain the
+                # small corrections needed for the requested residual accuracy.
+                td.lindep = td.conv_tol**2
+            td.kernel()
+            self.assertTrue(np.all(cp.asnumpy(td.converged)))
+            energies = cp.asnumpy(td.e)
+            self.assertEqual(energies.shape, (3,))
+            self.assertTrue(np.isfinite(energies).all())
+            # Scaled couplings divide by energy gaps; avoid near-degenerate roots.
+            self.assertGreater(np.diff(np.r_[0., energies]).min(), 1e-5)
+            if full_td:
+                self.assertGreater(sum(float(cp.linalg.norm(y)) for _, y in td.xy), 1e-8)
+            self._td_cache[key] = td
+        return self._td_cache[key]
+
+    def _new_batch(self, td, target_state=None):
+        batch = td.nac_gradient_method()
+        batch.states = (0, 1, 2)
+        batch.grad_state = 1
+        batch.target_state = target_state
+        batch.cphf_conv_tol = 1e-10
+        return batch
+
+    def _assert_pair(self, td, result, pair):
+        direct = td.nac_method()
+        direct.states = pair
+        direct.cphf_conv_tol = 1e-10
+        direct.kernel()
+        self.assertGreater(np.linalg.norm(cp.asnumpy(direct.de)), 1e-6)
+        for name in ('de', 'de_scaled', 'de_etf', 'de_etf_scaled'):
+            actual = cp.asnumpy(result[name])
+            expected = cp.asnumpy(getattr(direct, name))
+            self.assertEqual(actual.shape, (self.small_mol.natm, 3))
+            self.assertTrue(np.isfinite(actual).all())
+            np.testing.assert_allclose(actual, expected, atol=1e-6, rtol=0,
+                                       err_msg=f'{pair}: {name}')
+
+    def _check_batch(self, td, target_state=None):
+        batch = self._new_batch(td, target_state)
+        batch.kernel()
+        pairs = {(0, 1), (1, 2)}
+        if target_state is None:
+            pairs.add((0, 2))
+        self.assertEqual(set(batch.results), pairs)
+        for pair in ((0, 1), (1, 2)):
+            self._assert_pair(td, batch.results[pair], pair)
+        gradient = td.nuc_grad_method()
+        gradient.state = 1
+        gradient.cphf_conv_tol = 1e-10
+        gradient.kernel()
+        np.testing.assert_allclose(cp.asnumpy(batch.grad_result),
+                                   cp.asnumpy(gradient.de), atol=1e-6, rtol=0)
+
+    def test_batch_svwn(self):
+        self._check_batch(self._get_td('svwn'))
+
+    def test_batch_camb3lyp(self):
+        self._check_batch(self._get_td('camb3lyp'))
+
+    def test_batch_tpss(self):
+        self._check_batch(self._get_td('tpss'))
+
+    def test_batch_tddft_b3lyp(self):
+        self._check_batch(self._get_td('b3lyp', full_td=True))
+
+    def test_target_state(self):
+        self._check_batch(self._get_td(), target_state=1)
 
 
 class KnownValues(unittest.TestCase):
@@ -109,7 +200,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_b3lyp(self):
+    def test_nac_tda_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -153,7 +244,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tda_singlet_b3lyp(self):
+    def test_nac_grad_tda_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -179,7 +270,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_camb3lyp(self):
+    def test_nac_tda_singlet_camb3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='camb3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -223,7 +314,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tda_singlet_camb3lyp(self):
+    def test_nac_grad_tda_singlet_camb3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='camb3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -317,7 +408,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tddft_singlet_b3lyp(self):
+    def test_nac_tddft_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDDFT().set(nstates=5)
@@ -361,7 +452,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tddft_singlet_b3lyp(self):
+    def test_nac_grad_tddft_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDDFT().set(nstates=5)
@@ -387,7 +478,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_grad_tda_singlet_b3lyp_target_state(self):
+    def test_nac_grad_tda_singlet_b3lyp_target_state_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -423,7 +514,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_grad_tda_singlet_b3lyp_target_state_ris_zvector_solver(self):
+    def test_nac_grad_tda_singlet_b3lyp_target_state_ris_zvector_solver_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -463,7 +554,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_z_vector_reuse(self):
+    def test_nac_z_vector_reuse_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)

@@ -803,6 +803,107 @@ def test_uhf_ejk_derivatives_kpts_with_long_range1():
         assert abs(sigma[i, j] - (e1-e2)/2/disp) < 5e-7
 
 
+@pytest.fixture(scope='module', params=[1, 2], ids=['gamma', 'two-kpoints'])
+def mixed_dd_spin_density(request):
+    cell = gto.M(
+        atom='He .2 .4 .1; He 2.1 1.2 1.8',
+        a=np.eye(3)*5, unit='Bohr', charge=1, spin=1,
+        basis=[[0, [2., 1.]], [0, [.15, 1.]], [1, [.6, 1.]]],
+        precision=1e-9, verbose=0)
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1.2, 1.]], [0, [.3, 1.]], [1, [.4, 1.]]]
+    auxcell.build(False, False)
+    kmesh = [request.param, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    overlap = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    eigenvalues, eigenvectors = np.linalg.eigh(overlap)
+    assert eigenvalues.min() > 1e-5
+    coeff = eigenvectors / np.sqrt(eigenvalues[:, None, :])
+    # A three-electron determinant with distinct alpha/beta occupied spaces.
+    alpha = coeff[:, :, :2]
+    beta = coeff[:, :, 2:3]
+    dm = np.array([alpha @ alpha.conj().transpose(0, 2, 1),
+                   beta @ beta.conj().transpose(0, 2, 1)])
+    np.testing.assert_allclose(
+        np.einsum('skij,kji->sk', dm, overlap),
+        np.array([[2.]*len(kpts), [1.]*len(kpts)]), atol=1e-12)
+    if request.param == 1:
+        assert abs(dm.imag).max() < 1e-12
+        dm = dm[:, 0].real
+        kpts = np.zeros(3)
+    dm = cp.asarray(dm)
+    opts = [int3c2e.SRInt3c2eOpt(cell, auxcell, .5, kmesh).build(
+                separate_dd=separated) for separated in (False, True)]
+    assert opts[0].dd_ft_opt is None
+    assert opts[1].dd_ft_opt is not None
+    compact, _ = opts[1].pair_and_diag_indices(cart=True, original_ao_order=False)
+    diffuse, _ = opts[1].dd_ft_opt.pair_and_diag_indices(
+        cart=True, original_ao_order=False)
+    unsplit, _ = opts[0].pair_and_diag_indices(cart=True, original_ao_order=False)
+    assert len(compact) > 0 and len(diffuse) > 0
+    # The genuine optimizer partitions the same AO-pair domain, without overlap.
+    compact, diffuse, unsplit = map(cp.asnumpy, (compact, diffuse, unsplit))
+    assert np.intersect1d(compact, diffuse).size == 0
+    np.testing.assert_array_equal(np.sort(np.r_[compact, diffuse]), np.sort(unsplit))
+    return cell, auxcell, kmesh, kpts, dm, opts
+
+
+def _mixed_dd_uhf_energy(cell, auxcell, kmesh, dm, omega, j_factor, k_factor):
+    kpts = cell.make_kpts(kmesh)
+    nkpts = len(kpts)
+    if dm.ndim == 3:
+        dm = dm[:, None]
+    cderi = rsdf_builder.build_cderi(
+        cell, auxcell, kpts=kpts, kmesh=kmesh, omega=omega)[0]
+    total_dm = dm[0] + dm[1]
+    rho = sum(cp.einsum('pij,ji->p', cderi[k, k], total_dm[k])
+              for k in range(nkpts))
+    energy = j_factor * .5 * rho.dot(rho).real
+    for ki in range(nkpts):
+        for kj in range(nkpts):
+            lij = (cderi[ki, kj] if (ki, kj) in cderi
+                   else cderi[kj, ki].transpose(0, 2, 1).conj())
+            lji = (cderi[kj, ki] if (kj, ki) in cderi
+                   else cderi[ki, kj].transpose(0, 2, 1).conj())
+            exchange = cp.einsum('pij,sjk,sli,pkl->', lij, dm[:, kj],
+                                 dm[:, ki], lji, optimize=True)
+            energy -= k_factor * .5 * exchange.real
+    return float(energy.get()) / nkpts**2
+
+
+@pytest.mark.parametrize('omega', [0, -.4], ids=['full-range', 'short-range'])
+def test_mixed_dd_unrestricted_derivatives(mixed_dd_spin_density, omega):
+    cell, auxcell, kmesh, kpts, dm, opts = mixed_dd_spin_density
+    j_factor, k_factor = .7, .8
+    results = [kuhf._get_ejk_derivatives(
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        omega=omega) for opt in opts]
+    result = results[1]
+    np.testing.assert_allclose(result, results[0], atol=5e-8, rtol=0)
+    np.testing.assert_allclose(result[:-3].sum(axis=0), 0, atol=1e-9)
+
+    coulomb = kuhf._get_ejk_derivatives(
+        opts[1], dm, kpts, hermi=1, j_factor=j_factor, k_factor=0, omega=omega)
+    total_coulomb = krhf._get_ejk_derivatives(
+        opts[1], dm[0]+dm[1], kpts, hermi=1,
+        j_factor=j_factor, k_factor=0, omega=omega)
+    np.testing.assert_allclose(coulomb, total_coulomb, atol=1e-11, rtol=0)
+    exchange = kuhf._get_ejk_derivatives(
+        opts[1], dm, kpts, hermi=1, j_factor=0, k_factor=k_factor, omega=omega)
+    np.testing.assert_allclose(result, coulomb+exchange, atol=1e-10, rtol=0)
+
+    def energy(c, ac):
+        return _mixed_dd_uhf_energy(c, ac, kmesh, dm, omega, j_factor, k_factor)
+
+    _check_gradient(result[:-3], cell, auxcell, energy, tol=5e-7)
+    disp = 1e-4
+    for i, j in [(0, 0), (0, 1)]:
+        c1, c2 = _finite_diff_cells(cell, i, j, disp=disp)
+        a1, a2 = _finite_diff_cells(auxcell, i, j, disp=disp)
+        numerical = (energy(c1, a1) - energy(c2, a2)) / (2*disp)
+        assert abs(result[-3+i, j] - numerical) < 5e-7
+
+
 def _gamma_df_energy(cell, auxcell, dm, omega, k_factor):
     mydf = FFTDF(cell)
     mydf.mesh = mesh = np.maximum(cell.mesh, auxcell.mesh)

@@ -67,6 +67,9 @@ def gen_response_ris(mf, mf_J, mf_K, mo_coeff=None, mo_occ=None,
                 else:
                     vk = mf_K.get_k(mol, dm1, hermi=hermi)
                     v1 -= .5 * hyb * vk
+                    if omega > 1e-10:
+                        vk = mf_K.get_k(mol, dm1, hermi, omega)
+                        v1 -= .5 * (alpha-hyb) * vk
             elif hermi != 2:
                 vj = mf_J.get_j(mol, dm1, hermi=hermi)
                 v1 += vj
@@ -320,6 +323,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
 
 def get_veff_ris(mf_J, mf_K, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+    """Return the fixed-density derivative of the quarter-weighted fitted energy.
+
+    The retained normalization is j_factor*Tr(D J[D])/8 minus
+    k_factor*Tr(D K[D])/16, including motion of the distinct auxiliary bases.
+    This helper does not return the full conventional J/K energy derivative.
+    """
     from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt
     auxmol_J = mf_J.with_df.auxmol
     auxmol_K = mf_K.with_df.auxmol
@@ -426,6 +435,8 @@ class Gradients(tdrhf.Gradients):
                     "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
+            if self.base.xy is None:
+                self.base.run()
             xy = rescale_spin_free_amplitudes(self.base.xy, state-1)
 
         if singlet is None:

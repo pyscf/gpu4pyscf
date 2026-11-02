@@ -41,8 +41,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
     mf = mf_grad.base
     mol = mf_grad.mol
-    if atmlst is None:
-        atmlst = range(mol.natm)
 
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
@@ -69,6 +67,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     de = e1_grad + e2_grad
     de += cupy.asnumpy(mf_grad.extra_force())
     log.timer_debug1('gradients of electronic part', *t0)
+    if atmlst is not None:
+        de = de[list(atmlst)]
     return de
 
 

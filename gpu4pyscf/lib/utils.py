@@ -89,6 +89,8 @@ def to_cpu(method, out=None):
         out.__dict__.pop(k, None)
 
     for key, val in method.__dict__.items():
+        if key in discards:
+            continue
         # Convert only the keys that are defined in the corresponding GPU class
         if key in cls_keys:
             if hasattr(val, 'to_cpu'):

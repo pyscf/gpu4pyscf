@@ -699,6 +699,65 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
         assert np.max(np.abs(test_hess - ref_hess)) < 1e-14
 
+
+class SurfaceHessian(unittest.TestCase):
+    def test_diagonal_surface_hessian(self):
+        for discretization in ['SWIG', 'ISWIG']:
+            with self.subTest(discretization=discretization):
+                from gpu4pyscf.solvent.grad.pcm import get_dF_dA
+                from gpu4pyscf.solvent.hessian.pcm import (
+                    get_d2F_d2A, get_d2Sii, contract_d2S_diagonal)
+
+                small_mol = gto.M(atom='O 0 0 0; H 0.1 1.4 1.1; H 1.5 -0.2 1.0',
+                                  basis='sto-3g', unit='Bohr', verbose=0)
+                coords = small_mol.atom_coords()
+
+                def surface_at(positions):
+                    displaced = small_mol.set_geom_(positions, unit='Bohr', inplace=False)
+                    return pcm.gen_surface(displaced, ng=38, rad=model.radii_table,
+                                           surface_discretization_method=discretization)
+
+                model = pcm.PCM(small_mol)
+                model.lebedev_order = 9
+                model.surface_discretization_method = discretization
+                model.build()
+                density = cp.asarray(pyscf.scf.RHF(small_mol).get_init_guess())
+                model._get_vind(density)
+                surface = model.surface
+                # Use the physical induced charge and adjoint potential. Their vanishing
+                # weights on buried points avoid ill-conditioned, arbitrary 1/F factors.
+                charge = model._intermediates['q']
+                adjoint = model.left_solve_K(model._intermediates['v_grids'], K_transpose=True)
+                weights = charge * adjoint
+                dF, _ = get_dF_dA(surface, with_dA=False,
+                                 surface_discretization_method=discretization)
+                d2F, _ = get_d2F_d2A(surface, discretization)
+                full = cp.einsum('ABxyq,q->ABxy', get_d2Sii(surface, dF, d2F), weights)
+                actual = contract_d2S_diagonal(surface, dF, weights, discretization).get()
+                np.testing.assert_allclose(actual, full.get(), atol=2e-10, rtol=2e-12)
+                np.testing.assert_allclose(actual, actual.transpose(1, 0, 3, 2), atol=2e-10)
+                np.testing.assert_allclose(actual.sum(axis=0), 0, atol=2e-10)
+
+                def scalar(positions):
+                    displaced = surface_at(positions)
+                    # With this geometry and small displacements, no surface point changes
+                    # membership. A changed mask would invalidate a fixed-index derivative.
+                    assert displaced['gslice_by_atom'] == surface['gslice_by_atom']
+                    diagonal = np.sqrt(2 / np.pi) * displaced['charge_exp'] / displaced['switch_fun']
+                    return float(cp.dot(weights, diagonal))
+
+                center = scalar(coords)
+                directions = (np.array([[0.3, -0.1, 0.2], [-0.4, 0.2, 0.1], [0.1, 0.3, -0.2]]),
+                              np.array([[0., 0., 0.], [0.2, 0.4, -0.1], [-0.2, -0.1, 0.3]]))
+                for direction in directions:
+                    expected = np.einsum('Ax,ABxy,By->', direction, actual, direction)
+                    step = 1e-3
+                    estimate = (scalar(coords + step * direction) - 2 * center
+                                + scalar(coords - step * direction)) / step**2
+                    np.testing.assert_allclose(estimate, expected, atol=2e-5, rtol=2e-6)
+
+
+
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")
     unittest.main()

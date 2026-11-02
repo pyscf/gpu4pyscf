@@ -15,8 +15,11 @@
 import unittest
 import numpy as np
 import cupy as cp
+import pyscf
+from packaging.version import Version
 from pyscf import lib
 from pyscf.pbc import gto as pbcgto
+from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc import scf as pscf
 from gpu4pyscf.pbc.scf import kuhf
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
@@ -220,6 +223,141 @@ class KnownValues(unittest.TestCase):
         dm = mf.get_init_guess(key='mod_huckel', s1e=s)
         assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
         assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
+
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.14'),
+                     'Temporarily disabled for PySCF <= 2.14: CPU KUHF empty-beta occupations')
+    def test_fully_polarized_kpoint_occupations(self):
+        from pyscf.pbc.scf import KUHF as CpuKUHF
+        cell = pbcgto.M(atom='H .2 .3 .4', spin=1, unit='Bohr',
+                        a=np.diag([5., 5.2, 5.4]), mesh=[25, 27, 29],
+                        basis=[[0, [.8, 1.]], [1, [.4, 1.]]],
+                        pseudo='gth-pade', precision=1e-10, verbose=0)
+        kpts = cell.make_kpts([2, 1, 1])
+        mf = pscf.KUHF(cell, kpts=kpts)
+        # KUHF.nelec counts electrons over all sampled k-points.
+        mf.nelec = (len(kpts), 0)
+        hcore, overlap = mf.get_hcore(), mf.get_ovlp()
+        energy, coeff = mf.eig((hcore, hcore), overlap)
+        cpu = CpuKUHF(cell, kpts=kpts)
+        cpu.nelec = mf.nelec
+        reference = np.asarray(cpu.get_occ(energy.get()))
+        np.testing.assert_array_equal(reference.sum(axis=(1, 2)), cpu.nelec)
+        self.assertEqual(np.count_nonzero(reference[1]), 0)
+        occupation = mf.get_occ(energy, coeff)
+        np.testing.assert_array_equal(occupation.get(), reference)
+        density = mf.init_guess_by_1e()
+        counts = cp.einsum('skij,kji->s', density, overlap).real.get()
+        np.testing.assert_allclose(counts, mf.nelec, atol=1e-10, rtol=0)
+        np.testing.assert_array_equal(density[1].get(), 0.)
+        mf.conv_tol = cpu.conv_tol = 1e-11
+        mf.kernel(dm0=density)
+        cpu.kernel(dm0=density.get())
+        self.assertTrue(mf.converged and cpu.converged)
+        np.testing.assert_allclose(mf.e_tot, cpu.e_tot, atol=1e-9, rtol=0)
+        np.testing.assert_array_equal(mf.mo_occ.get(), np.asarray(cpu.mo_occ))
+        np.testing.assert_array_equal(mf.make_rdm1()[1].get(), 0.)
+
+
+class UnrestrictedSCFProperties(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from pyscf.pbc import scf as cpu_scf
+        cls.cell = pbcgto.M(
+            atom='He .2 .3 .4', unit='Bohr', a=np.diag([5., 5.2, 5.4]),
+            basis=[[0, [.8, 1.]], [1, [.4, 1.]]], pseudo='gth-pade',
+            mesh=[25, 27, 29], precision=1e-10, verbose=0)
+        cls.kpts = cls.cell.make_kpts([2, 1, 1])
+        cls.models = {}
+        for name in ('UHF', 'KUHF'):
+            kwargs = {} if name == 'UHF' else {'kpts': cls.kpts}
+            gpu = getattr(pscf, name)(cls.cell, **kwargs).run(conv_tol=1e-11)
+            cpu = getattr(cpu_scf, name)(cls.cell, **kwargs).run(conv_tol=1e-11)
+            assert gpu.converged and cpu.converged
+            cls.models[name] = gpu, cpu
+
+    def _check_density_dispatch(self, name):
+        from gpu4pyscf.pbc.dft import UniformGrids
+        from gpu4pyscf.pbc.dft.multigrid_v3 import MultiGridNumInt
+        from pyscf.pbc.dft.numint import KNumInt as CpuNumInt
+        sampled = name.startswith('K')
+        source = self.models[name][0]
+        kwargs = {'kpts': self.kpts} if sampled else {}
+        mf = getattr(pscf, name)(self.cell, **kwargs)
+        mf.mo_coeff = source.mo_coeff.copy()
+        mf.mo_occ = source.mo_occ.copy()
+        grids = UniformGrids(self.cell)
+        mf.build()
+        self.assertIsInstance(mf._numint, MultiGridNumInt)
+        original_mesh = np.asarray(mf._numint.mesh).copy()
+        grids.mesh = np.asarray(self.cell.mesh) + 2
+        density = mf.make_rdm1()
+        before = density.copy()
+        actual = mf.get_rho(grids=grids)
+        explicit = mf.get_rho(dm=density, grids=grids)
+        np.testing.assert_allclose(actual.get(), explicit.get(), atol=1e-12, rtol=0)
+        coordinates = grids.coords.get()
+        kpts = self.kpts if sampled else np.zeros((1, 3))
+        ao = self.cell.pbc_eval_gto('GTOval_sph', coordinates, kpts=kpts)
+        charge = density.sum(axis=0)
+        charge = charge.get().reshape(len(kpts), self.cell.nao, self.cell.nao)
+        reference = CpuNumInt().eval_rho(self.cell, ao, charge, hermi=1)
+        np.testing.assert_allclose(actual.get(), reference, atol=1e-9, rtol=0)
+        np.testing.assert_array_equal(density.get(), before.get())
+        np.testing.assert_array_equal(mf._numint.mesh, original_mesh)
+
+    def test_get_rho_uhf_built(self):
+        self._check_density_dispatch('UHF')
+
+    def test_get_rho_kuhf_built(self):
+        self._check_density_dispatch('KUHF')
+
+
+    def test_kuhf_default_fock(self):
+        rotation = np.eye(self.cell.nao)
+        angle = .13
+        rotation[:2, :2] = [[np.cos(angle), -np.sin(angle)],
+                            [np.sin(angle), np.cos(angle)]]
+        mf, cpu = self.models['KUHF']
+        coeff = cp.matmul(mf.mo_coeff, cp.asarray(rotation))
+        occupation = mf.mo_occ
+        density = mf.make_rdm1(coeff, occupation)
+        hcore = mf.get_hcore()
+        energy = mf.energy_elec(density, hcore)
+        reference = cpu.energy_elec(density.get(), hcore.get())
+        np.testing.assert_allclose(energy, reference, atol=1e-9, rtol=0)
+        gradient = mf.get_grad(coeff, occupation)
+        ref_grad = cpu.get_grad(coeff.get(), occupation.get())
+        self.assertGreater(float(cp.linalg.norm(gradient)), 1e-3)
+        np.testing.assert_allclose(gradient.get(), ref_grad, atol=1e-9, rtol=0)
+        eigenvalues, canonical = mf.canonicalize(coeff, occupation)
+        ref_values = cpu.canonicalize(coeff.get(), occupation.get())[0]
+        np.testing.assert_allclose(eigenvalues.get(), np.asarray(ref_values), atol=1e-9, rtol=0)
+        np.testing.assert_allclose(mf.make_rdm1(canonical, occupation).get(),
+                                   density.get(), atol=1e-11, rtol=0)
+
+    def test_single_band_shape_and_normalization(self):
+        mf, cpu = self.models['KUHF']
+        energy, coeff = mf.get_bands(np.zeros(3))
+        batched = mf.get_bands(np.zeros((1, 3)))[0]
+        reference = cpu.get_bands(np.zeros(3))[0]
+        expected_shape = (2, self.cell.nao)
+        self.assertEqual(energy.shape, expected_shape)
+        unbatched = batched[:, 0]
+        np.testing.assert_allclose(energy.get(), unbatched.get(), atol=1e-11, rtol=0)
+        np.testing.assert_allclose(energy.get(), np.asarray(reference), atol=1e-9, rtol=0)
+        overlap = cp.asarray(self.cell.pbc_intor('int1e_ovlp'))
+        for c in coeff:
+            np.testing.assert_allclose((c.conj().T @ overlap @ c).get(),
+                                       np.eye(self.cell.nao), atol=1e-10, rtol=0)
+
+    def test_kpts_without_gamma(self):
+        cell = self.cell
+        kpts = cell.make_kpts([2, 2, 1], with_gamma_point=False)
+        for mf_cls in (pscf.KUHF, dft.KUKS):
+            with self.subTest(mf_cls=mf_cls.__name__):
+                with self.assertRaisesRegex(NotImplementedError, 'include the Gamma point'):
+                    mf_cls(cell, kpts=kpts).kernel()
+
 
 if __name__ == '__main__':
     print("Tests for PBC UHF and PBC KUHF")

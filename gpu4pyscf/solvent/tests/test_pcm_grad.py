@@ -15,7 +15,6 @@
 import unittest
 import numpy
 import pyscf
-import pytest
 import cupy
 from pyscf import gto
 from gpu4pyscf import scf
@@ -363,6 +362,7 @@ class KnownValues(unittest.TestCase):
         ])
 
         assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 1e-7
+
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of PCMs")
