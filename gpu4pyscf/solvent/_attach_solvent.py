@@ -174,8 +174,11 @@ class SCFWithSolvent(_Solvation):
     def gen_response(self, *args, **kwargs):
         vind = self.undo_solvent().gen_response(*args, **kwargs)
         is_uhf = isinstance(self, scf.uhf.UHF)
+        hermi = kwargs.get("hermi", 0)
         def vind_with_solvent(dm1):
             v = vind(dm1)
+            if hermi == 2:
+                return v
             if self.with_solvent.equilibrium_solvation:
                 if is_uhf:
                     v += self.with_solvent._B_dot_x(dm1[0]+dm1[1])

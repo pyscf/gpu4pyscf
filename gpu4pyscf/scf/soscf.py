@@ -42,7 +42,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 
     if fock_ao is None:
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        fock_ao = mf.get_fock(h1e, dm=dm0)
+        fock_ao = mf.get_fock(h1e, None, None, dm0)
     fock = mo_coeff.conj().T.dot(fock_ao).dot(mo_coeff)
     foo = fock[occidx[:,None],occidx]
     fvv = fock[viridx[:,None],viridx]
@@ -70,7 +70,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 def gen_g_hop_rohf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
     if getattr(fock_ao, 'focka', None) is None:
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        fock_ao = mf.get_fock(h1e, dm=dm0)
+        fock_ao = mf.get_fock(h1e, None, None, dm0)
     fock_ao = fock_ao.focka, fock_ao.fockb
     mo_occa = occidxa = mo_occ > 0
     mo_occb = occidxb = mo_occ ==2
@@ -120,7 +120,7 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 
     if fock_ao is None:
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        fock_ao = mf.get_fock(h1e, dm=dm0)
+        fock_ao = mf.get_fock(h1e, None, None, dm0)
     focka = mo_coeff[0].conj().T.dot(fock_ao[0]).dot(mo_coeff[0])
     fockb = mo_coeff[1].conj().T.dot(fock_ao[1]).dot(mo_coeff[1])
     fooa = focka[occidxa[:,None],occidxa]

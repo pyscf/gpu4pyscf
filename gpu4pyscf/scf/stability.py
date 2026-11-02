@@ -202,9 +202,13 @@ def _gen_hop_rhf_external(mf, with_symmetry=False, verbose=None):
     mvir = mo_coeff[:, nocc:]
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    Fock_ao = mf.get_fock(dm = dm0)
-    Foo = mocc.conj().T @ Fock_ao @ mocc
-    Fvv = mvir.conj().T @ Fock_ao @ mvir
+    from gpu4pyscf.solvent._attach_solvent import SCFWithSolvent
+    if isinstance(mf, SCFWithSolvent):
+        fock_ao = mf.get_fock(dm_or_wfn=dm0)
+    else:
+        fock_ao = mf.get_fock(dm=dm0)
+    Foo = mocc.conj().T @ fock_ao @ mocc
+    Fvv = mvir.conj().T @ fock_ao @ mvir
 
     hdiag = Fvv.diagonal()[:, None] - Foo.diagonal()
     hdiag = hdiag.ravel()

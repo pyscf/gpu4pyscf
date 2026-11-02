@@ -77,7 +77,11 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                             vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
                         v1 += vj - .5 * vk
                     else:
-                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
+                        vk = mf.get_k(mol, dm1, hermi=hermi)
+                        vk *= hyb
+                        if abs(omega) > 1e-10:  # For range separated Coulomb
+                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                        v1 -= .5 * vk
                 elif hermi != 2:
                     v1 += mf.get_j(mol, dm1, hermi=hermi)
                 return v1
@@ -101,7 +105,11 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                             vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
                         v1 += vj - .5 * vk
                     else:
-                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
+                        vk = mf.get_k(mol, dm1, hermi=hermi)
+                        vk *= hyb
+                        if abs(omega) > 1e-10:  # For range separated Coulomb
+                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                        v1 -= .5 * vk
                 elif hermi != 2:
                     v1 += mf.get_j(mol, dm1, hermi=hermi)
                 return v1
