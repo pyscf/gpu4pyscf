@@ -652,8 +652,13 @@ def get_j(dfobj, dm, hermi=1):
 
     j2c, tag = dfobj._cd_j2c
     if tag == 'cd':
-        rhoj = solve_triangular(j2c, rhoj.T, lower=True)
-        rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
+        if rhoj.ndim == 1:
+            # 1-d: .T is a no-op, but dpnp deprecates .T on non-2D arrays
+            rhoj = solve_triangular(j2c, rhoj, lower=True)
+            rhoj = solve_triangular(j2c.T, rhoj, lower=False)
+        else:
+            rhoj = solve_triangular(j2c, rhoj.T, lower=True)
+            rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
     else:
         rhoj = rhoj.dot(j2c).dot(j2c.T)
 
