@@ -17,9 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
 #include "rys_roots.cu"
@@ -587,7 +584,8 @@ int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbas_aux, nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    cudaError_t err = cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
         return 1;
@@ -612,7 +610,8 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
-    cudaError_t err = cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;

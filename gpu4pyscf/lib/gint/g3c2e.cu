@@ -159,7 +159,7 @@ static void GINTfill_int3c2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisPr
     double* __restrict__ x12 = c_bpcache.x12;
     double* __restrict__ y12 = c_bpcache.y12;
     double* __restrict__ z12 = c_bpcache.z12;
-
+    
     double gout0 = 0;
     for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
     for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
@@ -179,7 +179,7 @@ static void GINTfill_int3c2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisPr
         const double aijkl = aij + akl;
         const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -190,7 +190,7 @@ static void GINTfill_int3c2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisPr
         }
         gout0 += fac;
     } }
-
+    
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
 
@@ -256,7 +256,7 @@ static void GINTfill_int3c2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisPr
         const double aijkl = aij + akl;
         const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         const double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -295,7 +295,7 @@ static void GINTfill_int3c2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisPr
 
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
-
+    
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish] - eri.ao_offsets_i;
     const int j0 = ao_loc[jsh] - eri.ao_offsets_j;
@@ -325,7 +325,7 @@ static void GINTfill_int3c2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisPr
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-
+    
     const int nprim_ij = envs.nprim_ij;
     const int nprim_kl = envs.nprim_kl;
     const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -369,7 +369,7 @@ static void GINTfill_int3c2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisPr
         const double aijkl = aij + akl;
         const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         const double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -405,12 +405,12 @@ static void GINTfill_int3c2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisPr
 
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
-
+    
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish] - eri.ao_offsets_i;
     const int j0 = ao_loc[jsh] - eri.ao_offsets_j;
     const int k0 = ao_loc[ksh] - eri.ao_offsets_k;
-
+   
     double* __restrict__ eri_ij = eri.data + k0*kstride+j0*jstride+i0;
 
     eri_ij[0] = gout0;
@@ -436,7 +436,7 @@ static void GINTfill_int3c2e_kernel0100(GINTEnvVars envs, ERITensor eri, BasisPr
     const int ish = bas_pair2bra[bas_ij];
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
-
+    
     const int nprim_ij = envs.nprim_ij;
     const int nprim_kl = envs.nprim_kl;
     const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
@@ -480,7 +480,7 @@ static void GINTfill_int3c2e_kernel0100(GINTEnvVars envs, ERITensor eri, BasisPr
         const double aijkl = aij + akl;
         const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         const double fac = eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -516,12 +516,12 @@ static void GINTfill_int3c2e_kernel0100(GINTEnvVars envs, ERITensor eri, BasisPr
 
     const size_t jstride = eri.stride_j;
     const size_t kstride = eri.stride_k;
-
+    
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish] - eri.ao_offsets_i;
     const int j0 = ao_loc[jsh] - eri.ao_offsets_j;
     const int k0 = ao_loc[ksh] - eri.ao_offsets_k;
-
+   
     double* __restrict__ eri_ij = eri.data + k0*kstride+j0*jstride+i0;
 
     eri_ij[0] = gout0;

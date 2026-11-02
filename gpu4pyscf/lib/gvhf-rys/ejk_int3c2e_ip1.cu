@@ -17,9 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -30,29 +27,12 @@
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
 
-// unrolled_ejk_int3c2e_ip1.cu is auto-generated upstream and must stay
-// byte-identical. Its kernels use __syncthreads() but never declare an
-// nd_item, so swap in an item-free barrier for the duration of the include.
-// All launches are 3-D nd_range (LAUNCH_KERNEL), so get_nd_item<3>() is
-// well-formed.
-#ifdef USE_SYCL
-#pragma push_macro("__syncthreads")
-#undef __syncthreads
-#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
-#endif
 // The generated file defines its own (device-side) LAUNCH_KERNEL; restore
 // gpu_compat.h's launcher after the include, as fill_int3c2e.cu does.
 #pragma push_macro("LAUNCH_KERNEL")
 #undef LAUNCH_KERNEL
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_ejk_int3c2e_ip1.cu"
-#pragma GCC diagnostic pop
-#undef LAUNCH_KERNEL
 #pragma pop_macro("LAUNCH_KERNEL")
-#ifdef USE_SYCL
-#pragma pop_macro("__syncthreads")
-#endif
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
@@ -798,7 +778,8 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
-    cudaError_t err = cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
@@ -827,7 +808,8 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
 {
     size_t nao2 = nao * nao;
 
-    cudaError_t err = cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;

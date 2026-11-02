@@ -134,6 +134,14 @@ _DEFER_FREE_FLUSH_STRIDE = max(1, int(
 # to the thread that imported this module. Guards against a reader/writer
 # deadlock inside libsycl's Scheduler -- see _on_scheduler_safe_thread().
 # Set to 0 ONLY to reproduce the pre-fix deadlock for debugging.
+# FUTURE (upstream fix available): this deadlock is intel/llvm#22943
+# (https://github.com/intel/llvm/issues/22943), fixed by
+# https://github.com/intel/llvm/pull/22993. Verified ABSENT from both the
+# stock Aurora DPC++ 2026.1.0 and oneapi 2026.2.0 (reproducer still hangs
+# ~10%, fix symbol missing from libsycl). When a compiler carrying the
+# fix lands (try 2026.3.0), re-run the issue's reproducer ~30x
+# (expect 0/30 hangs vs 3/30 here), then re-run the hang repros and try
+# deleting _drain_then / the barrier gating.
 _DEFER_FREE_MAIN_THREAD_ONLY = (
     os.environ.get("GPU4PYSCF_DEFER_FREE_MAIN_THREAD_ONLY", "1") != "0"
 )
@@ -617,19 +625,14 @@ def _reap_completed_locked():
     submission order (oldest first): the oldest event is the long pole, and
     later waits are typically already complete.
 
-    Two empirically verified properties of `submit_barrier()` events on
-    this SYCL/PVC/Level-Zero stack (probes run this session, mirrors of the
-    `test_rhf_hessian` evidence cited above):
-
-    * BUSY queue: the barrier event is a REAL waitable backend event. A
-      probe submitting a ~13 s kernel, then the barrier, then more work,
-      saw `ev.wait()` block ~13 s -- exactly until the pre-barrier work
-      completed, ignoring the post-barrier submissions. This is the
-      property that makes the tagged reap correct.
-    * IDLE queue: the barrier returns a Level Zero "internal event" whose
-      `.wait()` returns immediately and does NOT raise. That is still safe
-      here: an idle in-order queue means all previously submitted work has
-      completed, so dropping the batch right away cannot race anything.
+    Requires DPC++ >= 2026.2.0. On a busy queue the barrier event is a REAL
+    waitable backend event (a probe submitting a ~13 s kernel, then the
+    barrier, then more work, saw `ev.wait()` block ~13 s -- exactly until
+    the pre-barrier work completed, ignoring the post-barrier submissions);
+    on an idle queue `.wait()` returns immediately, which is safe because
+    nothing is in flight. On 2026.1.0 the Level Zero adapter aborts the
+    process (`ur_die: urEventWait must not be called for an internal event`)
+    on back-to-back barrier submit+wait; see ur_event_barrier_bug/REPORT.md.
 
     `ext_oneapi_get_last_event()` was ALSO probed as a cheaper tag
     candidate (no barrier submission at all) and REJECTED: on this stack it
@@ -640,12 +643,6 @@ def _reap_completed_locked():
     not track a last event (`LastEvent = nullptr`), so the function falls
     back to `insertMarkerEvent()`, whose event is not waitable. Do not use
     `ext_oneapi_get_last_event` for lifetime ordering on this stack.
-
-    If any tagged event is missing or its `.wait()` raises, this falls
-    back to the previous whole-queue drain -- `_master_queue().wait()` --
-    which is a strict superset of waiting for any barrier submitted on
-    that queue and is always safe (see the `Event`/`Device.synchronize()`
-    comment above documenting the idle-queue internal-event caveat).
 
     Both `SyclEvent.wait()` and `SyclQueue.wait()` release the GIL while
     blocking (`with nogil: DPCTLEvent_Wait(...)` / `DPCTLQueue_Wait(...)`
@@ -695,33 +692,15 @@ def _reap_completed_locked():
     # "batch", which is unaffected by releasing this lock.
     _defer_free_lock.release()
     try:
-        waited_all = True
         for ev, _batch in tagged:
-            if ev is None:
-                waited_all = False
-                break
-            try:
-                ev.wait()
-            except Exception:
-                # An unusable barrier event (historically the Level Zero
-                # "internal event" on an idle queue). The whole-queue drain
-                # below is always safe.
-                waited_all = False
-                break
-        if not waited_all:
-            try:
-                _master_queue().wait()
-            except Exception:
-                # Cannot drain the queue -- release rather than leak.
-                pass
+            ev.wait()
     finally:
         _defer_free_lock.acquire()
     # Every tagged event was submitted strictly after the buffers in its
     # batch were last read (the master queue is in-order and
     # _flush_deferred_frees_locked always submits its barrier before
-    # returning), so completing those waits -- or the fallback queue drain
-    # -- proves every tagged batch is now genuinely safe to release.
-    # Nothing stays "still pending".
+    # returning), so completing those waits proves every tagged batch is
+    # now genuinely safe to release. Nothing stays "still pending".
     _pending_frees["tagged"] = []
 
 
@@ -1072,6 +1051,11 @@ def _wrap_with_master_queue(mod, names):
 # in-order queue with host-task keep-alives, so there is no pipelining
 # to lose.
 # =====================================================================
+# NOTE 2026-10-27 (Claude Opus 5.5, claude-opus-5-5): _DPNP_NATIVE_BLOCKING
+# and _wrap_blocking_lapack() are dead code. Nothing calls
+# _wrap_blocking_lapack() since 9e0295c8, because dpnp #3027 (7a2714ba747)
+# releases the GIL around the blocking oneMKL calls. Still without the GIL
+# release in dpnp: gemv, syrk, getrs, getrs_batch, getri_batch.
 _DPNP_NATIVE_BLOCKING = {
     "dpnp.backend.extensions.blas._blas_impl": (
         "_dot", "_dotc", "_dotu", "_gemm", "_gemm_batch", "_gemv", "_syrk",
@@ -1101,21 +1085,25 @@ def _drain_then(orig):
     return wrapper
 
 
-def _wrap_blocking_setitem():
-    """Same treatment for dpnp's `arr[idx] = value` (intel/llvm#22943).
-
-    `usm_ndarray.__setitem__` enqueues the copy then blocks on
-    `event_impl::wait()` in `dpnp/tensor/_tensor_impl`; on the in-order queue
-    that reaches `Scheduler::GraphProcessor::waitForEvent`, which blocks while
-    holding the graph read lock, so an in-flight host task can never be
-    enqueued. Caught with gdb on a hung test_df_int3c2e.py::test_int3c2e_rsh.
-    Overhead ~7-10% per setitem; accepted because the alternative is a hang.
-    """
-    from dpnp.dpnp_array import dpnp_array as _arr
-    orig = _arr.__setitem__
-    if getattr(orig, "__gil_drained__", False):
-        return
-    _arr.__setitem__ = _drain_then(orig)
+# DISABLED 2026-10-28 (Claude Opus 5.5, claude-opus-5-5): Layer 5 setitem
+# drain, commented out together with its _bootstrap() call. 3-pass sweep on
+# PVC with it off: scf/dft/tdscf/hessian/grad/df/pbc 1392 passed, 0 failed,
+# 0 hangs per pass (sweep3_results/RESULTS.md). Uncomment to restore.
+# def _wrap_blocking_setitem():
+#     """Same treatment for dpnp's `arr[idx] = value` (intel/llvm#22943).
+#
+#     `usm_ndarray.__setitem__` enqueues the copy then blocks on
+#     `event_impl::wait()` in `dpnp/tensor/_tensor_impl`; on the in-order queue
+#     that reaches `Scheduler::GraphProcessor::waitForEvent`, which blocks while
+#     holding the graph read lock, so an in-flight host task can never be
+#     enqueued. Caught with gdb on a hung test_df_int3c2e.py::test_int3c2e_rsh.
+#     Overhead ~7-10% per setitem; accepted because the alternative is a hang.
+#     """
+#     from dpnp.dpnp_array import dpnp_array as _arr
+#     orig = _arr.__setitem__
+#     if getattr(orig, "__gil_drained__", False):
+#         return
+#     _arr.__setitem__ = _drain_then(orig)
 
 
 def _wrap_blocking_lapack():
@@ -1146,64 +1134,67 @@ def _wrap_blocking_lapack():
                     RuntimeWarning)
 
 
-# =====================================================================
-# Layer 6: keep dpctl's order managers alive.
+# DISABLED 2026-10-28 (Claude Opus 5.5, claude-opus-5-5): Layer 6
+# order-manager pin, commented out together with its _bootstrap() call.
+# Same 3-pass sweep evidence as the Layer 5 setitem drain above.
+# # =====================================================================
+# # Layer 6: keep dpctl's order managers alive.
+# #
+# # Second face of intel/llvm#22943. dpctl keeps its
+# # `_SequentialOrderManager` instances in a **thread-local** map
+# # (`SyclQueueToOrderManagerMap._get_map`), and the manager's `__del__`
+# # does
+# #
+# #     SyclEvent.wait_for(_local.get_submitted_events())
+# #     SyclEvent.wait_for(_local.get_host_task_events())
+# #
+# # So when *any* worker thread exits, its thread-local dict is torn down
+# # and a blocking SYCL event wait runs from inside a garbage-collection
+# # finalizer. That wait enters
+# # `Scheduler::GraphProcessor::waitForEvent`, which blocks while holding
+# # the graph read lock; if a host task is in flight it can never be
+# # enqueued, and the process wedges. Captured with gdb on a hung
+# # `dft/tests/test_numint.py`:
+# #
+# #   Thread 9 : slot_tp_finalize -> SyclEvent.wait_for -> DPCTLEvent_Wait
+# #              -> Scheduler::waitForEvent -> enqueueCommand(BLOCKING)
+# #              -> event_impl::waitInternal      [holds GraphReadLock]
+# #   Thread 3 : DispatchHostTask::waitForEvents -> urEventWait
+# #   Thread 1 : blocked on a Python lock held by thread 9
+# #
+# # Pinning every manager with a process-lifetime strong reference means
+# # `__del__` never runs before interpreter shutdown, where dpctl's own
+# # `sys.is_finalizing()` guard already short-circuits the waits. Nothing
+# # else changes: the managers stay functional and keep ordering work
+# # exactly as before. Cost is a few small objects per thread.
+# # =====================================================================
+# _pinned_order_managers = _state.setdefault("pinned_order_managers", [])
 #
-# Second face of intel/llvm#22943. dpctl keeps its
-# `_SequentialOrderManager` instances in a **thread-local** map
-# (`SyclQueueToOrderManagerMap._get_map`), and the manager's `__del__`
-# does
 #
-#     SyclEvent.wait_for(_local.get_submitted_events())
-#     SyclEvent.wait_for(_local.get_host_task_events())
+# def _pin_order_managers():
+#     try:
+#         from dpctl.utils import _order_manager as _om
+#     except Exception as e:
+#         warnings.warn(
+#             f"Layer 6: could not import dpctl.utils._order_manager; the "
+#             f"finalizer-driven variant of intel/llvm#22943 remains "
+#             f"reachable: {e}", RuntimeWarning)
+#         return
 #
-# So when *any* worker thread exits, its thread-local dict is torn down
-# and a blocking SYCL event wait runs from inside a garbage-collection
-# finalizer. That wait enters
-# `Scheduler::GraphProcessor::waitForEvent`, which blocks while holding
-# the graph read lock; if a host task is in flight it can never be
-# enqueued, and the process wedges. Captured with gdb on a hung
-# `dft/tests/test_numint.py`:
+#     cls = getattr(_om, "_SequentialOrderManager", None)
+#     if cls is None or getattr(cls, "__gpu4pyscf_pinned__", False):
+#         return
 #
-#   Thread 9 : slot_tp_finalize -> SyclEvent.wait_for -> DPCTLEvent_Wait
-#              -> Scheduler::waitForEvent -> enqueueCommand(BLOCKING)
-#              -> event_impl::waitInternal      [holds GraphReadLock]
-#   Thread 3 : DispatchHostTask::waitForEvents -> urEventWait
-#   Thread 1 : blocked on a Python lock held by thread 9
+#     _orig_init = cls.__init__
 #
-# Pinning every manager with a process-lifetime strong reference means
-# `__del__` never runs before interpreter shutdown, where dpctl's own
-# `sys.is_finalizing()` guard already short-circuits the waits. Nothing
-# else changes: the managers stay functional and keep ordering work
-# exactly as before. Cost is a few small objects per thread.
-# =====================================================================
-_pinned_order_managers = _state.setdefault("pinned_order_managers", [])
-
-
-def _pin_order_managers():
-    try:
-        from dpctl.utils import _order_manager as _om
-    except Exception as e:
-        warnings.warn(
-            f"Layer 6: could not import dpctl.utils._order_manager; the "
-            f"finalizer-driven variant of intel/llvm#22943 remains "
-            f"reachable: {e}", RuntimeWarning)
-        return
-
-    cls = getattr(_om, "_SequentialOrderManager", None)
-    if cls is None or getattr(cls, "__gpu4pyscf_pinned__", False):
-        return
-
-    _orig_init = cls.__init__
-
-    @functools.wraps(_orig_init)
-    def __init__(self, *args, **kwargs):
-        _orig_init(self, *args, **kwargs)
-        # Strong reference -> never finalized mid-run.
-        _pinned_order_managers.append(self)
-
-    cls.__init__ = __init__
-    cls.__gpu4pyscf_pinned__ = True
+#     @functools.wraps(_orig_init)
+#     def __init__(self, *args, **kwargs):
+#         _orig_init(self, *args, **kwargs)
+#         # Strong reference -> never finalized mid-run.
+#         _pinned_order_managers.append(self)
+#
+#     cls.__init__ = __init__
+#     cls.__gpu4pyscf_pinned__ = True
 
 
 # =====================================================================
@@ -1257,9 +1248,9 @@ def _bootstrap():
     # Layer 4d: dpnp.linalg outputs (cholesky/solve/eigh/...). Same gap
     # family as 4c -- oneMKL results allocated inside dpnp C++.
     _wrap_linalg_allocating_funcs()
-    # Layer 4e + 4f SAFETY NETS (2026-10-13): wrong-type (numpy-into-dpnp)
-    # usage is fixed at the gpu4pyscf call sites — these shims are dormant
-    # backstops so a missed site fails soft instead of crashing a run.
+    # Layer 4e SAFETY NET (2026-10-13): wrong-type (numpy-into-dpnp)
+    # usage is fixed at the gpu4pyscf call sites — this shim is a dormant
+    # backstop so a missed site fails soft instead of crashing a run.
     # 4e: CuPy's ndarray implements __array__ as an implicit device-to-host
     # copy; dpnp raises. Keep the CuPy behavior available.
     try:
@@ -1271,36 +1262,6 @@ def _bootstrap():
                 return _np.array(host, dtype=dtype, copy=True) if dtype is not None else _np.array(host)
             _dpnp_shim_array.__cupy_shim_array__ = True
             _dpnp_arr_cls.__array__ = _dpnp_shim_array
-    except Exception:
-        pass
-    # 4f: CuPy's linalg functions asarray() their inputs; dpnp raises.
-    # Skip isinstance(x, type) entries — wrapping LinAlgError broke
-    # `except` clauses once (see progress.md).
-    try:
-        _linalg_mod = dpnp.linalg
-        for _name in dir(_linalg_mod):
-            if _name.startswith('_'):
-                continue
-            _orig = getattr(_linalg_mod, _name, None)
-            if (not callable(_orig) or isinstance(_orig, types.ModuleType)
-                    or isinstance(_orig, type)
-                    or getattr(_orig, "__hostarg_wrapped__", False)):
-                continue
-            def _linalg_wrapper(*args, _orig=_orig, **kwargs):
-                args = tuple(
-                    dpnp.asarray(a) if isinstance(a, _np.ndarray) and not isinstance(a, dpnp.ndarray) else a
-                    for a in args
-                )
-                for _k, _v in list(kwargs.items()):
-                    if isinstance(_v, _np.ndarray) and not isinstance(_v, dpnp.ndarray):
-                        kwargs[_k] = dpnp.asarray(_v)
-                return _orig(*args, **kwargs)
-            _linalg_wrapper.__hostarg_wrapped__ = True
-            _linalg_wrapper.__wrapped__ = _orig
-            try:
-                setattr(_linalg_mod, _name, _linalg_wrapper)
-            except (TypeError, AttributeError):
-                continue
     except Exception:
         pass
     # Layer 4g: index()-normalize slice components on dpnp getitem.
@@ -1520,10 +1481,18 @@ def _bootstrap():
         _ewc.DPNPBinaryFunc.at = _ufunc_at
     except Exception:
         pass
-    _wrap_blocking_setitem()
+    # DISABLED 2026-10-27 (Claude Opus 5.5, claude-opus-5-5): Layer 5
+    # setitem drain and Layer 6 order-manager pin. A/B on PVC with both off:
+    # original repro files (test_df_int3c2e, test_numint, test_soscf) 18/18
+    # clean, scf/dft/df/grad/hessian sweep 87/87 files clean (699 passed,
+    # 0 failed, 0 hangs). The hangs they targeted share the libsycl
+    # read-lock/write-lock inversion that the Layer 4 main-thread gating
+    # (_on_scheduler_safe_thread) already prevents; with gating off the hang
+    # reproduces 6/6 regardless. Re-enable by uncommenting.
+    # _wrap_blocking_setitem()
     # Layer 6: stop dpctl's thread-local order managers from running a
     # blocking event wait inside a finalizer when a worker thread exits.
-    _pin_order_managers()
+    # _pin_order_managers()
 
     _state["bootstrapped"] = True
 
@@ -1871,16 +1840,11 @@ cublas = _Cublas
 # =====================================================================
 # Event -- wall-clock timing + queue.wait() sync
 #
-# submit_barrier() on an idle in-order queue returns a Level Zero
-# 'internal event' whose .wait() returns immediately (probed directly:
-# no raise, no hang) and tracks no queued work, so we use host-clock
-# for elapsed-time math and queue.wait() as the sync primitive. On
-# an in-order queue, queue.wait() is a strict superset of 'wait for
-# the barrier we would have submitted'. (For lifetime ordering the
-# deferred-free reaper waits barrier events directly -- see
-# _reap_completed_locked -- which is safe because the busy-queue
-# barrier event IS real and the idle-queue case implies nothing is
-# in flight.)
+# We use the host clock for elapsed-time math and queue.wait() as the
+# sync primitive. On an in-order queue, queue.wait() is a strict superset
+# of 'wait for the barrier we would have submitted'. (For lifetime
+# ordering the deferred-free reaper waits barrier events directly -- see
+# _reap_completed_locked.)
 # =====================================================================
 class Event:
     """CuPy-compatible GPU timing Event."""
@@ -1899,6 +1863,10 @@ class Event:
         self._timestamp = time.perf_counter()
         self._recorded  = True
         self._synced    = False
+        # A per-record submit_barrier() so query() could poll instead of
+        # block aborted natively on DPC++ 2026.1.0 (the UR internal-event
+        # bug, see _reap_completed_locked). Not retried on 2026.2.0:
+        # record() stays a host timestamp and query() stays blocking.
 
     def synchronize(self):
         if self._recorded and not self._synced and self._queue is not None:
@@ -2028,7 +1996,14 @@ class _Runtime:
 
     @staticmethod
     def deviceCanAccessPeer(src: int, dst: int) -> bool:
-        return True
+        # Always False, so gpu4pyscf.__config__._p2p_access is False and the
+        # multi-GPU paths (p2p_transfer, array_reduce, concatenate) take their
+        # explicit-copy fallbacks. dpnp/dpctl reject any op whose operands
+        # live on different queues ("Execution queue is not compatible with
+        # allocation queues", ExecutionPlacementError) even with Level Zero
+        # peer access enabled; verified on PVC tiles 2026-10-27 (Claude Opus
+        # 5.5, claude-opus-5-5). cudaDeviceCanAccessPeer(d, d) is 0 as well.
+        return False
 
 
 runtime = _Runtime()

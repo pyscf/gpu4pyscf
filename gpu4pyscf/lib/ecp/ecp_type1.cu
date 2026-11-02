@@ -214,11 +214,8 @@ void type1_cart(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    constexpr int LIJ1 = LI+LJ+1;
-
     setup_context();
     const int task_id = blockIdx_x;
-    SHARED_ARRAY(double, rad_ang, [LIJ1*LIJ1*LIJ1]);
     if (task_id >= ntasks){
         return;
     }
@@ -254,6 +251,8 @@ void type1_cart(double *gctr,
         ur += rad_part(kbas, ecpbas, env);
     }
 
+    constexpr int LIJ1 = LI+LJ+1;
+    SHARED_ARRAY(double, rad_ang, [LIJ1*LIJ1*LIJ1]);
     set_shared_memory(rad_ang, LIJ1*LIJ1*LIJ1);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
@@ -336,12 +335,10 @@ void type1_cart(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env,
-                void *shm_mem)
+                const int *atm, const int *bas, const double *env)
 {
     setup_context();
     const int task_id = blockIdx_x;
-    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -349,6 +346,8 @@ void type1_cart(double *gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
+
+    DYNAMIC_SHARED_PTR(double, smem);
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
@@ -464,3 +463,4 @@ void type1_cart(double *gctr,
     }
     return;
 }
+

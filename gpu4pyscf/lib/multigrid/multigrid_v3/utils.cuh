@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include "gsycl/gpu_compat.h"
-
 template <typename T>
 __host__ __device__ T distance_squared(const T x, const T y, const T z) {
   return x * x + y * y + z * z;

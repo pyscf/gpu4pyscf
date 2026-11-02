@@ -16,12 +16,30 @@
 
 #pragma once
 
+// cuda.h: CUDA_VERSION (aft_eval_*); cuda_runtime.h: runtime API used everywhere.
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cuComplex.h>
 #include "gsycl/gpu_compat.h"
-#include "gvhf-rys/vhf.cuh"   // c_nf / c_div_nf on both backends
-#include <cuComplex.h>        // gsycl/cuComplex.h shim under SYCL
 
-extern TABLE_DEFINE(double, s_c_lattice_vectors, c_lattice_vectors, 9);
-extern TABLE_DEFINE(double, s_c_reciprocal_lattice_vectors, c_reciprocal_lattice_vectors, 9); // norm to 1
-extern TABLE_DEFINE(double, s_c_dxyz_dabc, c_dxyz_dabc, 9);
+// All constant memory of multigrid_v3 is declared here.
+#ifdef USE_SYCL
+// c_nf / c_div_nf: constexpr tables defined in vhf.cuh (CUDA declares them below).
+#include "gvhf-rys/vhf.cuh"
+// __constant__ is constexpr under SYCL, which the host cannot update, so the
+// host-written tables are device_globals. Being inline they need no
+// definition in any one .cu; cudaMemcpyToSymbol and c_xxx[i] work on them
+// exactly as on CUDA.
+inline sycl_device_global<double[9]> c_lattice_vectors;
+inline sycl_device_global<double[9]> c_reciprocal_lattice_vectors; // norm to 1
+inline sycl_device_global<double[9]> c_dxyz_dabc;
+#else
+// Defined in drivers.cu
+extern __constant__ double c_lattice_vectors[9];
+extern __constant__ double c_reciprocal_lattice_vectors[9]; // norm to 1
+extern __constant__ double c_dxyz_dabc[9];
+extern __constant__ int c_nf[];
+extern __constant__ float c_div_nf[];
+#endif
 
 #define NBAS_MAX        16777216

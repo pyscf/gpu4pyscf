@@ -34,11 +34,6 @@ set(GPU_SRCS
   rys_roots_dat.cu
   cart2sph.cu
 )
-# CUDA-only constant table definitions (SYCL defines these via device_global).
-if (NOT USE_SYCL)
-  list(APPEND GPU_SRCS constant_tables.cu)
-endif()
-
 add_library(gint SHARED ${GPU_SRCS})
 
 set_target_properties(gint PROPERTIES
@@ -46,6 +41,10 @@ set_target_properties(gint PROPERTIES
 
 if (USE_SYCL)
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
+  # also compile it as its own TU.
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
+    PROPERTIES HEADER_FILE_ONLY ON)
   target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
   target_link_libraries(gint PRIVATE sycl_compat gsycl)
 else()

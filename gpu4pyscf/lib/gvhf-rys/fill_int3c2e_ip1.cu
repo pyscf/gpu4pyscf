@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -33,7 +31,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs,
                     double omega, double lr_factor, double sr_factor,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc,                     int ao_pair_offset, int aux_offset,
+                    int *ao_pair_loc, int ao_pair_offset, int aux_offset,
                     int nao_pairs, int naux)
 {
     setup_context();
@@ -263,7 +261,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs,
                     double omega, double lr_factor, double sr_factor,
                     int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc,                     int ao_pair_offset, int aux_offset,
+                    int *ao_pair_loc, int ao_pair_offset, int aux_offset,
                     int nao_pairs, int naux)
 {
     setup_context();
@@ -499,7 +497,8 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
-    cudaError_t err = cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
@@ -527,7 +526,8 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
-    cudaError_t err = cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;

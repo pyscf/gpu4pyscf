@@ -15,8 +15,7 @@
  */
 
 #include "gvhf-rys/rys_roots.cuh"
-// Backend macros for the converted helpers below (includers guarantee
-// cuda_runtime.h / sycl_device.hpp first, as before).
+// Backend macros for the converted helpers below.
 #include "gsycl/gpu_compat.h"
 
 #define SQRTPIE4        .8862269254527580136

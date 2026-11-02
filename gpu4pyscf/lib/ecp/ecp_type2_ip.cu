@@ -14,31 +14,14 @@
  * limitations under the License.
  */
 
+
 template <int orderi, int orderj, int LI, int LJ, int LC> __device__
 void type2_cart_unrolled_kernel(double *gctr,
                 const int ish, const int jsh, const int ksh,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    constexpr int LI1 = LI+1;
-    constexpr int LJ1 = LJ+1;
-    constexpr int LIC1 = LI+LC+1;
-    constexpr int LJC1 = LJ+LC+1;
-    constexpr int LCC1 = (2*LC+1);
-
-    constexpr int BLKI = (LIC1+1)/2 * LCC1;
-    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
-
-    constexpr int nfi = (LI+1) * (LI+2) / 2;
-    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-
     setup_context();
-    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
-    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
-    SHARED_ARRAY(double, rad_all, [(LI+LJ+1)*LIC1*LJC1]);
-    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
-    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
-
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
@@ -53,10 +36,23 @@ void type2_cart_unrolled_kernel(double *gctr,
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
 
+    constexpr int LI1 = LI+1;
+    constexpr int LJ1 = LJ+1;
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int LJC1 = LJ+LC+1;
+    constexpr int LCC1 = (2*LC+1);
+
+    constexpr int BLKI = (LIC1+1)/2 * LCC1;
+    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
+
+    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
+    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
+
     type2_facs_omega<LI, LC>(omegai, rca);
     type2_facs_omega<LJ, LC>(omegaj, rcb);
     __syncthreads();
 
+    SHARED_ARRAY(double, rad_all, [(LI+LJ+1)*LIC1*LJC1]);
     set_shared_memory(rad_all, (LI+LJ+1)*LIC1*LJC1);
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
@@ -89,6 +85,12 @@ void type2_cart_unrolled_kernel(double *gctr,
         ur_tmp *= r128[ir];
     }
     __syncthreads();
+
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
+
+    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
+    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
@@ -127,19 +129,15 @@ void type2_cart_unrolled_kernel(double *gctr,
     }
 }
 
-// `smem` is passed in rather than declared here as `extern __shared__`:
-// under SYCL the dynamic local memory comes from a sycl::local_accessor
-// created by the enclosing submit(), which cannot be reached from a
-// device function. The CUDA callers pass their own `extern __shared__`
-// block, so behaviour is unchanged.
 template <int orderi, int orderj> __device__
-void type2_cart_kernel(double *smem, double *gctr,
+void type2_cart_kernel(double *gctr,
                 const int LI, const int LJ, const int LC,
                 const int ish, const int jsh, const int ksh,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
     setup_context();
+    DYNAMIC_SHARED_PTR(double, smem);
 
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
@@ -250,14 +248,8 @@ void type2_cart_ip1(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    constexpr int nfi = (LI+1) * (LI+2) / 2;
-    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    constexpr int nfi1 = (LI+2) * (LI+3)/2;
-
     setup_context();
     const int task_id = blockIdx_x;
-    SHARED_ARRAY(double, gctr_smem, [nfi*nfj*3]);
-    SHARED_ARRAY(double, buf, [nfi1*nfj]);
     if (task_id >= ntasks){
         return;
     }
@@ -270,11 +262,16 @@ void type2_cart_ip1(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
+    SHARED_ARRAY(double, gctr_smem, [nfi*nfj*3]);
     for (int ij = threadIdx_x; ij < nfi*nfj*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
+    constexpr int nfi1 = (LI+2) * (LI+3)/2;
+    SHARED_ARRAY(double, buf, [nfi1*nfj]);
     type2_cart_unrolled_kernel<1,0,LI+1,LJ,LC>(
         buf, ish, jsh, ksh, 
         ecpbas, ecploc, 
@@ -310,17 +307,10 @@ void type2_cart_ip1_general(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env,
-                void *shm_mem)
+                const int *atm, const int *bas, const double *env)
 {
-    constexpr int NFI_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    constexpr int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-
     setup_context();
     const int task_id = blockIdx_x;
-    SHARED_ARRAY(double, gctr_smem, [NF_MAX*NF_MAX*3]);
-    SHARED_ARRAY(double, buf, [NFI_MAX*NFJ_MAX]);
-    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -333,12 +323,16 @@ void type2_cart_ip1_general(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
+    SHARED_ARRAY(double, gctr_smem, [NF_MAX*NF_MAX*3]);
     for (int ij = threadIdx_x; ij < NF_MAX*NF_MAX*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
-    type2_cart_kernel<1,0>(smem,
+    constexpr int NFI_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    constexpr int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
+    SHARED_ARRAY(double, buf, [NFI_MAX*NFJ_MAX]);
+    type2_cart_kernel<1,0>(
         buf, LI+1, LJ, LC, 
         ish, jsh, ksh, 
         ecpbas, ecploc, 
@@ -346,7 +340,7 @@ void type2_cart_ip1_general(double *gctr,
     _li_down(gctr_smem, buf, LI, LJ);
     __syncthreads();
     if (LI > 0){
-        type2_cart_kernel<0,0>(smem,
+        type2_cart_kernel<0,0>(
             buf, LI-1, LJ, LC, 
             ish, jsh, ksh, 
             ecpbas, ecploc, 

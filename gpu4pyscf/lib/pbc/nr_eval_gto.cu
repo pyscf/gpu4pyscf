@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 
 #define LMAX 4
@@ -1872,5 +1871,3 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
     return 0;
 }
 }
-
-#undef SETUP_GTO_KERNEL

@@ -15,18 +15,14 @@
  */
 
 #include <stdio.h>
-#include <cuda_runtime.h>
 #include "constant_objects.cuh"
-#include "gsycl/gpu_compat.h"
+#include <gvhf-rys/rys_constant.cu>
 
-TABLE_DEFINE(double, s_c_lattice_vectors, c_lattice_vectors, 9);
-TABLE_DEFINE(double, s_c_reciprocal_lattice_vectors, c_reciprocal_lattice_vectors, 9);
-TABLE_DEFINE(double, s_c_dxyz_dabc, c_dxyz_dabc, 9);
-
-
-
-// c_nf/c_div_nf defined in constant_tables.cu (CUDA-only).
-
+#ifndef USE_SYCL
+__constant__ double c_lattice_vectors[9];
+__constant__ double c_reciprocal_lattice_vectors[9];
+__constant__ double c_dxyz_dabc[9];
+#endif
 
 // input[nc,nx,ny,nz], output[nc,mx,my,mz]
 __global__ static
@@ -91,12 +87,12 @@ extern "C" {
 void update_lattice_vectors(double *lattice_vectors,
                             double *reciprocal_lattice_vectors)
 {
-    TABLE_FILL(c_lattice_vectors, s_c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    TABLE_FILL(c_reciprocal_lattice_vectors, s_c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
+    cudaMemcpyToSymbol(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
+    cudaMemcpyToSymbol(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
 }
 
 void update_dxyz_dabc(double *dxyz_dabc) {
-    TABLE_FILL(c_dxyz_dabc, s_c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
+    cudaMemcpyToSymbol(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
 }
 
 int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts)

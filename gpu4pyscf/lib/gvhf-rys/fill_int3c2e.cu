@@ -17,32 +17,13 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-// unrolled_int3c2e.cu is auto-generated upstream and must stay byte-identical.
-// Its kernels use __syncthreads() but never declare an nd_item, so swap in an
-// item-free barrier for the duration of the include. All launches are 3-D
-// nd_range (LAUNCH_KERNEL_*), so get_nd_item<3>() is well-formed.
-#ifdef USE_SYCL
-#pragma push_macro("__syncthreads")
-#undef __syncthreads
-#define __syncthreads() (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
-#endif
 #pragma push_macro("LAUNCH_KERNEL")
 #undef LAUNCH_KERNEL
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_int3c2e.cu"
-#pragma GCC diagnostic pop
-#undef LAUNCH_KERNEL
 #pragma pop_macro("LAUNCH_KERNEL")
-#ifdef USE_SYCL
-#pragma pop_macro("__syncthreads")
-#endif
 #include "build_rys_gxyz.cuh"
 
 #define THREADS         256
@@ -1617,7 +1598,8 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int ao_pair_offset, int aux_offset, int naux, int reorder_aux,
                  int to_sph)
 {
-    cudaError_t err = cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;

@@ -18,8 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
@@ -124,7 +122,6 @@ while (1) {
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
-    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -723,7 +720,6 @@ while (1) {
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     }
-    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];

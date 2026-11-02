@@ -11,7 +11,25 @@
 #  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
 #  CUDA_SEPARABLE_COMPILATION ON)
 
-set(GPU_SRCS_v3
+# mgrid_v2 is not SYCL-ported (multigrid_v2.py tolerates a missing libmgrid_v2).
+if (ENABLE_MULTIGRID_V2 AND NOT USE_SYCL)
+add_library(mgrid_v2 SHARED
+        multigrid_v2/drivers.cu
+        multigrid_v2/screen.cu
+        multigrid_v2/eval_xc.cu
+        multigrid_v2/eval_xc_grad.cu
+)
+
+set_target_properties(mgrid_v2 PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+        CUDA_SEPARABLE_COMPILATION ON
+)
+if(ENABLE_FP32_MULTIGRID)
+  target_compile_definitions(mgrid_v2 PRIVATE GPU4PYSCF_ENABLE_FP32_MULTIGRID)
+endif()
+endif()
+
+add_library(mgrid_v3 SHARED
   multigrid_v3/screen.cu
   multigrid_v3/drivers.cu
   #multigrid_v3/eval_density.cu
@@ -30,25 +48,17 @@ set(GPU_SRCS_v3
   multigrid_v3/aft_eval_mgga_mat.cu
 )
 
-# CUDA-only c_nf / c_div_nf definitions (SYCL gets them from gvhf-rys/vhf.cuh).
-if (NOT USE_SYCL)
-  list(APPEND GPU_SRCS_v3 multigrid_v3/constant_tables.cu)
-endif()
-
-add_library(mgrid_v3 SHARED ${GPU_SRCS_v3})
+set_target_properties(mgrid_v3 PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+  CUDA_SEPARABLE_COMPILATION ON
+)
 
 if (USE_SYCL)
-  # mgrid_v2 is not the default multigrid engine (multigrid_v3 is) and is
-  # not SYCL-ported (multigrid_v2.py already tolerates a missing
-  # libmgrid_v2 via try/except OSError, same as the dead v1 "mgrid"
-  # target above). Only mgrid_v3 is built here.
   file(GLOB CUH_HEADERS_v3
     "${CMAKE_CURRENT_SOURCE_DIR}/multigrid_v3/*.cuh"
   )
-  set_source_files_properties(${CUH_HEADERS_v3} PROPERTIES LANGUAGE CXX)
-  set_source_files_properties(${GPU_SRCS_v3} PROPERTIES LANGUAGE CXX)
-
-  set_target_properties(mgrid_v3 PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+  get_target_property(GPU_SRCS_v3 mgrid_v3 SOURCES)
+  set_source_files_properties(${CUH_HEADERS_v3} ${GPU_SRCS_v3} PROPERTIES LANGUAGE CXX)
   target_compile_options(mgrid_v3 PRIVATE -x c++ -nocudainc -nocudalib)
   # Header-defined device helpers must be inline: every TU of this library
   # includes them, and plain always_inline functions would be duplicate
@@ -56,27 +66,4 @@ if (USE_SYCL)
   target_compile_definitions(mgrid_v3 PRIVATE
     "GPU4PYSCF_DEVICE_ATTR=inline __attribute__((always_inline))")
   target_link_libraries(mgrid_v3 PRIVATE sycl_compat gsycl)
-else()
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
-
-  if (ENABLE_MULTIGRID_V2)
-  add_library(mgrid_v2 SHARED
-        multigrid_v2/drivers.cu
-        multigrid_v2/screen.cu
-        multigrid_v2/eval_xc.cu
-        multigrid_v2/eval_xc_grad.cu
-  )
-
-  set_target_properties(mgrid_v2 PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-        CUDA_SEPARABLE_COMPILATION ON
-  )
-  if(ENABLE_FP32_MULTIGRID)
-    target_compile_definitions(mgrid_v2 PRIVATE GPU4PYSCF_ENABLE_FP32_MULTIGRID)
-  endif()
-  endif()
-
-  set_target_properties(mgrid_v3 PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-    CUDA_SEPARABLE_COMPILATION ON)
-endif (USE_SYCL)
+endif()

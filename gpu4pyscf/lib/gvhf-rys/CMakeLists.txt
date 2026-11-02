@@ -20,6 +20,10 @@ if (USE_SYCL)
   add_library(gvhf_rys SHARED ${GPU_SRCS})
 
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
+  # also compile it as its own TU.
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
+    PROPERTIES HEADER_FILE_ONLY ON)
 
   # Per-TU SYCL kernel-name disambiguation.
   #
@@ -34,15 +38,11 @@ if (USE_SYCL)
   # The .cu files are auto-generated upstream and must stay byte-identical
   # to upstream/master, so the per-TU disambiguation is done with object-like
   # -D macros that rewrite the 19 shared identifiers within each TU only:
-  # kernel definitions and their dispatch sites rename together. The
-  # RYS_UNROLLED_KERNEL_TAG definitions satisfy the #error guard in
-  # unrolled_kernels.cuh for every unrolled_*.cu TU.
+  # kernel definitions and their dispatch sites rename together.
   set(_RYS_JK_K_SHARED_KERNELS rys_k_0000 rys_k_1000 rys_k_1010 rys_k_1011
       rys_k_1100 rys_k_1110 rys_k_1111 rys_k_2000 rys_k_2010 rys_k_2011
       rys_k_2020 rys_k_2100 rys_k_2110 rys_k_2200 rys_k_3000 rys_k_3010
       rys_k_3020 rys_k_3100 rys_k_3200)
-  set(_RYS_JK_KERNEL_DEFS "RYS_UNROLLED_KERNEL_TAG=jk")
-  set(_RYS_K_KERNEL_DEFS  "RYS_UNROLLED_KERNEL_TAG=k")
   foreach(_k ${_RYS_JK_K_SHARED_KERNELS})
     list(APPEND _RYS_JK_KERNEL_DEFS "${_k}=${_k}_jk_sycl")
     list(APPEND _RYS_K_KERNEL_DEFS  "${_k}=${_k}_k_sycl")
@@ -51,14 +51,6 @@ if (USE_SYCL)
     PROPERTIES COMPILE_DEFINITIONS "${_RYS_JK_KERNEL_DEFS}")
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_rys_k.cu
     PROPERTIES COMPILE_DEFINITIONS "${_RYS_K_KERNEL_DEFS}")
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_rys_jk_ip1.cu
-    PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=vjk_ip1")
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_ejk_ip1.cu
-    PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=ejk_ip1")
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_ejk_ip2_type12.cu
-    PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=ejk_ip2_t12")
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/unrolled_ejk_ip2_type3.cu
-    PROPERTIES COMPILE_DEFINITIONS "RYS_UNROLLED_KERNEL_TAG=ejk_ip2_t3")
 
   # Note: this is needed in SYCL to prevent compiling it as a
   # a seperate TU and cause multi-definition error from all the
@@ -77,10 +69,10 @@ if (USE_SYCL)
   target_compile_options(gvhf_rys PRIVATE -x c++ -nocudainc -nocudalib)
   target_link_libraries(gvhf_rys PRIVATE sycl_compat gsycl)
 else()
-  list(APPEND GPU_SRCS rys_roots_dat.cu rys_constant.cu)
+  list(APPEND GPU_SRCS rys_constant.cu)
   add_library(gvhf_rys SHARED ${GPU_SRCS})
 
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
   set_target_properties(gvhf_rys PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}

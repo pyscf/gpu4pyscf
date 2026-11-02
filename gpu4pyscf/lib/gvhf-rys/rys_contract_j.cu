@@ -17,16 +17,18 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
-FOLD_TABLE_DEFINE(Fold2Index, s_rys_i_in_fold2idx, c_i_in_fold2idx, 165);
-FOLD_TABLE_DEFINE(Fold3Index, s_rys_i_in_fold3idx, c_i_in_fold3idx, 495);
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
+#else
+__constant__ Fold2Index c_i_in_fold2idx[165];
+__constant__ Fold3Index c_i_in_fold3idx[495];
+#endif
 
 __global__ static
 void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -35,8 +37,6 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   uint32_t *pool, int *head, int reserved_shm_size)
 {
     setup_context();
-    FOLD_TABLE_BIND(c_i_in_fold2idx, s_rys_i_in_fold2idx);
-    FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
     SHARED_ARRAY(int, ntasks);
     SHARED_ARRAY(int, pair_ij);
     SHARED_ARRAY(int, pair_kl0);
@@ -509,7 +509,6 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             uint32_t *pool, int *head, int reserved_shm_size)
 {
     setup_context();
-    FOLD_TABLE_BIND(c_i_in_fold3idx, s_rys_i_in_fold3idx);
     SHARED_ARRAY(int, ntasks);
     SHARED_ARRAY(int, pair_ij);
     SHARED_ARRAY(int, pair_kl0);
@@ -898,7 +897,8 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             auto dev_envs = *envs;
             buflen *= sizeof(double);
             if (buflen > 48000) {
-                cudaError_t err = cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
                 if (err != cudaSuccess) {
                     fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                             cudaGetErrorString(err));
@@ -919,7 +919,8 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             auto dev_envs = *envs;
             buflen *= sizeof(double);
             if (buflen > 48000) {
-                cudaError_t err = cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
                 if (err != cudaSuccess) {
                     fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                             cudaGetErrorString(err));
@@ -971,8 +972,8 @@ int RYS_init_rysj_constant()
             }
         } }
     }
-    FOLD_TABLE_FILL(c_i_in_fold2idx, s_rys_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
-    FOLD_TABLE_FILL(c_i_in_fold3idx, s_rys_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
+    cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
+    cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     return 0;
 }
 }

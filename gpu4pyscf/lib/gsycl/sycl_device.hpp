@@ -99,6 +99,7 @@ using double2 = sycl::double2;
 #define __popc(x) (sycl::popcount(x))
 
 template <typename T> __attribute__((always_inline)) auto ceil(T x) { return sycl::ceil(x); }
+template <typename T> __attribute__((always_inline)) auto ceilf(T x) { return sycl::ceil(x); }
 template <typename T> __attribute__((always_inline)) auto sqrtf(T x) { return sycl::sqrt(x); }
 template <typename T> __attribute__((always_inline)) auto sqrt(T x) { return sycl::sqrt(x); }
 template <typename T> __attribute__((always_inline)) auto rsqrt(T x) { return sycl::rsqrt(x); }
@@ -110,6 +111,7 @@ template <typename T> __attribute__((always_inline)) auto fabs(T x) -> std::enab
 template <typename T> __attribute__((always_inline)) auto fabsf(T x) -> std::enable_if_t<std::is_same_v<T, float>, float> { return sycl::fabs(x); }
 template <typename T> __attribute__((always_inline)) auto erf(T x) { return sycl::erf(x); }
 template <typename T> __attribute__((always_inline)) auto floor(T x) { return sycl::floor(x); }
+template <typename T> __attribute__((always_inline)) auto floorf(T x) { return sycl::floor(x); }
 template <typename T> __attribute__((always_inline)) auto pow(T x, int n) { return sycl::pown(x, n); }
 template <typename T, typename U> __attribute__((always_inline)) auto pow(T x, U n) { return sycl::pow(x, n); }
 template <typename T> __attribute__((always_inline)) typename std::enable_if<std::is_same<T, float>::value, float>::type logf(T x) { return sycl::log(x); }

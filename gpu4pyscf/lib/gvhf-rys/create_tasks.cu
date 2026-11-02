@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
 
 #include "vhf.cuh"
 
@@ -67,7 +66,6 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -136,7 +134,6 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -208,7 +205,6 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -273,7 +269,6 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -399,7 +394,6 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -529,7 +523,6 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -654,7 +647,6 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -725,7 +717,6 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -861,7 +852,6 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 
@@ -933,7 +923,6 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
-        __syncthreads();
         return;
     }
 

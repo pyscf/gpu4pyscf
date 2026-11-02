@@ -17,9 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"

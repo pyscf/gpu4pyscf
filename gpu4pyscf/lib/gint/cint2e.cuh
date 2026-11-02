@@ -18,21 +18,34 @@
 
 #include "gint.h"
 
-#ifdef USE_SYCL
-// sycl_device.hpp comes via gint.h.
-#elif defined(__CUDACC__)
-#include <cuda_runtime.h>
-#endif
-// Backend-agnostic kernel macros (setup_context, threadIdx_x, DYNAMIC_SHARED_PTR,
-// LAUNCH_KERNEL_*). Included here so every gint TU gets them regardless of include order.
+// CUDA and SYCL headers plus the backend-agnostic kernel macros (setup_context,
+// threadIdx_x, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*).
 #include "gsycl/gpu_compat.h"
 
 #ifdef USE_SYCL
 
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gint_bpcache;
-// Kernel bodies keep CUDA's `c_bpcache.member` spelling (device code only;
-// host uploads go through TABLE_FILL, which names s_gint_bpcache directly).
+// Kernel bodies keep CUDA's `c_bpcache.member` spelling. device_global has
+// no member access and get() is device-only, so:
+//  * device pass: c_bpcache is the device_global's storage;
+//  * host pass: kernel bodies are parsed but never run, so c_bpcache is a
+//    typed placeholder.
+// Both passes parse the host uploads, so one overload turns the upstream call
+// cudaMemcpyToSymbol(c_bpcache, ...) into a copy to the device_global.
+#ifdef __SYCL_DEVICE_ONLY__
 #define c_bpcache (::s_gint_bpcache.get())
+#else
+inline BasisProdCache &gint_host_bpcache() {
+    static BasisProdCache placeholder;
+    return placeholder;
+}
+#define c_bpcache (gint_host_bpcache())
+#endif
+static inline cudaError_t cudaMemcpyToSymbol(
+        BasisProdCache &, const void *src, size_t count, size_t offset = 0,
+        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
+    return cudaMemcpyToSymbol(s_gint_bpcache, src, count, offset, kind);
+}
 
 // Generated with GINTinit_index1d_xyz
 // Look into constant.cu for details

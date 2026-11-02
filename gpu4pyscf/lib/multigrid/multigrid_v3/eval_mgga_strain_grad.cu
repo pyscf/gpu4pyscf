@@ -17,9 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
 
@@ -37,7 +36,6 @@ void eval_mgga_grad_kernel(double *grad, double *strain, double *dm,
                            double factor, double negligible,
                            PBCIntEnvVars envs)
 {
-    TABLE_BIND(c_dxyz_dabc, s_c_dxyz_dabc);
     setup_context();
     constexpr int tile = 16;
     int tx = threadIdx_x;

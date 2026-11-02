@@ -18,9 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
@@ -28,7 +25,9 @@
 #include "create_tasks.cu"
 #include "rys_contract_k.cuh"
 
-GXYZ_DEFINE(GXYZOffset, s_rys_gxyz_offset, 625);
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<GXYZOffset[256]> s_rys_gxyz_offset;
+#endif
 
 #define GOUT_WIDTH1     81
 
@@ -40,7 +39,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size)
 {
     setup_context();
-    GXYZ_BIND(c_gxyz_offset, s_rys_gxyz_offset);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     SHARED_ARRAY(int, ntasks);
     SHARED_ARRAY(int, pair_ij);
@@ -680,7 +678,10 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
 
         auto launch = [&](auto offset, int tile_chunk) {
-            GXYZ_COPY_CHUNK(gxyz_offset, offset, tile_chunk*sizeof(GXYZOffset));
+            checkCudaErrors(
+                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
+                                   tile_chunk*sizeof(GXYZOffset),
+                                   0, cudaMemcpyHostToDevice));
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
@@ -689,7 +690,8 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
             auto threads = make_block(scheme[0], scheme[1]);
             auto dev_envs = *envs;
             if (buflen > 48000) {
-                cudaError_t err = cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
+                cudaError_t err = cudaGetLastError();
                 if (err != cudaSuccess) {
                     fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", buflen,
                             cudaGetErrorString(err));

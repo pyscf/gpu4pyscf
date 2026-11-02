@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -507,6 +505,7 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
         s_estimator, dev_envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
         npairs, omega, tril_symmetry, Ecut_mask);
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCfill_s_estimator %s\n",
@@ -526,6 +525,7 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( q_cond_kernel, blocks, threads, shm_size,
         q_cond, dev_envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
+
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCfill_qcond %s\n",

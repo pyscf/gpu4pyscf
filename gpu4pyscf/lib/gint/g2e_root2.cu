@@ -88,7 +88,7 @@ static void GINTfill_int2e_kernel0011(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -233,7 +233,7 @@ static void GINTfill_int2e_kernel0020(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -381,7 +381,7 @@ static void GINTfill_int2e_kernel0021(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -563,7 +563,7 @@ static void GINTfill_int2e_kernel0030(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -717,7 +717,7 @@ static void GINTfill_int2e_kernel1010(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -892,7 +892,7 @@ static void GINTfill_int2e_kernel1011(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1122,7 +1122,7 @@ static void GINTfill_int2e_kernel1020(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1310,7 +1310,7 @@ static void GINTfill_int2e_kernel1100(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1482,7 +1482,7 @@ static void GINTfill_int2e_kernel1110(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1697,7 +1697,7 @@ static void GINTfill_int2e_kernel2000(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -1845,7 +1845,7 @@ static void GINTfill_int2e_kernel2010(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -2042,7 +2042,7 @@ static void GINTfill_int2e_kernel2100(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
@@ -2224,7 +2224,7 @@ static void GINTfill_int2e_kernel3000(GINTEnvVars envs, ERITensor eri, BasisProd
         double aijkl = aij + akl;
         double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0; 
         a0 *= theta;
         double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
         double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));

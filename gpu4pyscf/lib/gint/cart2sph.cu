@@ -782,7 +782,7 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-
+        
                 int j_cartesian_offset = 0;
                 int j_spherical_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
@@ -805,7 +805,7 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-
+        
                 int j_pad_offset = 0;
                 int j_unpad_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
@@ -839,7 +839,7 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-
+        
                 int j_cartesian_offset = 0;
                 int j_spherical_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
@@ -918,7 +918,7 @@ extern "C" {
             for (int i_group = 0; i_group < n_l_ctr_group; i_group++) {
                 const int l_i = l_of_group[i_group];
                 const int n_bas_i = n_total_bas_of_group[i_group] - n_pad_bas_of_group[i_group];
-
+        
                 int j_pad_offset = 0;
                 int j_unpad_offset = 0;
                 for (int j_group = 0; j_group < n_l_ctr_group; j_group++) {
@@ -987,7 +987,7 @@ extern "C" {
                 auto threads = make_block(16, 16);
                 auto blocks = make_grid((n_right + 16 - 1) / 16, (n_bas * n_cartesian_of_l + 16 - 1) / 16);
                 LAUNCH_KERNEL((left_cart2cart), blocks, threads, 0, stream, cartesian_matrix, spherical_matrix,
-                                n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx);
+                                                    n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx);
 
                 i_pad_offset += n_total_bas_of_group[i_group] * n_cartesian_of_l;
                 i_unpad_offset += n_bas * n_cartesian_of_l;

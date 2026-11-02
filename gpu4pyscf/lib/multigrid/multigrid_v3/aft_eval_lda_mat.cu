@@ -17,10 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+#include "constant_objects.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "constant_objects.cuh"
 #include "utils.cuh"
 #include "aft_recursion.cuh"
 
@@ -34,7 +33,11 @@
 // pi^1.5
 #define OVERLAP_FAC     5.56832799683170787
 
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
 __global__ static
+#endif
 void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
                          int64_t *bas_ij_idx,
                          double *G_bases, double *L_bases,
@@ -248,7 +251,10 @@ int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeh
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntile_batch*npair);
     auto dev_envs = *envs;
-        LAUNCH_KERNEL(orth_lda_mat_kernel, grids, threads, 0, out, vxcG, bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z, dev_envs);
+    LAUNCH_KERNEL( orth_lda_mat_kernel, grids, threads, 0,
+                    out, vxcG, bas_ij_idx, G_bases, L_bases, mesh_cum,
+                    nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z,
+                    dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_lda_mat_kernel: %s\n", cudaGetErrorString(err));

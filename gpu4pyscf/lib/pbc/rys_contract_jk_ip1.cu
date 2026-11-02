@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -54,13 +53,12 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     SHARED_ARRAY(int, expi);
     SHARED_ARRAY(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
-
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
     int gout_stride = blockDim_y;
     int threads = blockDim_x * blockDim_y;
-    int t_id = gout_id * nsq_per_block + sq_id;
+    int thread_id = threadIdx_x + blockDim_x * threadIdx_y;
     int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
     int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     double *dd_cache = dd_pool + blockIdx_x * nf * blockDim_x + sq_id;
@@ -118,7 +116,7 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double sigma_zz = 0;
 while (1) {
     __syncthreads();
-    if (t_id == 0) {
+    if (thread_id == 0) {
         int task_id = atomicAdd(head, 1);
         int batch_kl = task_id / bounds.npairs_ij;
         pair_ij = task_id - bounds.npairs_ij * batch_kl;
@@ -139,7 +137,7 @@ while (1) {
         continue;
     }
 
-    if (t_id == 0) {
+    if (thread_id == 0) {
         int _jsh = bas_mask_idx[jsh];
         ish_cell0 = ish;
         jsh_cell0 = _jsh % nbas_cell0;
@@ -149,12 +147,12 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    if (t_id < 3) {
+    if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        ri[t_id] = env[ri_ptr+t_id];
-        rj[t_id] = env[rj_ptr+t_id];
-        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rj[thread_id] = env[rj_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -162,7 +160,7 @@ while (1) {
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
-    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
+    for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = env[expi+ip];
@@ -465,7 +463,8 @@ while (1) {
         double v_lz = -v_iz - v_jz - v_kz;
         int ka = bas[ksh_cell0*BAS_SLOTS+ATOM_OF];
         int la = bas[lsh_cell0*BAS_SLOTS+ATOM_OF];
-        double *reduce = shared_memory + t_id;
+        int threads = nsq_per_block * gout_stride;
+        double *reduce = shared_memory + thread_id;
         __syncthreads();
         if (task_id < ntasks) {
             reduce[0*threads] = v_kx;
@@ -496,7 +495,7 @@ while (1) {
     }
     int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
     int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
-    double *reduce = shared_memory + t_id;
+    double *reduce = shared_memory + thread_id;
     __syncthreads();
     reduce[0*threads] = grad_ix;
     reduce[1*threads] = grad_iy;

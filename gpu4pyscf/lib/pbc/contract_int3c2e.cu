@@ -25,9 +25,7 @@
 #include "int3c2e_create_tasks.cuh"
 
 #define NF_AUX_MAX      28
-// Unified tile width (was 30 SYCL / 29 CUDA). Only sizes stack temporaries;
-// loop bounds follow the same macro, so numerics identical.
-#define GOUT_WIDTH      30
+#define GOUT_WIDTH      29
 
 // lattice sum over j and k for (ij|k)
 __global__ static
@@ -335,7 +333,6 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, double omega, P
     SHARED_ARRAY(double, xjxi);
     SHARED_ARRAY(double, yjyi);
     SHARED_ARRAY(double, zjzi);
-    SHARED_ARRAY(double, fac);
     SHARED_ARRAY(int, num_ijk_tasks);
     SHARED_ARRAY(int, num_sub_tasks);
     SHARED_ARRAY(int, img_not_processed);
@@ -392,16 +389,15 @@ while (1) {
         xjxi = rj[0] - xi;
         yjyi = rj[1] - yi;
         zjzi = rj[2] - zi;
-        int ish_cell0 = ish;
-        int jsh_cell0 = jsh % envs.nbas;
-        fac = PI_FAC;
-        if (ish_cell0 < jsh_cell0) {
-            fac = 0;
-        }
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
     }
     __syncthreads();
+    int ish_cell0 = ish;
+    int jsh_cell0 = jsh % envs.nbas;
+    if (ish_cell0 < jsh_cell0) {
+        continue;
+    }
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
 
@@ -499,7 +495,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
-                            double cicj = fac * env[ci+ip] * env[cj+jp];
+                            double cicj = PI_FAC * env[ci+ip] * env[cj+jp];
                             fac_ij = exp(-Kab) * cicj;
                         }
                         double xij = xjLxi * aj_aij + xi;
@@ -590,11 +586,11 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, double omega, PBCIntEnvVars 
                            int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
@@ -617,11 +613,11 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, double omega, PBCInt
                                int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,

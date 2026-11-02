@@ -17,10 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+#include "constant_objects.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "constant_objects.cuh"
 #include "utils.cuh"
 #include "aft_recursion.cuh"
 
@@ -237,7 +236,9 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntiles*nbatches_shl_pair);
     auto dev_envs = *envs;
-        LAUNCH_KERNEL(orth_aopair_dm_kernel, grids, threads, 0, outR, outI, dm, shl_pair_offsets, bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum, ntiles, factor, dev_envs);
+    LAUNCH_KERNEL( orth_aopair_dm_kernel, grids, threads, 0,
+                    outR, outI, dm, shl_pair_offsets, bas_ij_idx, G_bases,
+                    L_bases, mesh_cum, nimgs_cum, ntiles, factor, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_aopair_dm_kernel: %s\n", cudaGetErrorString(err));

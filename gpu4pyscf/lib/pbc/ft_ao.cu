@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "ft_ao.cuh"
@@ -37,29 +36,22 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
     setup_context();
     SHARED_ARRAY(double, g, [(AUXL+1)*FT_AO_THREADS * 6]);
-    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_block_id = gridDim_y - blockIdx_y - 1;
     int Gv_block_id = blockIdx_x;
+    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_id_in_block = threadIdx_y;
     int Gv_id_in_block = threadIdx_x;
-
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    // A work-item whose shell index falls outside envs.nbas cannot return
-    // here: every __syncthreads() below is a real SYCL group_barrier, which
-    // -- unlike CUDA's warp-retirement semantics -- requires every work-item
-    // in the group to reach it. Clamp to a valid shell instead so out-of-
-    // range lanes take the identical control-flow path (and therefore the
-    // same barrier count) as their neighbours; the final write-out below is
-    // masked so the clamped, discarded computation never reaches memory.
-    int valid = sh_id < envs.nbas;
-    int sh_id_clamped = valid ? sh_id : envs.nbas - 1;
+    if (sh_id >= envs.nbas) {
+        return;
+    }
 
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[sh_id_clamped*BAS_SLOTS+ANG_OF];
+    int li = bas[sh_id*BAS_SLOTS+ANG_OF];
     int nfi = c_nf[li];
-    int iprim = bas[sh_id_clamped*BAS_SLOTS+NPRIM_OF];
+    int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double kx = 0;
     double ky = 0;
@@ -94,9 +86,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double s0zR, s1zR, s2zR;
     double s0zI, s1zI, s2zI;
 
-    int ia = bas[sh_id_clamped*BAS_SLOTS+ATOM_OF];
-    double *expi = env + bas[sh_id_clamped*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[sh_id_clamped*BAS_SLOTS+PTR_COEFF];
+    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
+    double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
+    double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
     double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
     for (int ip = 0; ip < iprim; ++ip) {
         __syncthreads();
@@ -186,9 +178,9 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
         }
     }
 
-    if (valid && Gv_id < nGv) {
+    if (Gv_id < nGv) {
         size_t stride = (size_t)nGv * OF_COMPLEX;
-        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id_clamped] * nGv + Gv_id) * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
         for (int n = 0; n < AUXNF; ++n) {
             if (n >= nfi) break;
@@ -221,15 +213,10 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     SHARED_ARRAY(int, img_counts, [WARPS]);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
-    // ft_aopair_kernel's grid-points-per-block is independent of ft_ao_bdiv_kernel's
-    // NG_PER_BLOCK (bumped to FT_AO_THREADS for that kernel's divergence fix).
     constexpr int nGv_per_block = WARP_SIZE;
     int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int warp_id = thread_id / nGv_per_block;
-    // Persistent workers, as upstream: one c2s_pool slice per work-group,
-    // tasks pulled from `head`. Indexing the pool by a hashed group id
-    // instead lets two co-resident groups share a slice (silent garbage).
     double *c2s_pool = pool + blockIdx_x * POOL_SIZE;
 while (1) {
     __syncthreads();
@@ -448,7 +435,7 @@ while (1) {
                     }
                 }
                 __syncthreads();
-                if (pair_idx < shl_pair1 && img < img1) {
+                if (pair_idx < shl_pair1 && img < img1 && Gv_id < nGv) {
                     float div_nfi = c_div_nf[li];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {

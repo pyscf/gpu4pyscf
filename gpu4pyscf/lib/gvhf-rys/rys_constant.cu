@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#pragma once
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <gvhf-rys/vhf.cuh>
@@ -112,9 +113,10 @@ __constant__ int _c_cartesian_lexical_xyz[] = {
     0, 0, 6,
 };
 
+#ifndef USE_SYCL
 __constant__ GXYZOffset c_gxyz_offset[256];
+#endif
 
-// c_nf/c_div_nf moved from rys_jk_driver.cu (CUDA-only tables).
 __constant__ int c_nf[] = {
     1,
     3,

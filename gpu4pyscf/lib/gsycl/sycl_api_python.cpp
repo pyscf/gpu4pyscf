@@ -156,7 +156,7 @@ GPU4PYSCF_EXPORT size_t sycl_get_free_memory() {
 
 GPU4PYSCF_EXPORT size_t sycl_memcpy(void* dst, void* src, size_t size) {
     auto* q = static_cast<sycl::queue*>(sycl_get_queue_ptr());
-    q->memcpy(dst, src, size);
+    q->memcpy(dst, src, size).wait();
     return 0;
 }
 

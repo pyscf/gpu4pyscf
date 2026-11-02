@@ -18,20 +18,7 @@
 
 #include "gvhf-rys/rys_roots.cu"
 
-// NOTE (SYCL/PVC): the barriers below must NOT be taken when `stride == 1`.
-// A number of callers (the "unrolled" int3c2e/ejk kernels) pass
-// stride=1, rt_id=0, meaning every work-item evaluates *all* of its own roots
-// into its own `rw` slot; no cross-thread data is exchanged, so the barrier is
-// semantically a no-op.  Those callers also drive a work-item dependent loop
-//     for (idx = st_id; idx < nst; idx += nst_per_block)
-// whose trip count differs between work-items.  Executing a group barrier in
-// such a loop is UB: on CUDA the hardware barrier ignores threads that already
-// exited the kernel, so it happens to work, but on Level Zero the work-items
-// that left the loop early never arrive and the work-group hangs forever.
-// Guarding on `stride > 1` (uniform within the group in every caller) keeps the
-// barrier exactly where it is actually needed - the cooperative gout_stride>1
-// callers, whose loops are uniform (`idx < nst + st_id`).
-static __device__ __forceinline__
+__device__ __forceinline__
 void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
                      double omega, double lr_factor, double sr_factor,
                      int block_size, int stride, int rt_id)
@@ -72,7 +59,7 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
     }
 }
 
-static __device__ __forceinline__
+__device__ __forceinline__
 void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
                      double omega, double lr_factor, double sr_factor)
 {

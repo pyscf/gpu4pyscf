@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 
@@ -42,7 +41,6 @@
     int Gv_id_in_block = thread_id % nGv_per_block; \
     int t_id = thread_id / nGv_per_block;
 
-
 #define WARP_SIZE       32
 #define WARPS           8
 #define THREADS         256
@@ -52,17 +50,16 @@
 #define OF_COMPLEX      2
 #define POOL_SIZE       65536
 
-
 __global__ static
 void ft_aopair_kernel(double *out, double *vG,
-    PBCIntEnvVars envs, int *shl_pair_offsets,
-    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
-    int *gout_stride_lookup, double *Gv, int nGv,
-    int nbatches_shl_pair, int compressing, int *head)
+                      PBCIntEnvVars envs, int *shl_pair_offsets,
+                      uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+                      int *gout_stride_lookup, double *Gv, int nGv,
+                      int nbatches_shl_pair, int compressing, int *head)
 {
     constexpr int nGv_per_block = 16;
-    constexpr int sp_threads = THREADS / nGv_per_block;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
+    constexpr int sp_threads = THREADS / nGv_per_block;
     KERNEL_SETUP();
 while (1) {
     if (thread_id == 0) {
@@ -333,14 +330,14 @@ while (1) {
 
 __global__ static
 void ft_pdotp_kernel(double *out, double *vG,
-    PBCIntEnvVars envs, int *shl_pair_offsets,
-    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
-    int *gout_stride_lookup, double *Gv, int nGv,
-    int nbatches_shl_pair, int compressing, int *head)
+                     PBCIntEnvVars envs, int *shl_pair_offsets,
+                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+                     int *gout_stride_lookup, double *Gv, int nGv,
+                     int nbatches_shl_pair, int compressing, int *head)
 {
     constexpr int nGv_per_block = 16;
-    constexpr int sp_threads = THREADS / nGv_per_block;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
+    constexpr int sp_threads = THREADS / nGv_per_block;
     KERNEL_SETUP();
 while (1) {
     if (thread_id == 0) {
@@ -678,11 +675,11 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                        int *gout_stride_lookup, double *grids, int ngrids,
                        int compressing)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
     LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
@@ -702,11 +699,11 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                       int *gout_stride_lookup, double *grids, int ngrids,
                       int compressing)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
     LAUNCH_KERNEL( ft_pdotp_kernel, blocks, threads, shm_size,

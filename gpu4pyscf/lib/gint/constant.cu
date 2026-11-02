@@ -15,10 +15,30 @@
  */
 
 #include "gint.h"
-#include "cint2e.cuh"
 
-// SYCL store behind the c_bpcache accessor (cint2e.cuh). CUDA's
-// __constant__ c_bpcache lives in constant_tables.cu (built only under !USE_SYCL).
 #ifdef USE_SYCL
+#include "cint2e.cuh"
+// c_idx and c_l_locs are constexpr in cint2e.cuh; only the host-written
+// bpcache needs a definition.
 SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gint_bpcache;
+#else
+//__constant__ GINTEnvVars c_envs;
+__constant__ BasisProdCache c_bpcache;
+//__constant__ int16_t c_idx4c[NFffff*3];
+
+// Generated with GINTinit_index1d_xyz
+__constant__ int c_idx[TOT_NF*3] = {
+    0, 1, 0, 0, 2, 1, 1, 0, 0, 0, 3, 2, 2, 1, 1, 1, 0, 0, 0, 0, 4, 3, 3, 
+    2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 5, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 
+    1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 6, 5, 5, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2, 
+    2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 2, 
+    1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 
+    3, 2, 1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 
+    1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1, 0, 
+    6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 2, 0, 0, 1, 0, 1, 2, 
+    0, 1, 2, 3, 0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 0, 1, 0, 
+    1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 0, 1, 0, 1, 2, 
+    0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6};
+
+__constant__ int c_l_locs[GPU_LMAX+2] = {0, 1, 4, 10, 20, 35, 56, 84};
 #endif

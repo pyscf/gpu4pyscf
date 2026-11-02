@@ -47,14 +47,9 @@ static int GINTfill_int3c1e_ipip1_charge_contracted_tasks(double* output, const 
 
     LAUNCH_CONFIG();
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
-    // GSIZE must cover 3 * NROOTS * (i_l + 2 + 1) * (j_l + 1) doubles, whose maximum
-    // over the (i_l, j_l) reaching this case is exactly GSIZE<NROOTS>.  Cases 2 and 3
-    // used to ask for GSIZE5 / GSIZE6 (12x / 7x too much); on Intel GPUs that private
-    // array lands in the scratch surface, which is sized per HW thread for the whole
-    // device, so the waste costs gigabytes of device memory.
     switch (nrys_roots) {
-    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 4: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 5: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 6: LAUNCH_KERNEL((GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
@@ -80,14 +75,9 @@ static int GINTfill_int3c1e_ipvip1_charge_contracted_tasks(double* output, const
 
     LAUNCH_CONFIG();
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
-    // GSIZE must cover 3 * NROOTS * (i_l + 2 + 1) * (j_l + 1) doubles, whose maximum
-    // over the (i_l, j_l) reaching this case is exactly GSIZE<NROOTS>.  Cases 2 and 3
-    // used to ask for GSIZE5 / GSIZE6 (12x / 7x too much); on Intel GPUs that private
-    // array lands in the scratch surface, which is sized per HW thread for the whole
-    // device, so the waste costs gigabytes of device memory.
     switch (nrys_roots) {
-    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 4: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 5: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 6: LAUNCH_KERNEL((GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
@@ -113,14 +103,9 @@ static int GINTfill_int3c1e_ip1ip2_charge_contracted_tasks(double* output, const
 
     LAUNCH_CONFIG();
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
-    // GSIZE must cover 3 * NROOTS * (i_l + 2 + 1) * (j_l + 1) doubles, whose maximum
-    // over the (i_l, j_l) reaching this case is exactly GSIZE<NROOTS>.  Cases 2 and 3
-    // used to ask for GSIZE5 / GSIZE6 (12x / 7x too much); on Intel GPUs that private
-    // array lands in the scratch surface, which is sized per HW thread for the whole
-    // device, so the waste costs gigabytes of device memory.
     switch (nrys_roots) {
-    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<2, GSIZE2_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
-    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<3, GSIZE3_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 2: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
+    case 3: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 4: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 5: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
     case 6: LAUNCH_KERNEL((GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E>), blocks, threads, 0, stream, output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents) break;
@@ -187,7 +172,7 @@ int GINTfill_int3c1e_ipip1_charge_contracted(const cudaStream_t stream, const Ba
         return 2;
     }
 
-    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -237,7 +222,7 @@ int GINTfill_int3c1e_ipvip1_charge_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
-    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -287,7 +272,7 @@ int GINTfill_int3c1e_ip1ip2_charge_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
-    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -337,7 +322,7 @@ int GINTfill_int3c1e_ipip2_density_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
-    checkCudaErrors(TABLE_FILL(c_bpcache, s_gint_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;

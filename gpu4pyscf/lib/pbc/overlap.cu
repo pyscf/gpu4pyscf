@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "pbc.cuh"
@@ -29,10 +27,9 @@
 #define GOUT_WIDTH_IP1  18
 
 // Backend-agnostic prologue for the 1D overlap kernels in this file.
-// setup_context() is the first statement; the SHARED_* decls bind to `item`;
-// DYNAMIC_SHARED_PTR declares the dynamic shared allocation in place
-// (extern __shared__ in CUDA, work-group scratch memory in SYCL) with no
-// trailing kernel argument on either backend.
+// setup_context() is the first statement; DYNAMIC_SHARED_PTR declares the
+// dynamic shared allocation in place (extern __shared__ in CUDA, work-group
+// scratch memory in SYCL).
 #define KERNEL_SETUP() \
     setup_context(); \
     SHARED_ARRAY(int, shl_pair0); \
@@ -54,10 +51,7 @@
 // `*envs` is copied into a host-local `dev_envs` before launch, so the SYCL
 // [=] capture holds it by value (the raw host pointer `envs` must not be
 // dereferenced on the device). CUDA copies the value into kernel params.
-//
-// Two shapes exist:
-//   LAUNCH_OVERLAP_KERNEL    -> KERNEL(out, envs, <rest>)
-//   LAUNCH_OVERLAP_KERNEL_DM -> KERNEL(out, dm, envs, <rest>)
+//   LAUNCH_OVERLAP_KERNEL -> KERNEL(out, envs, <rest>)
 #define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, out_, ...) { \
     auto dev_envs = *envs; \
     auto blocks = make_grid(nbatches_); \
@@ -69,18 +63,6 @@
         return 1; \
     } \
 }
-#define LAUNCH_OVERLAP_KERNEL_DM(KERNEL, nbatches_, out_, dm_, ...) { \
-    auto dev_envs = *envs; \
-    auto blocks = make_grid(nbatches_); \
-    auto threads = make_block(THREADS); \
-    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, dm_, dev_envs, __VA_ARGS__); \
-    cudaError_t err = cudaGetLastError(); \
-    if (err != cudaSuccess) { \
-        fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
-        return 1; \
-    } \
-}
-
 
 __global__ static
 void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,

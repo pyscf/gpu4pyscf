@@ -57,7 +57,6 @@ typedef struct {
 __device__ inline
 int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
 {
-    setup_context();
     tmp_storage[t_id] = keep;
     __syncthreads();
     for (int offset = 1; offset < threads; offset <<= 1) {
@@ -372,9 +371,8 @@ void block_max(int val, int& out)
 {
     setup_context();
     int thread_id = threadIdx_x;
-    SHARED_ARRAY(int, buf, [WARPS]);
-
     val = warp_max(val);
+    SHARED_ARRAY(int, buf, [WARPS]);
     int lane = thread_id % warpSize;
     int warp_id = thread_id / warpSize;
     if (lane == 0) {
@@ -392,3 +390,4 @@ void block_max(int val, int& out)
     }
     __syncthreads();
 }
+

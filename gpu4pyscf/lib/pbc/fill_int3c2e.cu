@@ -26,11 +26,7 @@
 #include "int3c2e_create_tasks.cuh"
 #pragma push_macro("LAUNCH_KERNEL")
 #undef LAUNCH_KERNEL
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmacro-redefined"
 #include "unrolled_int3c2e.cu"
-#pragma GCC diagnostic pop
-#undef LAUNCH_KERNEL
 #pragma pop_macro("LAUNCH_KERNEL")
 
 #define REMOTE_THRESHOLD 50
@@ -73,7 +69,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, double omega, PBCIntEnvVars envs, 
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int thread_id = threadIdx_x;
     int worker_id = blockIdx_x;
-
     c2s_pool += worker_id * (THREADS*GOUT_WIDTH);
     img_pool += worker_id * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
@@ -991,7 +986,6 @@ void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
 {
     setup_context();
     int bas_ij = global_x;
-
     int bvk_nbas = envs.bvk_ncells * envs.nbas;
     int ish = bas_ij / bvk_nbas;
     int jsh = bas_ij - bvk_nbas * ish;
@@ -1059,7 +1053,6 @@ void ovlp_img_idx_kernel(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_i
 {
     setup_context();
     int pair_id = global_x;
-
     if (pair_id >= npairs) {
         return;
     }

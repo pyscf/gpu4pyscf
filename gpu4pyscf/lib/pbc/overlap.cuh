@@ -19,11 +19,10 @@
 #define PI_POW_1_5       5.568327996831707845
 #define REMOTE_THRESHOLD 50
 
-static __inline__ __device__
+__inline__ __device__
 void vrr_hrr(double *gx, double *rjri, double ai, double aj, double cicj,
              int li, int lj, int gout_id, int gout_stride, int nsp_per_block)
 {
-    setup_context();
     int stride_j = li + 1;
     int g_size = (li + 1) * (lj + 1);
     int gx_len = g_size * nsp_per_block;

@@ -87,11 +87,7 @@ static void rys_roots(int nroots, double x, double *rw,
 }
 
 // rys_roots for range-separation Coulomb
-// NOTE (SYCL/PVC): see rys_roots_for_k.cu -- the barriers are skipped when
-// stride == 1, because such callers evaluate every root on the calling
-// work-item and invoke this routine from a work-item dependent loop, where a
-// group barrier deadlocks on Level Zero.
-__device__ __forceinline__ static
+__device__ __forceinline__
 void rys_roots_rs(int nroots, double theta, double rr, double omega,
                   double *rw, int block_size, int rt_id, int stride)
 {
@@ -120,5 +116,5 @@ void rys_roots_rs(int nroots, double theta, double rr, double omega,
             rw1[ irys*2   *block_size] *= theta_fac;
             rw1[(irys*2+1)*block_size] *= sqrt_theta_fac;
         }
-    }    
+    }
 }

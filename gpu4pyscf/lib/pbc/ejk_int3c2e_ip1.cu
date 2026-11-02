@@ -32,9 +32,9 @@ void ejk_int3c2e_deriv_kernel(double *ejk, double *sigma, double *dm, double *dm
                               ShellTripletTaskInfo *task_pool,
                               uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                               int *img_idx, uint32_t *sp_img_offsets, int *gout_stride_lookup,
-                               int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
-                               float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                               int *head, int sp_blocks, int ksh_blocks)
+                              int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
+                              float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
+                              int *head, int sp_blocks, int ksh_blocks)
 {
     setup_context();
     SHARED_ARRAY(int, sp_block_id);

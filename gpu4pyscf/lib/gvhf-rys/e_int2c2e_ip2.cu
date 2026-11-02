@@ -17,9 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"
@@ -310,7 +307,8 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
     auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    cudaError_t err = cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));
         return 1;

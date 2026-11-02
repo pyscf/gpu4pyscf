@@ -2,16 +2,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifdef USE_SYCL
-#include <sycl_device.hpp>
-#elif defined(__CUDACC__)
-#include <cuda_runtime.h>
-#endif
-// Backend-agnostic kernel macros (setup_context, SHARED_ARRAY,
-// DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*). Included here so every TU that
+// CUDA and SYCL headers plus the backend-agnostic kernel macros (setup_context,
+// SHARED_ARRAY, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*), for every C++ TU that
 // includes vhf.cuh (kernels, drivers, and shared .cuh helpers like
-// rys_contract_k.cuh) gets them regardless of include order.
+// rys_contract_k.cuh). The plain C files that include it only need the structs.
+#ifdef __cplusplus
 #include "gsycl/gpu_compat.h"
+#endif
 
 #define PTR_RANGE_OMEGA 8
 // slots of atm
@@ -42,13 +39,6 @@
 
 #define MIN(x, y)       ((x) < (y) ? (x) : (y))
 #define MAX(x, y)       ((x) > (y) ? (x) : (y))
-
-// Abstracts __device__ __forceinline__ (CUDA) vs static inline (SYCL) on device functions.
-#ifdef USE_SYCL
-#define DEVICE_INLINE static inline
-#else
-#define DEVICE_INLINE __device__ __forceinline__
-#endif
 
 // 2*pi**2.5
 #define PI_FAC          34.98683665524972497
@@ -174,30 +164,6 @@ __device__ __forceinline__ unsigned get_smid()
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
 
-// Backend-split fold-index tables (defined once in rys_contract_j.cu).
-// SYCL keeps its own device_global names; the kernel binds them to the
-// CUDA names so bodies stay backend-agnostic.
-#define FOLD_TABLE_DEFINE(type, sname, cname, N) \
-    __constant__ type cname[N]
-#define FOLD_TABLE_BIND(cname, sname) \
-    (void)0
-#define FOLD_TABLE_FILL(cname, sname, src, bytes) \
-    cudaMemcpyToSymbol(cname, src, bytes)
-
-// Per-launch gxyz chunk publish into the 256-entry __constant__
-// (with errors checked).
-#define GXYZ_COPY_CHUNK(goff, off, bytes) \
-    checkCudaErrors(cudaMemcpyToSymbol(c_gxyz_offset, (goff) + (off), (bytes)))
-
-// Device-side gxyz table store, defined once (in rys_contract_k.cu).
-// CUDA reuses c_gxyz_offset from rys_constant.cu.
-#define GXYZ_DEFINE(type, sname, N) \
-    /* nothing: CUDA store lives in rys_constant.cu */
-
-// Kernel picks the active table. CUDA builds write device_global names
-// through into local aliases via GXYZ_BIND.
-#define GXYZ_BIND(cname, sname) (void)0
-
 extern __constant__ int _c_cartesian_lexical_xyz[];
 extern __constant__ GXYZOffset c_gxyz_offset[];
 
@@ -229,59 +195,58 @@ static inline unsigned get_smid()
 // this must be a no-op.
 #define adjust_threads(kernel, threads) { }
 
+// Defined once, in rys_contract_j.cu / rys_contract_k.cu. Kernel bodies keep
+// CUDA's spelling (c_i_in_fold2idx, c_i_in_fold3idx, c_gxyz_offset), as in
+// gint/cint2e.cuh: device_global has no pointer arithmetic and get() is
+// device-only, so
+//  * device pass: the name is the device_global's storage;
+//  * host pass: kernel bodies are parsed but never run, so the name is a
+//    typed placeholder.
+// Both passes parse the host uploads, so one overload per table turns the
+// upstream call cudaMemcpyToSymbol(c_xxx, ...) into a copy to the
+// device_global.
 extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
 extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
+extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[256]> s_rys_gxyz_offset;
+#ifdef __SYCL_DEVICE_ONLY__
+#define c_i_in_fold2idx (::s_rys_i_in_fold2idx.get())
+#define c_i_in_fold3idx (::s_rys_i_in_fold3idx.get())
+#define c_gxyz_offset   (::s_rys_gxyz_offset.get())
+#else
+inline Fold2Index (&rys_host_fold2idx())[165] {
+    static Fold2Index placeholder[165];
+    return placeholder;
+}
+inline Fold3Index (&rys_host_fold3idx())[495] {
+    static Fold3Index placeholder[495];
+    return placeholder;
+}
+inline GXYZOffset (&rys_host_gxyz_offset())[256] {
+    static GXYZOffset placeholder[256];
+    return placeholder;
+}
+#define c_i_in_fold2idx (rys_host_fold2idx())
+#define c_i_in_fold3idx (rys_host_fold3idx())
+#define c_gxyz_offset   (rys_host_gxyz_offset())
+#endif
+static inline cudaError_t cudaMemcpyToSymbol(
+        Fold2Index (&)[165], const void *src, size_t count, size_t offset = 0,
+        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
+    return cudaMemcpyToSymbol(s_rys_i_in_fold2idx, src, count, offset, kind);
+}
+static inline cudaError_t cudaMemcpyToSymbol(
+        Fold3Index (&)[495], const void *src, size_t count, size_t offset = 0,
+        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
+    return cudaMemcpyToSymbol(s_rys_i_in_fold3idx, src, count, offset, kind);
+}
+static inline cudaError_t cudaMemcpyToSymbol(
+        GXYZOffset (&)[256], const void *src, size_t count, size_t offset = 0,
+        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
+    return cudaMemcpyToSymbol(s_rys_gxyz_offset, src, count, offset, kind);
+}
 
-#define FOLD_TABLE_DEFINE(type, sname, cname, N) \
-    SYCL_EXTERNAL sycl_device_global<type[N]> sname
-#define FOLD_TABLE_BIND(cname, sname) \
-    auto cname = sname.get()
-#define FOLD_TABLE_FILL(cname, sname, src, bytes) \
-    cudaMemcpyToSymbol(sname, src, bytes)
-
-// Per-launch gxyz chunk publish into the device_global table.
-#define GXYZ_COPY_CHUNK(goff, off, bytes) \
-    cudaMemcpyToSymbol(s_rys_gxyz_offset, (goff) + (off), (bytes))
-
-// Device-side gxyz table store, defined once (in rys_contract_k.cu).
-#define GXYZ_DEFINE(type, sname, N) \
-    SYCL_EXTERNAL sycl_device_global<type[N]> sname
-
-// Bind the SYCL store to the local name used by kernel bodies.
-#define GXYZ_BIND(cname, sname) \
-    const auto cname = sname.get()
-
-//NOTE: `_c_cartesian_lexical_xyz` equvialent in SYCL is converted to
-// `static constexpr` var defined in rys_contract_k.cuh becuase this
-// particular header is being included in gvhf-rys/rys_contract_jk_ip1.cu,
-// gvhf-rys/rys_contract_jk_ip2.cu files that uses this var. Hence it is not
-// declared or defined here
-
-// Here 625 is just a random MAX chosen from rys_constant.cu
-extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_rys_gxyz_offset;
-
-__constant__ int c_nf[] = {
-    1,
-    3,
-    6,
-    10,
-    15,
-    21,
-    28,
-    36,
-    45,
-};
-
-__constant__ float c_div_nf[] = {
-    1.f,
-    0.333334f,
-    0.166667f,
-    0.100001f,
-    0.066667f,
-    0.047620f,
-    0.035715f,
-    0.027778f,
-    0.022223f,
-};
+// rys_constant.cu holds the constant tables (_c_cartesian_lexical_xyz, c_nf,
+// c_div_nf). Under SYCL they are constexpr, so every TU gets its own copy.
+#include "gvhf-rys/rys_constant.cu"
 
 #endif // __CUDACC__

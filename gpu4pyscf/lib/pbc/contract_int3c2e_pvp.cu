@@ -343,11 +343,11 @@ int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, double omega, PB
                                    int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                                    float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaFuncSetAttribute(contract_int3c2e_pvp_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaFuncSetAttribute(contract_int3c2e_pvp_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaMemset(head, 0, sizeof(int));
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( contract_int3c2e_pvp_auxvec_kernel, blocks, threads, shm_size,

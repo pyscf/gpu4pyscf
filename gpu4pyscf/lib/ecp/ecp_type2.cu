@@ -18,7 +18,6 @@ template <int order> __device__
 void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
                     const double *ci, const double *ai){
     setup_context();
-
     double root = 0.0;
     if (threadIdx_x < NGAUSS){
         root = r128[threadIdx_x];
@@ -183,7 +182,6 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
 __device__
 void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *rca, double *omega){
     setup_context();
-
     const int LI1 = LI+1;
     const int nfi = LI1*(LI1+1)/2;
     const int LCC1 = (2*LC+1);
@@ -290,24 +288,8 @@ void type2_cart(double * __restrict__ gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    constexpr int LI1 = LI+1;
-    constexpr int LJ1 = LJ+1;
-    constexpr int LIC1 = LI+LC+1;
-    constexpr int LJC1 = LJ+LC+1;
-    constexpr int LCC1 = (2*LC+1);
-
-    constexpr int BLKI = (LIC1+1)/2 * LCC1;
-    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
-
-    constexpr int nfi = (LI+1) * (LI+2) / 2;
-    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     setup_context();
     const int task_id = blockIdx_x;
-    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]); // up to 12600 Bytes
-    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
-    SHARED_ARRAY(double, rad_all, [(LI+LJ+1) * LIC1 * LJC1]);
-    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
-    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
     if (task_id >= ntasks){
         return;
     }
@@ -330,6 +312,18 @@ void type2_cart(double * __restrict__ gctr,
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
 
+    constexpr int LI1 = LI+1;
+    constexpr int LJ1 = LJ+1;
+    constexpr int LIC1 = LI+LC+1;
+    constexpr int LJC1 = LJ+LC+1;
+    constexpr int LCC1 = (2*LC+1);
+
+    constexpr int BLKI = (LIC1+1)/2 * LCC1;
+    constexpr int BLKJ = (LJC1+1)/2 * LCC1;
+
+    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
+    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
+
     type2_facs_omega<LI, LC>(omegai, rca);
     type2_facs_omega<LJ, LC>(omegaj, rcb);
     __syncthreads();
@@ -349,6 +343,7 @@ void type2_cart(double * __restrict__ gctr,
     double radj[LJC1];
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
 
+    SHARED_ARRAY(double, rad_all, [(LI+LJ+1) * LIC1 * LJC1]);
     set_shared_memory(rad_all, (LI+LJ+1)*LIC1*LJC1);
 
     double ur = 0.0;
@@ -370,6 +365,12 @@ void type2_cart(double * __restrict__ gctr,
         ur *= root;
     }
     __syncthreads();
+
+    constexpr int nfi = (LI+1) * (LI+2) / 2;
+    constexpr int nfj = (LJ+1) * (LJ+2) / 2;
+
+    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
+    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
@@ -427,12 +428,10 @@ void type2_cart(double * __restrict__ gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env,
-                void *shm_mem)
+                const int *atm, const int *bas, const double *env)
 {
     setup_context();
     const int task_id = blockIdx_x;
-    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -440,6 +439,8 @@ void type2_cart(double * __restrict__ gctr,
     const int ish = tasks[task_id];
     const int jsh = tasks[task_id + ntasks];
     const int ksh = tasks[task_id + 2*ntasks];
+
+    DYNAMIC_SHARED_PTR(double, smem);
 
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];

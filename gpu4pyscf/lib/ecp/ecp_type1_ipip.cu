@@ -20,18 +20,10 @@ void type1_cart_ipipv(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env,
-                void *shm_mem)
+                const int *atm, const int *bas, const double *env)
 {
-    constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
-    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-
     setup_context();
     const int task_id = blockIdx_x;
-    SHARED_ARRAY(double, buf1, [nfi2_max*nfj_max]);
-    SHARED_ARRAY(double, buf, [3*nfi1_max*nfj_max]);
-    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -45,13 +37,18 @@ void type1_cart_ipipv(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
-    type1_cart_kernel<2,0>(smem,
+    constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
+    constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
+    SHARED_ARRAY(double, buf1, [nfi2_max*nfj_max]);
+    type1_cart_kernel<2,0>(
         buf1, LI+2, LJ,
         ish, jsh, ksh,
         ecpbas, ecploc,
         atm, bas, env);
     __syncthreads();
 
+    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    SHARED_ARRAY(double, buf, [3*nfi1_max*nfj_max]);
     for (int i = threadIdx_x; i < 3*nfi1_max*nfj_max; i+=blockDim_x){
         buf[i] = 0.0;
     }
@@ -59,7 +56,7 @@ void type1_cart_ipipv(double *gctr,
     _li_down(buf, buf1, LI+1, LJ);
     __syncthreads();
 
-    type1_cart_kernel<1,0>(smem,
+    type1_cart_kernel<1,0>(
         buf1, LI, LJ,
         ish, jsh, ksh,
         ecpbas, ecploc,
@@ -76,7 +73,7 @@ void type1_cart_ipipv(double *gctr,
         __syncthreads();
         _li_down(buf, buf1, LI-1, LJ);
         if (LI > 1){
-            type1_cart_kernel<0,0>(smem,
+            type1_cart_kernel<0,0>(
                 buf1, LI-2, LJ,
                 ish, jsh, ksh,
                 ecpbas, ecploc,
@@ -97,19 +94,10 @@ void type1_cart_ipvip(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
                 const int *ecpbas, const int *ecploc,
-                const int *atm, const int *bas, const double *env,
-                void *shm_mem)
+                const int *atm, const int *bas, const double *env)
 {
-
-    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    constexpr int nfi_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-
     setup_context();
     const int task_id = blockIdx_x;
-    SHARED_ARRAY(double, buf1, [nfi1_max*nfj1_max]);
-    SHARED_ARRAY(double, buf, [3*nfi_max*nfj1_max]);
-    DYNAMIC_SHARED_PTR(double, smem, shm_mem);
     if (task_id >= ntasks){
         return;
     }
@@ -123,13 +111,18 @@ void type1_cart_ipvip(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += ioff*nao + joff + 9*ecp_id*nao*nao;
 
-    type1_cart_kernel<1,1>(smem,
+    constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
+    SHARED_ARRAY(double, buf1, [nfi1_max*nfj1_max]);
+    type1_cart_kernel<1,1>(
         buf1, LI+1, LJ+1,
         ish, jsh, ksh,
         ecpbas, ecploc,
         atm, bas, env);
     __syncthreads();
 
+    constexpr int nfi_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
+    SHARED_ARRAY(double, buf, [3*nfi_max*nfj1_max]);
     for (int i = threadIdx_x; i < 3*nfi_max*nfj1_max; i+=blockDim_x){
         buf[i] = 0.0;
     }
@@ -137,7 +130,7 @@ void type1_cart_ipvip(double *gctr,
     _li_down(buf, buf1, LI, LJ+1);
     __syncthreads();
     if (LI > 0){
-        type1_cart_kernel<0,1>(smem,
+        type1_cart_kernel<0,1>(
             buf1, LI-1, LJ+1,
             ish, jsh, ksh,
             ecpbas, ecploc,
@@ -154,7 +147,7 @@ void type1_cart_ipvip(double *gctr,
             buf[i] = 0.0;
         }
         __syncthreads();
-        type1_cart_kernel<1,0>(smem,
+        type1_cart_kernel<1,0>(
             buf1, LI+1, LJ-1,
             ish, jsh, ksh,
             ecpbas, ecploc,
@@ -163,7 +156,7 @@ void type1_cart_ipvip(double *gctr,
         _li_down(buf, buf1, LI, LJ-1);
         __syncthreads();
         if (LI > 0){
-            type1_cart_kernel<0,0>(smem,
+            type1_cart_kernel<0,0>(
                 buf1, LI-1, LJ-1,
                 ish, jsh, ksh,
                 ecpbas, ecploc,

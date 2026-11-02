@@ -18,9 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cmath>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
 
@@ -58,7 +57,6 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
                         int npairs, float log_threshold,
                         float undressed_threshold)
 {
-    TABLE_BIND(c_reciprocal_lattice_vectors, s_c_reciprocal_lattice_vectors);
     setup_context();
     int pair_id = global_x;
     if (pair_id >= npairs) return;
@@ -321,9 +319,8 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
 // An estimation of the upper bound of the overlap |<cell0|supcmol>| for
 // shell pairs between the primitve cell and the super-mol
 __global__ static
-void ovlp_mask_estimation_kernel(int8_t *ovlp_mask,
-                                 double *img_coords, int nimgs, float log_cutoff,
-                                 PBCIntEnvVars envs)
+void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
+                                 double *img_coords, int nimgs, float log_cutoff)
 {
     setup_context();
     int jsh = global_x;
@@ -387,10 +384,9 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask,
 }
 
 __global__ static
-void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx,
+void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars envs,
                               double *img_coords, int nimgs, int npairs,
-                              float log_cutoff, float Ecut_max, int is_mgga,
-                              PBCIntEnvVars envs)
+                              float log_cutoff, float Ecut_max, int is_mgga)
 {
     setup_context();
     int pair_id = global_x;
@@ -465,9 +461,8 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx,
 
 __global__ static
 void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
-                                     int npairs, float log_cutoff,
-                                     int is_mgga, int *head,
-                                     PBCIntEnvVars envs)
+                                     PBCIntEnvVars envs, int npairs, float log_cutoff,
+                                     int is_mgga, int *head)
 {
     constexpr int batch_size = 64;
     setup_context();
@@ -560,10 +555,9 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
     int batches = (npairs + THREADS-1) / THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(batches);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( grid_ranges_kernel, grids, threads, 0,
                     grid_frac_ranges, pair_ke, Ecut_by_shell, primary_atoms,
-                    dev_envs, bas_ij_idx, li_inc, lj_inc, npairs,
+                    *envs, bas_ij_idx, li_inc, lj_inc, npairs,
                     log_threshold, undressed_threshold);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -622,8 +616,8 @@ int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
     int bvk_nbas = nbas * envs->bvk_ncells;
     auto threads = make_block(16, 16);
     auto grids = make_grid((bvk_nbas + 15) / 16, (nbas + 15) / 16);
-        auto dev_envs = *envs;
-        LAUNCH_KERNEL(ovlp_mask_estimation_kernel, grids, threads, 0, ovlp_mask, img_coords, nimgs, log_cutoff, dev_envs);
+    LAUNCH_KERNEL( ovlp_mask_estimation_kernel, grids, threads, 0,
+                    ovlp_mask, *envs, img_coords, nimgs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
@@ -639,8 +633,9 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
     int blocks = (npairs + THREADS-1)/THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(blocks);
-        auto dev_envs = *envs;
-        LAUNCH_KERNEL(supmol_non_trivial_pairs_kernel, grids, threads, 0, supmol_bas_ij, bas_ij_idx, npairs, log_cutoff, is_mgga, head, dev_envs);
+    LAUNCH_KERNEL( supmol_non_trivial_pairs_kernel, grids, threads, 0,
+                    supmol_bas_ij, bas_ij_idx, *envs, npairs, log_cutoff,
+                    is_mgga, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in supmol_non_trivial_pairs_kernel: %s\n", cudaGetErrorString(err));
@@ -656,8 +651,9 @@ int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
     int blocks = (npairs + THREADS-1)/THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(blocks);
-        auto dev_envs = *envs;
-        LAUNCH_KERNEL(estimate_aft_Ecut_kernel, grids, threads, 0, Ecut, bas_ij_idx, img_coords, nimgs, npairs, log_cutoff, Ecut_max, is_mgga, dev_envs);
+    LAUNCH_KERNEL( estimate_aft_Ecut_kernel, grids, threads, 0,
+                    Ecut, bas_ij_idx, *envs, img_coords, nimgs, npairs,
+                    log_cutoff, Ecut_max, is_mgga);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in estimate_aft_Ecut_kernel: %s\n", cudaGetErrorString(err));

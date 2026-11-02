@@ -17,7 +17,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <cuda_runtime.h>
 
 // WARP_SIZE: compile-time constant used for shared-memory sizing.
 // `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,

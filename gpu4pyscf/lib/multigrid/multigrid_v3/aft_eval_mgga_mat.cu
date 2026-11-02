@@ -17,10 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+#include "constant_objects.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "constant_objects.cuh"
 #include "utils.cuh"
 #include "aft_recursion.cuh"
 
@@ -304,7 +303,10 @@ int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtau
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntile_batch*npair);
     auto dev_envs = *envs;
-        LAUNCH_KERNEL(orth_mgga_mat_kernel, grids, threads, 0, out, vrhoG, vtauG, bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z, dev_envs);
+    LAUNCH_KERNEL( orth_mgga_mat_kernel, grids, threads, 0,
+                    out, vrhoG, vtauG, bas_ij_idx, G_bases, L_bases,
+                    mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y,
+                    ntiles_z, dev_envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_mgga_mat_kernel: %s\n", cudaGetErrorString(err));
