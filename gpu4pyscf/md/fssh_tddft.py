@@ -85,7 +85,7 @@ class FSSH_TDDFT(FSSH):
         ground_energy = mf.e_tot
         energies = np.append(ground_energy, excited_energies)
         energy = energies[self.states]  # (Nstates,)  Unit: Ha
-        converged = np.append(mf.converged, td_scanner.converged)
+        converged = np.append(mf.converged, cp.asnumpy(td_scanner.converged))
         assert all(converged[self.states])
 
         if not with_nacv:
