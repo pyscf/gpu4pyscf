@@ -41,7 +41,7 @@
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho3, out_gga->v3rho3, coef, np, dim->v3rho3); \
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2sigma, out_gga->v3rho2sigma, coef, np, dim->v3rho2sigma); \
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigma2, out_gga->v3rhosigma2, coef, np, dim->v3rhosigma2); \
-                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3); 
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3);
 
 #define ADD_MGGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_mgga->zk, coef, np, dim->zk); \
                  if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_mgga->vrho, coef, np, dim->vrho); \
@@ -77,7 +77,7 @@
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigmalapltau, out_mgga->v3sigmalapltau, coef, np, dim->v3sigmalapltau); \
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl3       , out_mgga->v3lapl3       , coef, np, dim->v3lapl3       ); \
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl2tau    , out_mgga->v3lapl2tau    , coef, np, dim->v3lapl2tau    ); \
-                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    ); 
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    );
 
 __global__
 static void _add_out(double *out, const double *buf, double coef, int np, int dim){
@@ -257,6 +257,7 @@ void _memset_mgga(xc_mgga_out_params *out, int order, int np, const xc_dimension
 }
 
 __host__
+// XC evaluation and its helper kernels use the default stream.
 int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
             xc_lda_out_params *out, cudaStream_t stream){
     if(func->info->lda == NULL){
@@ -271,8 +272,6 @@ int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
     _memset_lda(out, order, np, dim, stream);
     //FREE(dim);
 
-    // libxc callbacks launch on the legacy default stream.
-    if (stream != 0) cudaStreamSynchronize(stream);
     if(func->info->lda != NULL){
         if(func->nspin == XC_UNPOLARIZED){
             if(func->info->lda->unpol[order] != NULL)
@@ -282,7 +281,6 @@ int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
                 func->info->lda->pol[order](func, np, rho, out);
         }
     }
-    if (stream != 0) cudaStreamSynchronize(0);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc lda: %s\n", cudaGetErrorString(err));
@@ -315,8 +313,6 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
     }
 
     /* call the GGA routines */
-    // libxc callbacks launch on the legacy default stream.
-    if (stream != 0) cudaStreamSynchronize(stream);
     if(func->info->gga != NULL){
         if(func->nspin == XC_UNPOLARIZED){
             if(func->info->gga->unpol[order] != NULL)
@@ -326,7 +322,6 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
                 func->info->gga->pol[order](func, np, rho, sigma, out);
         }
     }
-    if (stream != 0) cudaStreamSynchronize(0);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc_gga: %s\n", cudaGetErrorString(err));
@@ -359,8 +354,6 @@ int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, con
     }
 
     /* call the mGGA routines */
-    // libxc callbacks launch on the legacy default stream.
-    if (stream != 0) cudaStreamSynchronize(stream);
     if(func->info->mgga != NULL){
         if(func->nspin == XC_UNPOLARIZED){
             if(func->info->mgga->unpol[order] != NULL)
@@ -370,7 +363,6 @@ int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, con
                 func->info->mgga->pol[order](func, np, rho, sigma, lapl, tau, out);
         }
     }
-    if (stream != 0) cudaStreamSynchronize(0);
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc mgga: %s\n", cudaGetErrorString(err));

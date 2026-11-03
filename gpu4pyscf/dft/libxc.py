@@ -215,6 +215,8 @@ class XCfun:
     def compute(self, inp, output=None, do_exc=True, do_vxc=True, do_fxc=False, do_kxc=False, do_lxc=False):
         assert not do_lxc
         assert self.on_gpu
+        stream = cupy.cuda.get_current_stream().ptr
+        assert stream == 0, 'libxc CUDA evaluation requires the default stream'
 
         if isinstance(inp, cupy.ndarray):
             inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
@@ -246,14 +248,13 @@ class XCfun:
                 if array is not None:
                     setattr(out_params, label, array[0].data.ptr)
                     setattr(buf_params, label, array[1].data.ptr)
-            stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_lda(
                 self.xc_func,
                 npoints,
                 inp['rho'].data.ptr,
                 ctypes.byref(out_params),
                 ctypes.byref(buf_params),
-                stream.ptr
+                stream
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_gga')
@@ -274,7 +275,6 @@ class XCfun:
                     setattr(out_params, label, array[0].data.ptr)
                     setattr(buf_params, label, array[1].data.ptr)
 
-            stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_gga(
                 self.xc_func,
                 npoints,
@@ -282,7 +282,7 @@ class XCfun:
                 inp['sigma'].data.ptr,
                 ctypes.byref(out_params),
                 ctypes.byref(buf_params),
-                stream.ptr
+                stream
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_gga')
@@ -303,7 +303,6 @@ class XCfun:
                 if array is not None:
                     setattr(out_params, label, array[0].data.ptr)
                     setattr(buf_params, label, array[1].data.ptr)
-            stream = cupy.cuda.get_current_stream()
             lapl = cupy.empty(0)
             err = libgdft.GDFT_xc_mgga(
                 self.xc_func,
@@ -314,7 +313,7 @@ class XCfun:
                 inp['tau'].data.ptr,
                 ctypes.byref(out_params),
                 ctypes.byref(buf_params),
-                stream.ptr
+                stream
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_mgga')
