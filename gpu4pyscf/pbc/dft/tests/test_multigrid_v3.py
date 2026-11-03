@@ -565,6 +565,23 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1) < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
+    def test_aft_partition_retains_float32_cutoff_pairs(self):
+        ni = multigrid.MultiGridNumInt(cell_orth).build(xctype='MGGA')
+        pairs = cp.asarray([0, multigrid.NBAS_MAX + 1], dtype=np.int64)
+        cutoff = np.float64(10.1)
+        pair_ke = cp.asarray([1., np.float32(cutoff)], dtype=np.float32)
+        # The native estimator caps energies in float32, which can round upward.
+        self.assertGreater(float(pair_ke[-1].get()), float(cutoff))
+        # Test ke_lower<init_ke: retain the first cutoff bin rather than dropping pairs; targets
+        # pbc/dft/multigrid_v3.py:649-656.
+        buckets = multigrid._partition_ke_for_aft(
+            ni, pairs, pair_ke, 2., cutoff, 'MGGA', lib.logger.new_logger(cell_orth))
+        assigned = cp.concatenate([bucket['bas_ij_idx'] for bucket in buckets])
+        np.testing.assert_array_equal(np.sort(assigned.get()), pairs.get())
+        self.assertEqual(buckets[0]['ke_cutoff'], cutoff)
+        for bucket in buckets:
+            self.assertTrue(np.all(bucket['mesh'] <= ni.mesh))
+
     def test_get_vxc_mgga(self):
         nao = cell_orth.nao
         np.random.seed(2)
@@ -1262,6 +1279,144 @@ class KnownValues(unittest.TestCase):
         grad, sigma = grad_sigma[:-3], grad_sigma[-3:]
         assert abs(grad_ref - grad).max().get() < 1e-12
         assert abs(sigma_ref - sigma).max().get() < 1e-12
+
+class AdditionalModes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cell = gto.M(atom='He .2 .3 .4', unit='Bohr',
+                         a=np.diag([5., 5.5, 6.]), mesh=[25, 27, 29],
+                         basis=[[0, [1., 1.]], [1, [.7, 1.]]],
+                         precision=1e-11, verbose=0)
+        cls.dm = cp.asarray((.7 * np.eye(cls.cell.nao))[None])
+        direction = np.random.default_rng(31).normal(size=(cls.cell.nao, cls.cell.nao))
+        cls.response = cp.asarray((.02 * (direction + direction.T))[None, None])
+
+    def _check_spin_response(self, module):
+        from pyscf.pbc.dft import numint as cpu_numint
+        from pyscf.pbc.dft.gen_grid import UniformGrids as CpuGrids
+        cell, dm, response = self.cell, self.dm, self.response
+        saved_dm, saved_response = dm.copy(), response.copy()
+        kpts = np.zeros((1, 3))
+        grids = CpuGrids(cell)
+        grids.mesh = cell.mesh
+        baseline = cp.stack([.5 * dm, .5 * dm])
+        for xc in ('LDA,VWN', 'PBE', 'r2scan'):
+            ni = module.MultiGridNumInt(cell)
+            cached = ni.cache_xc_kernel1(cell, None, xc, dm, spin=1, kpts=kpts)[2]
+            for singlet in (True, False):
+                with self.subTest(version=module.__name__, xc=xc, singlet=singlet):
+                    sign = 1 if singlet else -1
+                    perturbation = cp.stack([response, sign * response])
+                    result = ni.nr_rks_fxc_st(cell, None, xc, dm, response, hermi=1,
+                                              singlet=singlet, kpts=kpts)
+                    reused = ni.nr_rks_fxc_st(cell, None, xc, dm, response, hermi=1,
+                                              singlet=singlet, kpts=kpts, fxc=cached)
+                    full = ni.nr_uks_fxc(cell, None, xc, baseline, perturbation,
+                                         hermi=1, kpts=kpts)
+                    np.testing.assert_allclose(result.get(), reused.get(), atol=1e-11, rtol=0)
+                    np.testing.assert_allclose(result.get(), full[0].get(), atol=1e-11, rtol=0)
+                    if singlet:
+                        rks = ni.nr_rks_fxc(cell, None, xc, dm, response, hermi=1, kpts=kpts)
+                        rks_j = ni.nr_rks_fxc(cell, None, xc, dm, response,
+                                              hermi=1, kpts=kpts, with_j=True)
+                        vj = ni.get_j(response[0], kpts=kpts)
+                        np.testing.assert_allclose((rks_j-rks)[0].get(), vj.get(),
+                                                   atol=1e-10, rtol=0)
+                        full_j = ni.nr_uks_fxc(cell, None, xc, baseline, perturbation,
+                                               hermi=1, kpts=kpts, with_j=True)
+                        coulomb = cp.stack([2*vj[None], 2*vj[None]])
+                        np.testing.assert_allclose((full_j-full).get(), coulomb.get(),
+                                                   atol=1e-10, rtol=0)
+                    step = 1e-4
+                    plus = (baseline + step * perturbation[:, 0]).get()
+                    minus = (baseline - step * perturbation[:, 0]).get()
+                    cpu = cpu_numint.KNumInt()
+                    vp = cpu.nr_uks(cell, grids, xc, plus, kpts=kpts)[2][0]
+                    vm = cpu.nr_uks(cell, grids, xc, minus, kpts=kpts)[2][0]
+                    np.testing.assert_allclose(result[0].get(), (vp-vm)/(2*step),
+                                               atol=2e-7, rtol=0)
+        np.testing.assert_array_equal(dm.get(), saved_dm.get())
+        np.testing.assert_array_equal(response.get(), saved_response.get())
+
+    def test_v2_singlet_triplet_response(self):
+        from gpu4pyscf.pbc.dft import multigrid_v2
+        if multigrid_v2.libgpbc is None:
+            self.skipTest('multigrid v2 kernels not compiled')
+        # Test singlet=True versus False: add/subtract opposite-spin XC kernel blocks; targets
+        # pbc/dft/multigrid_v2.py:2088-2092.
+        self._check_spin_response(multigrid_v2)
+
+    def test_v3_singlet_triplet_response(self):
+        # Test singlet=True versus False: add/subtract the opposite-spin XC kernel; targets
+        # pbc/dft/multigrid_v3.py:2212-2216.
+        self._check_spin_response(multigrid)
+
+    def test_low_memory_energy_and_response(self):
+        cell, dm, response = self.cell, self.dm, self.response
+        spin_dm = cp.stack([.6 * dm, .4 * dm])
+        spin_response = cp.stack([response, -.3 * response])
+        for spin, density, perturbation in ((0, dm, response),
+                                             (1, spin_dm, spin_response)):
+            with self.subTest(spin=spin):
+                saved_dm, saved_response = density.copy(), perturbation.copy()
+                ni = multigrid.MultiGridNumInt(cell)
+                expected = ni.get_vxc(cell, None, 'r2scan', density, spin=spin, with_j=True)
+                fxc = ni.nr_uks_fxc if spin else ni.nr_rks_fxc
+                expected_response = fxc(cell, None, 'r2scan', density, perturbation,
+                                         hermi=1, with_j=True)
+                # Simulate a constrained workspace, without exhausting device memory.
+                with lib.temporary_env(multigrid, get_avail_mem=lambda: 1):
+                    # Test dm_sc.nbytes*10>mem: move the supercell density to host memory; targets
+                    # pbc/dft/multigrid_v3.py:2184-2186.
+                    actual = ni.get_vxc(cell, None, 'r2scan', density,
+                                       spin=spin, with_j=True)
+                    actual_response = fxc(cell, None, 'r2scan', density, perturbation,
+                                           hermi=1, with_j=True)
+                for value, reference in zip(actual, expected):
+                    np.testing.assert_allclose(cp.asnumpy(value), cp.asnumpy(reference),
+                                               atol=1e-11, rtol=0)
+                np.testing.assert_allclose(actual_response.get(), expected_response.get(),
+                                           atol=1e-11, rtol=0)
+                np.testing.assert_array_equal(density.get(), saved_dm.get())
+                np.testing.assert_array_equal(perturbation.get(), saved_response.get())
+
+    def test_batched_reciprocal_density(self):
+        cell = self.cell
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        density = cp.stack([self.dm, .4 * self.dm])
+        # Test n_dm>1: transform each density and retain the leading batch axis; targets
+        # pbc/dft/multigrid_v3.py:352-355.
+        result = multigrid._eval_rhoG(ni, density)
+        ao = cell.pbc_eval_gto('GTOval_sph', cell.get_uniform_grids())
+        rho = np.einsum('gi,nij,gj->ng', ao, density[:, 0].get(), ao)
+        reference = np.fft.fftn(rho.reshape(2, *cell.mesh), axes=(-3, -2, -1))
+        reference *= cell.vol / np.prod(cell.mesh)
+        np.testing.assert_allclose(result.get(), reference, atol=1e-9, rtol=1e-9)
+
+    def test_batched_fft_submesh_projection(self):
+        shape, mesh = (9, 11, 13), (3, 5, 7)
+        field = np.random.default_rng(7).normal(size=(2, *shape))
+        spectrum = np.fft.fftn(field, axes=(-3, -2, -1))
+        indices = [np.rint(np.fft.fftfreq(m) * m).astype(int) % n
+                   for m, n in zip(mesh, shape)]
+        selection = (slice(None),) + np.ix_(*indices)
+        expected = spectrum[selection]
+        source = cp.asarray(spectrum)
+        workspace = cp.empty((2, *mesh), dtype=np.complex128)
+        # Test a.ndim==4: preserve the batch size during FFT submesh extraction; targets
+        # pbc/dft/multigrid_v3.py:955-960.
+        actual = multigrid._take_fft_submesh(source, mesh, out=workspace)
+        self.assertEqual(actual.data.ptr, workspace.data.ptr)
+        np.testing.assert_array_equal(actual.get(), expected)
+        target = cp.full(source.shape, 2-1j, dtype=np.complex128)
+        reference = np.full(spectrum.shape, 2-1j, dtype=np.complex128)
+        for _ in range(2):
+            multigrid._inv_take_fft_submesh(target, actual, mesh)
+            reference[selection] += expected
+        np.testing.assert_array_equal(target.get(), reference)
+        np.testing.assert_array_equal(source.get(), spectrum)
+
 
 if __name__ == '__main__':
     print("Full Tests for multigrid v3")

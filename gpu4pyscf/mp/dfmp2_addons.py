@@ -568,8 +568,8 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
             j2c_l_inv = cp.asarray(j2c_decomp['j2c_l_inv'], dtype=dtype, order='C')
             for iset in range(nset):
                 shape = j3c[iset].shape
-                j3c[iset].shape = (naux, -1)
-                n_ov = j3c[iset].shape[1]
+                j3c[iset].shape = (-1, naux)
+                n_ov = j3c[iset].shape[0]
                 batch_ov = int(fp_avail / (4 * naux))
                 for i_ov in range(0, n_ov, batch_ov):
                     nbatch_ov = min(batch_ov, n_ov - i_ov)
@@ -614,9 +614,11 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     mol_concat = mol + aux
     nbas = mol.nbas
     nao = mol.nao
-    naux = aux.nao
     nao_tp = nao * (nao + 1) // 2
     shlP0, shlP1 = aux_slice if aux_slice else (0, aux.nbas)
+    # Allocate only the requested auxiliary shells, not the full basis.
+    aux_loc = aux.ao_loc_nr()
+    naux = int(aux_loc[shlP1] - aux_loc[shlP0])
     shls_slice = (0, nbas, 0, nbas, nbas + shlP0, nbas + shlP1)
     if out is None:
         out = np.empty((nao_tp, naux), order='F')

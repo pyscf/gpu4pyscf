@@ -16,7 +16,6 @@ import pyscf
 import numpy as np
 import cupy as cp
 import unittest
-import pytest
 from pyscf import lib
 import gpu4pyscf
 from gpu4pyscf.lib.cupy_helper import contract
@@ -356,6 +355,56 @@ class KnownValues(unittest.TestCase):
         ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
                                         k_factor=None, sum_results=True)
         assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
+
+class SmallPhysicalProtocols(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.small_mol = pyscf.M(atom='H 0 0 0; H 0 0 .74', basis='6-31g', verbose=0)
+        cls.cpu = cls.small_mol.RHF().density_fit(auxbasis='weigend').set(
+            conv_tol=1e-12, conv_tol_grad=1e-10)
+        cls.gpu = cls.cpu.to_gpu()
+        cls.cpu.kernel()
+        cls.gpu.kernel()
+        assert cls.cpu.converged and cls.gpu.converged
+        np.testing.assert_allclose(cls.gpu.e_tot, cls.cpu.e_tot, atol=1e-10, rtol=0)
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.cpu, cls.gpu, cls.small_mol
+
+    def test_tda_gradient_without_td_kernel(self):
+        td = self.gpu.TDA().set(nstates=2, conv_tol=1e-10, lindep=1e-20)
+        gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
+        self.assertIsNone(td.xy)
+        actual = gradient.kernel(state=1)
+        self.assertTrue(all(td.converged))
+        # CPU PySCF 2.14.0 DF energy central difference, step 5e-4 Bohr;
+        # agrees with step 1e-3 Bohr within 2e-7 Eh/Bohr.
+        derivative = -0.19801192632862
+        reference = np.array([[0., 0., -derivative], [0., 0., derivative]])
+        np.testing.assert_allclose(actual, reference, atol=1e-6, rtol=0)
+
+    def test_tdhf_gradient_with_xy(self):
+        td = self.gpu.TDHF().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
+        self.assertTrue(all(td.converged))
+        gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
+        selected = gradient.kernel(state=2)
+        self.assertEqual(gradient.state, 2)
+        explicit = td.nuc_grad_method().set(cphf_conv_tol=1e-10).kernel(xy=td.xy[1])
+        np.testing.assert_allclose(explicit, selected, atol=1e-10, rtol=0)
+        # CPU PySCF 2.14.0 DF energy central difference, step 5e-4 Bohr;
+        # agrees with step 1e-3 Bohr within 3e-7 Eh/Bohr.
+        reference = [[0., 0., -0.10770852316910], [0., 0., 0.10770852316910]]
+        np.testing.assert_allclose(selected, reference, atol=1e-6, rtol=0)
+
+    def test_tda_gradient_state_zero(self):
+        td = self.gpu.TDA()
+        gradient = td.nuc_grad_method()
+        actual = gradient.kernel(state=0)
+        self.assertIsNone(td.xy)
+        reference = self.cpu.nuc_grad_method().kernel()
+        np.testing.assert_allclose(actual, reference, atol=1e-7, rtol=0)
+
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")

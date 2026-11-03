@@ -17,6 +17,7 @@ from unittest import mock
 import numpy as np
 import cupy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import gto
 import gpu4pyscf
 from gpu4pyscf.scf import hf, rohf, ghf
@@ -649,6 +650,8 @@ class KnownValues(unittest.TestCase):
         assert cp.max(cp.abs(test_dm0 - ref_dm0)) < 1e-10
         assert cp.max(cp.abs(cp.abs(test_coeff.T @ S @ ref_coeff) - cp.eye(mol.nao))) < 1e-10
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: VSAP reference differs for ghost atoms')
     def test_vsap_guess_rks(self):
         mol = pyscf.M(
             atom = """

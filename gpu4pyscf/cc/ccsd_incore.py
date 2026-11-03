@@ -497,14 +497,10 @@ class CCSDBase(lib.StreamObject):
     density_fit          = NotImplemented
     nuc_grad_method      = NotImplemented
 
-    # to_cpu can be reused only when __init__ still takes mf
     def to_cpu(self):
+        from gpu4pyscf.lib.utils import to_cpu
         mf = self._scf.to_cpu()
-        from importlib import import_module
-        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
-        cls = getattr(mod, self.__class__.__name__)
-        obj = cls(mf)
-        return obj
+        return to_cpu(self, out=ccsd.CCSD(mf))
 
 CCSDBase.ccsd = ccsd.CCSDBase.ccsd
 

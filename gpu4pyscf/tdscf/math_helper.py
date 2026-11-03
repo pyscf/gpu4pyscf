@@ -98,7 +98,7 @@ def matrix_power(S,a, epsilon=None):
 
     s = s**a
 
-    X = cp.dot(ket*s,ket.T)
+    X = cp.dot(ket*s,ket.conj().T)
 
     return X
 
@@ -299,6 +299,8 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
     '''
     nvec = cp.shape(vecs)[0]
     for j in range(nvec):
+        if count >= V.shape[1]:
+            break
         vec = vecs[j, :].reshape(1,-1)
         vec = Gram_Schmidt_bvec(V[:count, :], vec)   #single orthonormalize
         if double:
@@ -425,9 +427,6 @@ def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
         y_tmp = Y_new[j,:].reshape(1,-1)
         x_tmp,y_tmp = S_symmetry_orthogonal(x_tmp,y_tmp)
         xy_norm = (cp.dot(x_tmp, x_tmp.T) + cp.dot(y_tmp, y_tmp.T))**0.5
-        x_tmp = x_tmp/xy_norm
-        y_tmp = y_tmp/xy_norm
-
         if  xy_norm > 1e-18:
             x_tmp = x_tmp/xy_norm
             y_tmp = y_tmp/xy_norm

@@ -882,7 +882,8 @@ class Gradients(tdrhf_grad.Gradients):
                 hermi = all(x == 1 for x in hermi)
             return _jk_energy_per_atom(
                 int3c2e_opt, dm_list, j_factor, k_factor, hermi,
-                omega, lr_factor, sr_factor, verbose=verbose)
+                omega=omega, lr_factor=lr_factor, sr_factor=sr_factor,
+                verbose=verbose)
 
         ejk = _jk_energies_per_atom(
             int3c2e_opt, dm_list, j_factor, k_factor, sum_results,

@@ -948,6 +948,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.linalg.norm(test_hessian - ref_hessian) < 1e-5
 
+
 if __name__ == "__main__":
     print("Full Tests for RKS Hessian with VV10")
     unittest.main()

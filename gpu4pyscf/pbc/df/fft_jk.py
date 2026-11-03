@@ -306,7 +306,9 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
     return vk
 
 def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
-    '''Derivatives of Coulomb (J) AO matrix at sampled k-points.
+    '''Atom-resolved Coulomb-energy derivatives for each input density matrix.
+
+    Return (natm, 3) for one density matrix or (nset, natm, 3) for a batch.
     '''
     cell = mydf.cell
     mesh = mydf.mesh
@@ -314,9 +316,9 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     assert cell.dimension > 1
 
     if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+        # FFTDF exposes this function directly, so honor its configured k-points.
+        kpts = mydf.kpts
+    kpts = kpts.reshape(-1, 3)
     is_gamma_point = is_zero(kpts)
     ni = mydf._numint
     dm_kpts = cp.asarray(dm_kpts, order='C')
@@ -426,7 +428,11 @@ def _factorize_dm(dm_kpts, kpts=None):
     else:
         nkpts = len(kpts)
     orbl, orbr = factorize_dm(dm_kpts)
-    orbl = cp.asarray(orbl.reshape((-1, nkpts) + orbl.shape[-2:]))
+    if orbl.size == 0:
+        nset = dm_kpts.size // (nkpts * dm_kpts.shape[-1]**2)
+        orbl = cp.asarray(orbl.reshape((nset, nkpts) + orbl.shape[-2:]))
+    else:
+        orbl = cp.asarray(orbl.reshape((-1, nkpts) + orbl.shape[-2:]))
     if orbr is not None:
         orbr = cp.asarray(orbr.reshape(orbl.shape))
     return orbl, orbr

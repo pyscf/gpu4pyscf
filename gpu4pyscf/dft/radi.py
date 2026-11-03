@@ -37,7 +37,7 @@ def treutler_atomic_radii_adjust(mol, atomic_radii):
 # fac(i,j) = \frac{1}{4} ( \frac{ra(j)}{ra(i)} - \frac{ra(i)}{ra(j)}
 # fac(j,i) = -fac(i,j)
     charges = [elements_proton(_std_symbol_without_ghost(x)) for x in mol.elements]
-    rad = cupy.sqrt(atomic_radii[charges]) + 1e-200
+    rad = cupy.sqrt(cupy.asarray(atomic_radii[charges])) + 1e-200
     rr = rad.reshape(-1,1) * (1./rad)
     a = .25 * (rr.T - rr)
     a[a<-.5] = -.5
@@ -67,8 +67,7 @@ def get_treutler_fac(mol, atomic_radii):
 
 def get_becke_fac(mol, atomic_radii):
     charges = [elements_proton(_std_symbol_without_ghost(x)) for x in mol.elements]
-    atomic_radii = numpy.asarray(atomic_radii[charges])
-    rad = atomic_radii[charges] + 1e-200
+    rad = numpy.asarray(atomic_radii[charges]) + 1e-200
     rr = rad.reshape(-1,1) * (1./rad)
     a = .25 * (rr.T - rr)
     a[a<-.5] = -.5

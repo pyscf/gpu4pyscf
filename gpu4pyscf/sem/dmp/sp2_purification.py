@@ -232,6 +232,8 @@ def purify(mf, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
         All references to molecular orbitals (mo_coeff, mo_energy, mo_occ) are eliminated.
         """
         conv_tol = self.conv_tol
+        if callback is None:
+            callback = self.callback
         mol = self.mol
         verbose = self.verbose
         log = logger.new_logger(self, verbose)
@@ -259,6 +261,7 @@ def purify(mf, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
         
         t1 = log.timer('SCF initialization', *t0)
         self.converged = False
+        self.cycles = 0
 
         if self.max_cycle <= 0:
             self.e_tot = e_tot
@@ -284,7 +287,6 @@ def purify(mf, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
             self.chkfile.save_mol(mol, self.chkfile)
 
         fock_last = None
-        self.cycles = 0
         for cycle in range(self.max_cycle):
             t0 = log.init_timer()
             dm_last = dm

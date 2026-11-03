@@ -16,6 +16,7 @@ import unittest
 import numpy
 import cupy
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cutensor import _contract_einsum, contraction
 
 class KnownValues(unittest.TestCase):
     def test_contract(self):
@@ -59,10 +60,11 @@ class KnownValues(unittest.TestCase):
     # issue 614
     def test_zero_strides(self):
         a = cupy.ones((3, 3))
-        assert contract('ij,ji->', a[0,:,None], a[0,None,:]) == 3
+        result = contract('ij,ji->', a[0,:,None], a[0,None,:])
+        self.assertEqual(result.shape, ())
+        assert result == 3
 
     def test_einsum_fallback_contiguous(self):
-        from gpu4pyscf.lib.cutensor import _contract_einsum
         from gpu4pyscf.lib.cupy_helper import hermi_triu, transpose_sum
         ncells, nkpts, nao, comp = 8, 4, 6, 1
         expLkz = cupy.random.rand(ncells, nkpts, 2)
@@ -85,6 +87,104 @@ class KnownValues(unittest.TestCase):
         out2 = _contract_einsum('Lpq,Lkz->kpqz', veff, expLkz, 2., 0.)
         assert out2.flags.c_contiguous
         assert cupy.linalg.norm(out2 - 2*ref) < 1e-12
+
+class EinsumFallback(unittest.TestCase):
+    def setUp(self):
+        self.a = cupy.asarray([[1., 2., 3.], [4., 5., 6.]])
+        self.b = cupy.asarray([[-2., 4., 1.], [1., -1., 2.]])
+        self.ref = numpy.einsum('ij,ij->', self.a.get(), self.b.get())
+
+    def test_scalar_result(self):
+        result = _contract_einsum('ij,ij->', self.a, self.b, 1.5, 0.)
+        self.assertIsInstance(result, cupy.ndarray)
+        self.assertEqual(result.shape, ())
+        self.assertEqual(result.dtype, numpy.dtype(numpy.float64))
+        self.assertEqual(float(result), 1.5 * self.ref)
+        # EDA stores each fully contracted pair energy in a host scalar slot.
+        pair_energies = numpy.zeros((2, 2))
+        pair_energies[0, 1] = result
+        self.assertEqual(pair_energies[0, 1], 1.5 * self.ref)
+
+    def test_complex_scalar_result(self):
+        a = self.a + 1j
+        b = self.b - 2j
+        result = _contract_einsum('ij,ij->', a, b, 2., 0.)
+        ref = 2 * numpy.einsum('ij,ij->', a.get(), b.get())
+        self.assertEqual(result.shape, ())
+        self.assertEqual(result.dtype, numpy.dtype(numpy.complex128))
+        numpy.testing.assert_array_equal(result.get(), ref)
+
+    def test_scalar_output_beta_zero(self):
+        out = cupy.asarray(numpy.nan)
+        result = _contract_einsum('ij,ij->', self.a, self.b, 2., 0., out=out)
+        self.assertIs(result, out)
+        self.assertEqual(out.shape, ())
+        self.assertEqual(float(out), 2 * self.ref)
+
+    def test_scalar_output_alpha_beta(self):
+        out = cupy.asarray(7.)
+        result = _contract_einsum('ij,ij->', self.a, self.b, 2., -3., out=out)
+        self.assertIs(result, out)
+        self.assertEqual(out.shape, ())
+        self.assertEqual(float(out), 2 * self.ref - 3 * 7.)
+
+    def test_empty_scalar_contraction(self):
+        a = cupy.empty((0, 3))
+        b = cupy.empty((0, 3))
+        # Empty operands also take this fallback when cuTENSOR is available.
+        result = contract('ij,ij->', a, b)
+        self.assertEqual(result.shape, ())
+        self.assertEqual(float(result), 0.)
+
+    def test_singleton_vector_shape(self):
+        result = _contract_einsum('ij,j->i', self.a[:1], self.b[0], 1., 0.)
+        ref = numpy.einsum('ij,j->i', self.a[:1].get(), self.b[0].get())
+        self.assertEqual(result.shape, (1,))
+        self.assertTrue(result.flags.c_contiguous)
+        numpy.testing.assert_array_equal(result.get(), ref)
+
+    def test_output_input_overlap(self):
+        a_host = numpy.array([[1., 2.], [3., 4.]])
+        b_host = numpy.array([[2., 0.], [1., 3.]])
+        a = cupy.asarray(a_host)
+        out = a.T
+        initial = out.get()
+        expected = 2 * numpy.einsum('ik,kj->ij', a_host, b_host) + 3 * initial
+        result = _contract_einsum('ik,kj->ij', a, cupy.asarray(b_host), 2., 3., out=out)
+        self.assertIs(result, out)
+        numpy.testing.assert_array_equal(result.get(), expected)
+
+    def test_fortran_output_beta_zero_overwrites_nan(self):
+        out = cupy.full((2, 2), numpy.nan, order='F')
+        result = _contract_einsum('ij,kj->ik', self.a, self.b, 2., 0., out=out)
+        self.assertIs(result, out)
+        self.assertTrue(result.flags.f_contiguous)
+        expected = 2 * numpy.einsum('ij,kj->ik', self.a.get(), self.b.get())
+        numpy.testing.assert_array_equal(result.get(), expected)
+
+    def test_broadcast_zero_stride_complex_operand(self):
+        row = numpy.arange(3) + 1j
+        a = cupy.broadcast_to(cupy.asarray(row)[None,:], (4, 3))
+        b_host = numpy.arange(8, dtype=numpy.float64).reshape(4, 2)
+        self.assertEqual(a.strides[0], 0)
+        result = _contract_einsum('ij,ik->jk', a, cupy.asarray(b_host), 1., 0.)
+        expected = numpy.einsum('ij,ik->jk', numpy.broadcast_to(row, (4, 3)), b_host)
+        self.assertTrue(result.flags.c_contiguous)
+        numpy.testing.assert_array_equal(result.get(), expected)
+
+    def test_empty_contraction_with_output(self):
+        # The native entry point deliberately uses its real einsum fallback
+        # before requesting descriptors for unsupported empty operands.
+        a = cupy.empty((2, 0), dtype=numpy.complex128)
+        b = cupy.empty((0, 3), dtype=numpy.float64)
+        out = cupy.arange(6, dtype=numpy.complex128).reshape(2, 3)
+        expected = -.5 * out.get()
+        self.assertIs(contraction('ik,kj->ij', a, b, 2., -.5, out=out), out)
+        numpy.testing.assert_array_equal(out.get(), expected)
+        result = contraction('ik,kj->ij', cupy.empty((0, 2)), cupy.ones((2, 3)), 1., 0.)
+        self.assertEqual(result.shape, (0, 3))
+        self.assertEqual(result.size, 0)
+
 
 if __name__ == "__main__":
     print("Full tests for cutensor module")

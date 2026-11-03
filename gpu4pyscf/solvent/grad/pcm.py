@@ -806,6 +806,7 @@ class WithSolventGrad:
         return self.base.to_cpu().PCM().Gradients()
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        assert atmlst is None or len(atmlst) == self.mol.natm
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:

@@ -644,8 +644,8 @@ class KSCF(pbchf.SCF):
         single_kpt_band = (kpts_band.ndim == 1)
         kpts_band = kpts_band.reshape(-1,3)
 
-        fock = cp.asarray(self.get_hcore(cell, kpts_band))
-        fock += self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
+        fock = self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
+        fock += cp.asarray(self.get_hcore(cell, kpts_band))
         s1e = self.get_ovlp(cell, kpts_band)
 
         x = self.check_linear_dependency(s1e, time_reversal_symmetry=False)

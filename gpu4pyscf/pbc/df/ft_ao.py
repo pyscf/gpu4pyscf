@@ -70,6 +70,19 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
     if q is None:
         q = np.zeros(3)
     ft_kernel = gen_ft_kernel(cell, kptjs)
+    kmesh = kpts_to_kmesh(cell, kptjs)
+    bvk_ncells = int(np.prod(kmesh))
+    nao = cell.nao_nr()
+    nkpts = 1 if kptjs is None else len(kptjs)
+    bytes_per_gv = nkpts * nao**2 * bvk_ncells * np.dtype(np.complex128).itemsize
+    scratch_bytes = 512 * 1024**2
+    blksize = max(1, min(len(Gv), scratch_bytes // bytes_per_gv))
+    if blksize < len(Gv):
+        out = cp.empty((nkpts, len(Gv), nao, nao), dtype=np.complex128)
+        for p0 in range(0, len(Gv), blksize):
+            p1 = min(p0 + blksize, len(Gv))
+            out[:, p0:p1] = ft_kernel(Gv[p0:p1], q, kptjs)
+        return out
     return ft_kernel(Gv, q, kptjs)
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,

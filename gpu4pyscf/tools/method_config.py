@@ -99,7 +99,7 @@ def method_from_config(config):
         if solvent['method'].endswith(('PCM', 'pcm')):
             mf = mf.PCM()
             mf.with_solvent.lebedev_order = 29
-            mf.with_solvent.method = solvent['method'].replace('PCM','-PCM')
+            mf.with_solvent.method = solvent['method']
             mf.with_solvent.eps = solvent['eps']
         elif solvent['method'].endswith(('smd', 'SMD')):
             mf = mf.SMD()

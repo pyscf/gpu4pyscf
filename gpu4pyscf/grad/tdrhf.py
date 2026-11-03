@@ -130,7 +130,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         veff = vj[1] * 2 - vk[1]
     else:
         veff = -vk[1]
-    if with_solvent:
+    if with_solvent and singlet:
+        # A triplet's transition density carries no charge, so it has no
+        # LR-PCM term (see WithSolventTDSCF.gen_response)
         veff += td_grad.solvent_response(dmxpy + dmxpy.T)
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
@@ -365,8 +367,6 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
              for l in range(k+1)]
     schemes = {t: _ejk_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
 
-    # Size the per-block dd cache from the actual schemes: the quartets per
-    # block grow with SHM_SIZE faster than DD_CACHE_MAX's integer factor.
     nf = (uniq_l + 1) * (uniq_l + 2) // 2
     nf = nf[:,None] * nf
     nf = nf[:,:,None,None] * nf

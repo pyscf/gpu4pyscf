@@ -564,6 +564,105 @@ class KnownValues(unittest.TestCase):
         e2 = mf_scanner(cell2)
         assert abs(sigma[0,0] - (e1 - e2)/2e-3/cell.vol) < 1e-6
 
+class StrainVXC_high_cost(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cell = gto.M(
+            atom='He .2 .3 .4; He 1.4 1.2 1.6', unit='Bohr',
+            a=[[5., .3, .2], [.1, 5.5, .4], [.2, -.1, 6.]],
+            mesh=[25, 27, 29], basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+            pseudo='gth-pade', precision=1e-11, verbose=0)
+        cls.scaled_kpts = np.array([[.25, 0., 0.], [-.25, 0., 0.]])
+        cls.coeff = np.random.default_rng(51).normal(size=(2, cls.cell.nao, 3))
+        cls.coeff /= np.sqrt(cls.cell.nao)
+
+    def _cpu_energy(self, cell, density, xc, mesh, with_j, with_nuc):
+        from pyscf.pbc.df import FFTDF as CpuFFTDF
+        from pyscf.pbc.gto import pseudo
+        kpts = cell.get_abs_kpts(self.scaled_kpts)
+        grids = UniformGrids(cell)
+        grids.mesh = mesh
+        ni = KNumInt()
+        energy = ni.nr_rks(cell, grids, xc, density, kpts=kpts)[1]
+        df = CpuFFTDF(cell, kpts=kpts)
+        df.mesh = mesh
+        if with_j:
+            vj = df.get_jk(density, kpts=kpts, with_k=False)[0]
+            energy += .5 * np.einsum('kij,kji->', vj, density).real / len(kpts)
+        if with_nuc:
+            if cell._pseudo:
+                gv = cell.get_Gv(mesh)
+                vlocG = -np.einsum('ag,ag->g', cell.get_SI(mesh=mesh),
+                                   pseudo.get_vlocG(cell, gv))
+                rho = ni.get_rho(cell, density, grids, kpts=kpts)
+                # Convert the Fourier potential to physical units, then integrate.
+                vloc = np.fft.ifftn(vlocG.reshape(mesh)).real.ravel()
+                vloc *= np.prod(mesh) / cell.vol
+                energy += np.dot(rho, vloc) * cell.vol / np.prod(mesh)
+            else:
+                vne = df.get_nuc(kpts=kpts)
+                energy += np.einsum('kij,kji->', vne, density).real / len(kpts)
+        return float(energy)
+
+    def _check_public_vxc(self, xc, with_j=False, with_nuc=False,
+                          bare=False, grid_override=False, implicit_dm=False):
+        from gpu4pyscf.pbc.dft import KRKS
+        from gpu4pyscf.pbc.dft.numint import KNumInt as GpuNumInt
+        from gpu4pyscf.pbc.dft.gen_grid import UniformGrids as GpuGrids
+        from gpu4pyscf.pbc.grad import krks_stress
+        cell = self.cell.copy()
+        if bare:
+            # Rebuilding a copied cell with pseudo=None retains its parsed _pseudo.
+            cell = gto.M(atom=self.cell.atom, a=self.cell.a, unit=self.cell.unit,
+                         mesh=self.cell.mesh, basis=self.cell.basis,
+                         precision=self.cell.precision, verbose=0)
+            self.assertFalse(cell._pseudo)
+        kpts = cell.get_abs_kpts(self.scaled_kpts)
+        mf = KRKS(cell, kpts=kpts, xc=xc)
+        mf._numint = GpuNumInt()
+        mf.grids = GpuGrids(cell)
+        # A genuine positive orbital density suffices; no SCF is needed.
+        mf.mo_coeff = cp.asarray(self.coeff)
+        mf.mo_occ = cp.ones((2, 3))
+        density = mf.make_rdm1()
+        density_cpu = density.get()
+        gradient = mf.Gradients()
+        if grid_override:
+            gradient.grids = GpuGrids(cell)
+            gradient.grids.mesh = np.asarray(cell.mesh) + 2
+        selected_grids = gradient.grids if grid_override else mf.grids
+        mesh = np.asarray(selected_grids.mesh).copy()
+        actual = krks_stress.get_vxc(
+            gradient, cell, None if implicit_dm else density, kpts,
+            with_j=with_j, with_nuc=with_nuc)
+        self.assertEqual(actual.shape, (3, 3))
+        step = 1e-4
+        reference = np.empty((3, 3))
+        for x in range(3):
+            for y in range(3):
+                plus, minus = _finite_diff_cells(cell, x, y, step)
+                ep = self._cpu_energy(plus, density_cpu, xc, mesh, with_j, with_nuc)
+                em = self._cpu_energy(minus, density_cpu, xc, mesh, with_j, with_nuc)
+                reference[x, y] = (ep-em) / (2*step)
+        # get_vxc returns dE/dstrain, without the stress tensor's 1/volume.
+        np.testing.assert_allclose(actual, reference, atol=1e-7, rtol=0)
+        np.testing.assert_array_equal(density.get(), density_cpu)
+        np.testing.assert_array_equal(mf.mo_coeff.get(), self.coeff)
+        np.testing.assert_array_equal(selected_grids.mesh, mesh)
+
+    def test_lda_uniform_strain(self):
+        self._check_public_vxc('LDA,VWN', implicit_dm=True)
+
+    def test_pbe_coulomb_gradient_grid_override(self):
+        self._check_public_vxc('PBE', with_j=True, grid_override=True)
+
+    def test_r2scan_local_pseudopotential_strain(self):
+        self._check_public_vxc('R2SCAN', with_nuc=True)
+
+    def test_pbe_coulomb_bare_nuclear_strain(self):
+        self._check_public_vxc('PBE', with_j=True, with_nuc=True, bare=True)
+
+
 if __name__ == "__main__":
     print("Full Tests for KRKS Stress tensor")
     unittest.main()

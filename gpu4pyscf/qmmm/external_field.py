@@ -34,8 +34,7 @@ def external_field_for_scf(method, electric_field=None, origin=None):
     assert (isinstance(method, gpu4pyscf.scf.hf.SCF))
 
     if isinstance(method, EXTF):
-        method.electric_field = cp.asarray(electric_field)
-        method.origin = cp.asarray(origin).get()
+        method._set_field(electric_field, origin)
         return method
 
     cls = EXTFSCF
@@ -50,7 +49,10 @@ class EXTFSCF(EXTF):
 
     def __init__(self, method, electric_field=None, origin=None):
         self.__dict__.update(method.__dict__)
+        self._set_field(electric_field, origin)
 
+    def _set_field(self, electric_field, origin):
+        # Apply the same disabled-field/default-origin contract on every update.
         if electric_field is not None:
             electric_field = cp.asarray(electric_field)
             assert isinstance(electric_field, cp.ndarray)
@@ -116,8 +118,7 @@ def add_external_field_grad(scf_grad, electric_field=None, origin=None):
     # if unit is None:
     #     unit = mol.unit
     gobj = external_field_grad_for_scf(scf_grad)
-    gobj.base.electric_field = cp.asarray(electric_field)
-    gobj.base.origin = cp.asarray(origin).get()
+    gobj.base._set_field(electric_field, origin)
     return gobj
 
 def external_field_grad_for_scf(scf_grad):

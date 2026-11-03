@@ -512,7 +512,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
         
         if has_grad:
             n_tasks_ee -= 1
-            de_grad = base_de_ee[-1].get() + mf_grad.grad_nuc(mol, atmlst)
+            de_grad = base_de_ee[-1].get() + mf_grad.grad_nuc(mol)
             results['gradient'] = de_grad
 
         if n_pairs > 0:
@@ -551,6 +551,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
         for idx, t in enumerate(time_list):
             logger.note(td_nac, f"Time for step {idx}: {t*1e-3:.6f}s")
             
+    assert atmlst is None or len(atmlst) == mol.natm
     return results
 
 
@@ -683,7 +684,8 @@ class NAC_multistates(NAC_multistates_tdrks):
                         self.results[(global_i, global_j)] = res
 
         if self.grad_state == 0:
-            self.grad_result = self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
+            assert atmlst is None or len(atmlst) == self.mol.natm
+            self.grad_result = self.base._scf.nuc_grad_method().kernel()
 
         self._finalize()
         return self.results
