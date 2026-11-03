@@ -858,6 +858,31 @@ def test_ejk_strain_deriv_gamma_point():
     assert abs(ref - sigma).max() < 2e-5
 
 def test_ejk_strain_deriv_kpts():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.2 1.5 1.8', a=np.eye(3)*4.,
+                   basis=[[0, [.25, 1]], [1, [.3, 1]]], precision=1e-10,
+                   verbose=0)
+    kmesh = [2,1,1]
+    kpts = cell.make_kpts(kmesh)
+    dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    opt = rsjk.PBCJKMatrixOpt(cell).build()
+    deriv = opt._get_ejk_derivatives(dm, kpts=kpts)
+    assert deriv.shape == (cell.natm+3, 3)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_strain_deriv(mydf, dm, kpts=kpts)
+    ref -= .5 * aft_jk.get_ek_strain_deriv(mydf, dm, kpts=kpts)
+    assert abs(ref - deriv[-3:]).max() < 1e-6
+
+    def eval_ejk(displaced):
+        displaced_kpts = displaced.make_kpts(kmesh)
+        vj, vk = fft.FFTDF(displaced, kpts=displaced_kpts).get_jk(
+            dm, hermi=1, kpts=displaced_kpts)
+        return cp.einsum('kij,kji->', vj-.5*vk, dm).real * .5 / len(kpts)
+
+    _check_gradient(deriv[:-3], cell, eval_ejk)
+    _check_strain(deriv[-3:], cell, eval_ejk, tol=1e-6)
+
+
+def test_ejk_strain_deriv_kpts_high_cost():
     from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     cell = pyscf.M(
         atom = '''

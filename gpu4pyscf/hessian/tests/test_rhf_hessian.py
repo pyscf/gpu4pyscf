@@ -214,7 +214,7 @@ class KnownValues(unittest.TestCase):
         assert cp.linalg.norm(vk_cpu - vk_mo) < 1e-5
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_ecp_hess(self):
+    def test_ecp_hess_high_cost(self):
         mol = gto.M(atom='H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
                     ecp={'Cu':'lanl2dz'}, 
                     verbose=0,
@@ -228,6 +228,24 @@ class KnownValues(unittest.TestCase):
         e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))[1]
         mol.stdout.close()
         self.assertAlmostEqual(abs(hess[1,:,2] - (e1-e2)/0.002*lib.param.BOHR).max(), 0, 5)
+
+class SmallECP(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
+    def test_ecp_hess(self):
+        # NaH has two explicit electrons with LANL2DZ, versus 20 in CuH.
+        mol = gto.M(atom='H 0 0 1.9; Na 0 0 0', basis='lanl2dz',
+                    ecp={'Na': 'lanl2dz'}, verbose=0)
+        mf = scf.RHF(mol).run(conv_tol=1e-14)
+        assert mf.converged
+        hess = hessian.RHF(mf).kernel()
+        scanner = mf.nuc_grad_method().as_scanner()
+        coords = mol.atom_coords()
+        shift = np.zeros_like(coords)
+        shift[1, 2] = 1e-3
+        g1 = scanner(mol.set_geom_(coords + shift, unit='Bohr', inplace=False))[1]
+        g2 = scanner(mol.set_geom_(coords - shift, unit='Bohr', inplace=False))[1]
+        self.assertAlmostEqual(abs(hess[1,:,2] - (g1-g2)/2e-3).max(), 0, 5)
+
 
 if __name__ == "__main__":
     print("Full Tests for RHF Hessian")

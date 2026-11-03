@@ -348,7 +348,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tddft_singlet_b3lyp(self):
+    def test_nac_tddft_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)

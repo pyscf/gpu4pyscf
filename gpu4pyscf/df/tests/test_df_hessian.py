@@ -161,6 +161,18 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
     def test_uks_hessian_hybrid(self):
+        small_mol = pyscf.M(atom=atom, basis='sto3g', verbose=0)
+        mf = dft.uks.UKS(small_mol, xc='b3lyp').density_fit()
+        mf.grids.level = 3
+        mf.run(conv_tol=1e-12)
+        assert mf.converged
+        mf.conv_tol_cpscf = 1e-7
+        hobj = mf.Hessian().set(auxbasis_response=2)
+        h = hobj.kernel()
+        _check_dft_hessian(mf, h, ix=0, iy=0)
+        _check_dft_hessian(mf, h, ix=0, iy=1)
+
+    def test_uks_hessian_hybrid_high_cost(self):
         print('-----testing DF-UKS B3LYP Hessian----')
         mf = _make_uks(mol_sph, 'b3lyp')
         mf.conv_tol_cpscf = 1e-7

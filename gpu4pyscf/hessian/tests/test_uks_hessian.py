@@ -42,18 +42,21 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _check_vxc(method, xc='LDA', grid_level=1):
-    mf = dft.uks.UKS(mol, xc=xc)
-    mf.conv_tol = 1e-14
-    mf.grids.level = grid_level
-    mf.kernel()
+def _check_vxc(method, xc='LDA', grid_level=1, mf=None):
+    reconverge = mf is None
+    if mf is None:
+        mf = dft.uks.UKS(mol, xc=xc)
+        mf.conv_tol = 1e-14
+        mf.grids.level = grid_level
+        mf.kernel()
     dm = mf.make_rdm1()
     hobj = mf.Hessian()
     fn = getattr(uks_cpu, method)
     vxc_cpu = fn(hobj, mf.mo_coeff, mf.mo_occ, 12000)
 
     mf = mf.to_gpu()
-    mf.kernel()
+    if reconverge:
+        mf.kernel()
     hobj = mf.Hessian()
     fn = getattr(uks_gpu, method)
     vxc_gpu = fn(hobj, mf.mo_coeff, mf.mo_occ, 12000)
@@ -136,7 +139,7 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mf)
 
     @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
-    def test_hessian_pbe_D3(self):
+    def test_hessian_pbe_D3_high_cost(self):
         print('-----testing PBE Hessian with D3BJ----')
         mf = mol.UKS(xc='PBE')
         mf.conv_tol = 1e-14
@@ -174,15 +177,31 @@ class KnownValues(unittest.TestCase):
 class SmallGrid(unittest.TestCase):
     # Keep the full basis/grid regressions above; use a minimal basis and coarse
     # quadrature here to compare CPU/GPU derivatives in the routine test suite.
-    def make_mf(self, xc, disp=None):
+    @classmethod
+    def setUpClass(cls):
+        # The derivative comparison uses identical CPU orbitals on both devices.
+        # Reuse them across the three derivative orders and retain O p shells.
         small_mol = mol.copy()
         small_mol.basis = 'sto3g'
         small_mol.build(False, False)
+        cls.vxc_mfs = {}
+        for xc in ('LDA', 'PBE', 'TPSS'):
+            mf = small_mol.UKS(xc=xc)
+            mf.grids.level = 0
+            mf.run(conv_tol=1e-14)
+            assert mf.converged
+            cls.vxc_mfs[xc] = mf
+
+    def make_mf(self, xc, disp=None):
+        small_mol = gto.M(atom='Li 0 0 0; H .2 .3 1.6', basis='sto3g',
+                          charge=1, spin=1, verbose=0)
         mf = small_mol.UKS(xc=xc)
         mf.grids.level = 0
         mf.conv_tol = 1e-14
         mf.disp = disp
-        return mf.run()
+        mf.run()
+        assert mf.converged
+        return mf
 
     def test_hessian_mgga(self):
         _vs_cpu(self.make_mf('m06'), tol=1e-7)
@@ -198,17 +217,21 @@ class SmallGrid(unittest.TestCase):
     def test_vxc_diag(self):
         for xc in ('LDA', 'PBE', 'TPSS'):
             with self.subTest(xc=xc):
-                _check_vxc('_get_vxc_diag', xc=xc, grid_level=0)
+                _check_vxc('_get_vxc_diag', mf=self.vxc_mfs[xc])
 
     def test_vxc_deriv1(self):
         for xc in ('LDA', 'PBE', 'TPSS'):
             with self.subTest(xc=xc):
-                _check_vxc('_get_vxc_deriv1', xc=xc, grid_level=0)
+                _check_vxc('_get_vxc_deriv1', mf=self.vxc_mfs[xc])
 
     def test_vxc_deriv2(self):
         for xc in ('LDA', 'PBE', 'TPSS'):
             with self.subTest(xc=xc):
-                _check_vxc('_get_vxc_deriv2', xc=xc, grid_level=0)
+                _check_vxc('_get_vxc_deriv2', mf=self.vxc_mfs[xc])
+
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
+    def test_hessian_pbe_d3bj(self):
+        _vs_cpu(self.make_mf('PBE', disp='d3bj'), tol=1e-6)
 
 
 if __name__ == "__main__":
