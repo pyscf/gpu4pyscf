@@ -26,9 +26,10 @@ static __global__
 void recontract_kernel(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux)
 {
-    int thread_id = threadIdx.x;
-    int threads = blockDim.x;
-    int row_id = blockIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int threads = blockDim_x;
+    int row_id = blockIdx_x;
     size_t Naux = naux;
     out = out + out_idx[row_id] * Naux;
     input = input + inp_idx[row_id] * Naux;
@@ -44,10 +45,11 @@ static __global__
 void recontract_gather_kernel(double *out, double *input, int *inp_idx,
                               double *coef, int *offsets, size_t naux)
 {
-    int lane = threadIdx.x % warpSize;
-    int warp = threadIdx.x / warpSize;
-    int warps = blockDim.x / warpSize;
-    int row_id = blockIdx.x;
+    setup_context();
+    int lane = threadIdx_x % warpSize;
+    int warp = threadIdx_x / warpSize;
+    int warps = blockDim_x / warpSize;
+    int row_id = blockIdx_x;
     int start = offsets[row_id] + lane;
     int stop = offsets[row_id+1];
     unsigned mask = __activemask();
@@ -78,7 +80,9 @@ int recontract_ao_pair_gather(cudaStream_t stream, double *out, double *input,
     }
     int threads = 16 * WARP_SIZE;
     // One block per output pair; the kernel loops over all auxiliary columns.
-    recontract_gather_kernel<<<npair, threads, 0, stream>>>(
+    auto blocks = make_grid(npair);
+    auto block = make_block(threads);
+    LAUNCH_KERNEL(recontract_gather_kernel, blocks, block, 0, stream,
         out, input, inp_idx, coef, offsets, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -91,7 +95,10 @@ int recontract_ao_pair_gather(cudaStream_t stream, double *out, double *input,
 int recontract_ao_pair(double *out, double *input, int *out_idx, int *inp_idx,
                        double *coef, int naux, int count)
 {
-    recontract_kernel<<<count, 256>>>(out, input, out_idx, inp_idx, coef, naux);
+    auto blocks = make_grid(count);
+    auto threads = make_block(256);
+    LAUNCH_KERNEL( recontract_kernel, blocks, threads, 0,
+                    out, input, out_idx, inp_idx, coef, naux);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "recontract_ao_pair error %s\n", cudaGetErrorString(err));

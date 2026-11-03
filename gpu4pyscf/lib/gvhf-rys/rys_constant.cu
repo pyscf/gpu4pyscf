@@ -113,7 +113,9 @@ __constant__ int _c_cartesian_lexical_xyz[] = {
     0, 0, 6,
 };
 
+#ifndef USE_SYCL
 __constant__ GXYZOffset c_gxyz_offset[256];
+#endif
 
 __constant__ int c_nf[] = {
     1,

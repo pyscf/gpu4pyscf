@@ -1,0 +1,222 @@
+name: SYCL CPU CI
+
+# Sanity-verifies the SYCL port on a CPU-only GitHub-hosted runner using the
+# Intel OpenCL CPU device (no GPU present, none needed). The whole toolchain
+# comes from one conda environment (.github/sycl-cpu-ci-env.yml): Intel's
+# nightly dpnp/dpctl builds plus the matching oneAPI compilers, MKL and OpenCL
+# CPU runtime. Nothing is built from source except gpu4pyscf itself.
+#
+# Production builds AOT-compile for Intel PVC; that cannot run here, so the
+# build passes -DGPU4PYSCF_SYCL_AOT=OFF (see gpu4pyscf/lib/CMakeLists.txt) to
+# get a generic spir64 JIT build that the OpenCL CPU device can execute.
+#
+# Triggers:
+#   - workflow_dispatch (Actions tab)
+#   - every push and every pull request, on any branch
+#   - an issue/PR comment containing "@sycl-runner"
+#     NOTE: GitHub only delivers issue_comment events to the copy of this file
+#     on the repository's DEFAULT branch. For the comment trigger to work,
+#     this workflow file must also exist on the default branch; a comment on a
+#     PR then builds that PR's head ref.
+#
+# The full test suite will not finish on a 4-core runner and is not the goal;
+# the test steps below are allowed to partially fail (continue-on-error) so a
+# broken kernel build or import regression is still caught early.
+
+on:
+  workflow_dispatch: {}
+  # Run on every push and every pull request, the way lint.yml does, so the
+  # SYCL build is checked on each commit rather than only on the sycl branch.
+  # unittest.yml restricts itself to master because its runners are costly;
+  # this job is a build plus smoke test on a stock GitHub runner.
+  push:
+  pull_request:
+  issue_comment:
+    types: [created]
+
+permissions:
+  # contents: write lets the always-run log step push build/test logs to a
+  # ci-logs-<run_id> branch, since API log download needs repo admin auth.
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sycl-cpu-ci-${{ github.ref }}-${{ github.event_name }}
+  # dpnp/dpctl are installed prebuilt, so a superseded run has nothing worth
+  # finishing; cancel it. The ccache save step uses always() and still runs.
+  cancel-in-progress: true
+
+env:
+  # Only the OpenCL CPU device may be visible to SYCL.
+  ONEAPI_DEVICE_SELECTOR: "opencl:cpu"
+  OMP_NUM_THREADS: "2"
+  SYCL_CACHE_PERSISTENT: "1"
+  SYCL_CACHE_DIR: "/tmp/sycl_cache"
+  CCACHE_DIR: "/home/runner/.ccache"
+  CCACHE_MAXSIZE: "6G"
+  # The SYCL port is used via PYTHONPATH, not pip-installed: `pip install .`
+  # would run the CUDA setup.py, and the vendored cupy/cupyx shims live under
+  # <repo>/gpu4pyscf/, which must itself be on the path (same layout the
+  # production Aurora environment uses).
+  PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/gpu4pyscf"
+
+jobs:
+  build-and-test:
+    # For comment events, only react to "@sycl-runner".
+    if: github.event_name != 'issue_comment' || contains(github.event.comment.body, '@sycl-runner')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    defaults:
+      run:
+        # Login shell: setup-micromamba's init activates the sycl-ci env.
+        shell: bash -el {0}
+
+    steps:
+      - name: Acknowledge "@sycl-runner" comment
+        if: github.event_name == 'issue_comment'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+
+      - name: Checkout gpu4pyscf
+        uses: actions/checkout@v4
+        with:
+          # push / pull_request / workflow_dispatch build the ref that
+          # triggered them. A comment on a PR builds that PR's head ref, so
+          # "@sycl-runner" tests the branch under discussion rather than a
+          # fixed one; a comment on a plain issue has no PR to resolve, so it
+          # falls back to the default branch.
+          ref: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || '' }}
+
+      - name: Create conda environment (nightly dpnp/dpctl + oneAPI toolchain)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: .github/sycl-cpu-ci-env.yml
+          # Cache only the downloaded package files; the environment itself is
+          # re-solved on every run so the latest nightlies are always used.
+          cache-downloads: true
+          cache-environment: false
+          post-cleanup: none
+
+      - name: Toolchain and OpenCL CPU device
+        run: |
+          set -o pipefail; mkdir -p /tmp/logs
+          { which icpx icx ifx cmake
+            icpx --version
+            python -c "import dpctl, dpnp; print('dpctl', dpctl.__version__, '| dpnp', dpnp.__version__)"
+            python -c "import dpctl; dpctl.lsplatform(); d = dpctl.get_devices(device_type='cpu'); print(d); assert d, 'no SYCL CPU device'"
+            micromamba list | grep -E 'dpnp|dpctl|dpcpp|intel-sycl-rt|intel-opencl-rt|onemkl-sycl|python ' ; } 2>&1 | tee /tmp/logs/10_toolchain.log
+
+      - name: Restore ccache (gpu4pyscf C++/SYCL objects)
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          key: sycl-ccache-v2-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            sycl-ccache-v2-${{ runner.os }}-
+
+      - name: Build gpu4pyscf (SYCL backend, JIT spir64, CPU-runnable)
+        env:
+          # For sub-builds (ExchCXX ExternalProject etc.) that would otherwise
+          # fall back to /usr/bin/cc, which cannot compile -fsycl code.
+          CC: icx
+          CXX: icpx
+          FC: ifx
+          CMAKE_CONFIGURE_ARGS: >-
+            -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx
+            -DCMAKE_Fortran_COMPILER=ifx -DUSE_SYCL=ON
+            -DCMAKE_BUILD_TYPE=Release
+            -DGPU4PYSCF_SYCL_AOT=OFF
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: |
+          export MKLROOT="$CONDA_PREFIX" TBBROOT="$CONDA_PREFIX"
+          set -o pipefail; mkdir -p /tmp/logs
+          python setup.py --sycl build 2>&1 | tee /tmp/logs/40_gpu4pyscf_build.log
+          ccache -s || true
+
+      - name: Save ccache (even on failure, partial objects speed up retries)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: sycl-ccache-v2-${{ runner.os }}-${{ github.sha }}
+
+      - name: Smoke test - imports and CPU SYCL device visibility
+        run: |
+          set -o pipefail; mkdir -p /tmp/logs
+          { python -c "import dpctl; print('dpctl', dpctl.__version__); [print(d) for d in dpctl.get_devices()]" &&
+            python -c "import dpnp; a = dpnp.arange(10); assert int(a.sum()) == 45; print('dpnp', dpnp.__version__, 'OK')" &&
+            python -c "import gpu4pyscf; print('gpu4pyscf import OK')" ; } 2>&1 | tee /tmp/logs/50_smoke.log
+
+      - name: Test with pytest (same command as upstream unittest.yml)
+        # Identical pytest invocation to upstream's unittest.yml; only the
+        # scope differs. Enable suites one at a time by uncommenting a line.
+        timeout-minutes: 240
+        run: |
+          set -o pipefail; mkdir -p /tmp/logs
+          TESTS=(
+            # gpu4pyscf/tests
+            # gpu4pyscf/cc
+            # gpu4pyscf/df
+            # gpu4pyscf/dft
+            # gpu4pyscf/dispersion
+            # gpu4pyscf/fci
+            # gpu4pyscf/geomopt
+            # gpu4pyscf/grad
+            # gpu4pyscf/gto
+            # gpu4pyscf/hessian
+            # gpu4pyscf/lib
+            # gpu4pyscf/mcscf
+            # gpu4pyscf/md
+            # gpu4pyscf/mp
+            # gpu4pyscf/nac
+            # gpu4pyscf/pbc
+            # gpu4pyscf/pop
+            # gpu4pyscf/properties
+            # gpu4pyscf/qmmm
+            gpu4pyscf/scf
+            # gpu4pyscf/sem
+            # gpu4pyscf/solvent
+            # gpu4pyscf/tdscf
+            # gpu4pyscf/x2c
+          )
+          pytest -n 4 --dist loadfile -m 'not slow and not benchmark and not special' \
+            --cov="$GITHUB_WORKSPACE" --durations=50 "${TESTS[@]}" 2>&1 | tee /tmp/logs/60_pytest.log
+
+      - name: Upload logs as a run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sycl-cpu-ci-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Only a push to a branch in this repository has a writable
+      # GITHUB_TOKEN. On a pull request from a fork the token is read-only and
+      # github.repository names the base repository, so the push below is
+      # rejected with a 403. The artifact above covers every context; this
+      # step is the extra convenience of a browsable branch where it can run.
+      - name: Publish logs to a ci-logs branch (readable without API auth)
+        if: always() && github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/logs /tmp/ci-logs && cd /tmp/ci-logs
+          for f in /tmp/logs/*.log; do
+            [ -e "$f" ] && tail -n 1200 "$f" > "$(basename "$f")"
+          done
+          ls -la
+          git init -q -b main .
+          git config user.email "ci@github-runner" && git config user.name "sycl-cpu-ci logs"
+          git add -A
+          git commit -q -m "logs for run ${{ github.run_id }} (attempt ${{ github.run_attempt }}) sha ${{ github.sha }}" --allow-empty
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" HEAD:refs/heads/ci-logs-${{ github.run_id }}

@@ -16,6 +16,7 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "gsycl/gpu_compat.h"
 
 #define THREADS        32
 #define SQRT2_PI       0.7978845608028654
@@ -28,8 +29,9 @@ static void _pcm_d_s(double* __restrict__ matrix_d, double* __restrict__ matrix_
                     const double* __restrict__ charge_exp, const double* __restrict__ switch_fun,
                     const int n)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int i = global_x;
+    int j = global_y;
     if (i >= n || j >= n){
         return;
     }
@@ -82,7 +84,8 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
                                             const int n)
 {
     // Attention: The coords is assumed to be in x1,x2,...,xn,y1,y2,...,yn,z1,z2,...,zn, which is different from all other kernels!
-    const int i = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i = global_y;
     if (i >= n) {
         return;
     }
@@ -93,7 +96,7 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
     const double ei = charge_exp[i];
 
     double sum_i = 0;
-    for (int j = threadIdx.x; j < n; j += blockDim.x) {
+    for (int j = threadIdx_x; j < n; j += blockDim_x) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -118,7 +121,7 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
         sum_i += __shfl_down_sync(mask, sum_i, offset);
     }
 
-    if (threadIdx.x == 0) {
+    if (threadIdx_x == 0) {
         output[i] = sum_i;
     }
 }
@@ -128,7 +131,8 @@ static void _pcm_left_multiply_S_diagonal(double* __restrict__ output, const dou
                                         const double* __restrict__ S_diag,
                                         const int n)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int i = global_x;
     if (i >= n) {
         return;
     }
@@ -142,7 +146,10 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
                                  const double* __restrict__ coords, const double* __restrict__ norm_vec, const double* __restrict__ r_vdw, const double* __restrict__ charge_exp,
                                  const int n)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int i = global_x;
+
+    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -158,7 +165,7 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
     double nzi = 0.0; if constexpr (transpose) nzi = norm_vec[3*i+2];
 
     double sum_i = 0.0;
-    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+    for (int j = threadIdx_y; j < n; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -191,18 +198,16 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
         sum_i += d * right_vector[j];
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_i;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_i;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -210,10 +215,11 @@ __global__
 static void _pcm_dD_dS(double* __restrict__ matrix_dd, double* __restrict__ matrix_ds,
                        const double* __restrict__ coords, const double* __restrict__ norm_vec,
                        const double* __restrict__ charge_exp,
-                       const int n)
+                    const int n)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int i = global_x;
+    int j = global_y;
     if (i >= n || j >= n){
         return;
     }
@@ -267,7 +273,10 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
                                   const double* __restrict__ coords, const double* __restrict__ charge_exp,
                                   const int n)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int i = global_x;
+
+    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -280,7 +289,7 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
     double sum_x = 0.0;
     double sum_y = 0.0;
     double sum_z = 0.0;
-    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+    for (int j = threadIdx_y; j < n; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -315,42 +324,40 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
         sum_z += dSz * right_vector_j;
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_x;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[        i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[        i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_y;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n     + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n     + i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_z;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n * 2 + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -359,7 +366,10 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
                                            const double* __restrict__ coords, const double* __restrict__ charge_exp,
                                            const int n, const int g0, const int g1)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int i = global_x;
+
+    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -372,7 +382,7 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
     double sum_x = 0.0;
     double sum_y = 0.0;
     double sum_z = 0.0;
-    for (int j = threadIdx.y + g0; j < g1; j += blockDim.y) {
+    for (int j = threadIdx_y + g0; j < g1; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -407,42 +417,40 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
         sum_z += dSz * right_vector_j;
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_x;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[        i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[        i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_y;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n     + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n     + i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_z;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n * 2 + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -452,7 +460,10 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
                                   const double* __restrict__ coords, const double* __restrict__ charge_exp, const double* __restrict__ norm_vec,
                                   const int n)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int i = global_x;
+
+    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -469,7 +480,7 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
     double sum_x = 0.0;
     double sum_y = 0.0;
     double sum_z = 0.0;
-    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+    for (int j = threadIdx_y; j < n; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -512,42 +523,40 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
         sum_z += dDz * right_vector_j;
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_x;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[        i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[        i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_y;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n     + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n     + i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_z;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n * 2 + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -557,8 +566,9 @@ static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ m
                          const double* __restrict__ charge_exp,
                          const int n)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i = global_x;
+    const int j = global_y;
     if (i >= n || j >= n) {
         return;
     }
@@ -633,15 +643,18 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
                                           const double* __restrict__ coords, const double* __restrict__ charge_exp,
                                           const int ngrids, const int natm)
 {
-    const int i_atom = blockIdx.x;
-    const int j_atom = blockIdx.y;
+    setup_context();
+    const int i_atom = blockIdx_x;
+    const int j_atom = blockIdx_y;
+
+    SHARED_ARRAY(double, sum_shared, [n_thread_per_block * n_thread_per_block]);
     const int i_grid_start = gridslice[i_atom * 2 + 0];
     const int i_grid_end = gridslice[i_atom * 2 + 1];
     const int j_grid_start = gridslice[j_atom * 2 + 0];
     const int j_grid_end = gridslice[j_atom * 2 + 1];
 
     double sandwiched_d2S[9] { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-    for (int i_grid = i_grid_start + threadIdx.x; i_grid < i_grid_end; i_grid += n_thread_per_block) {
+    for (int i_grid = i_grid_start + threadIdx_x; i_grid < i_grid_end; i_grid += n_thread_per_block) {
         const double ei = charge_exp[i_grid];
 
         const double rix = coords[3*i_grid];
@@ -650,7 +663,7 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
 
         const double left_i = left_vector[i_grid];
 
-        for (int j_grid = j_grid_start + threadIdx.y; j_grid < j_grid_end; j_grid += n_thread_per_block) {
+        for (int j_grid = j_grid_start + threadIdx_y; j_grid < j_grid_end; j_grid += n_thread_per_block) {
             const double ej = charge_exp[j_grid];
             const double eij = ei * ej * rsqrt(ei*ei + ej*ej);
 
@@ -694,8 +707,7 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
         }
     }
 
-    __shared__ double sum_shared[n_thread_per_block * n_thread_per_block];
-        const int tid = threadIdx.y * n_thread_per_block + threadIdx.x;
+    const int tid = threadIdx_y * n_thread_per_block + threadIdx_x;
 
     for (int i_xyz = 0; i_xyz < 9; i_xyz++) {
         __syncthreads();
@@ -718,8 +730,9 @@ __global__
 static void _pcm_d2F_to_d2Sii(const double* __restrict__ F, const double* __restrict__ dF, const double* __restrict__ d2F, const double* __restrict__ charge_exp,
                               double* __restrict__ d2Sii, const int n_atom, const int n_grid)
 {
-    const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
-    const int ij_atom = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    const int i_grid = global_x;
+    const int ij_atom = global_y;
     if (i_grid >= n_grid || ij_atom >= n_atom * n_atom) {
         return;
     }
@@ -769,9 +782,10 @@ int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
 {
     int ntilex = (n + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntilex, ntiley);
-    _pcm_d_s<<<blocks, threads, 0, stream>>>(matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, ntiley);
+    LAUNCH_KERNEL(_pcm_d_s, blocks, threads, 0, stream,
+                  matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -785,9 +799,10 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
 {
     {
         const int ntiley = (n + THREADS - 1) / THREADS;
-        const dim3 threads(THREADS, THREADS);
-        const dim3 blocks(1, ntiley);
-        _pcm_left_multiply_S_offdiagonal<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
+        auto threads = make_block(THREADS, THREADS);
+        auto blocks = make_grid(1, ntiley);
+        LAUNCH_KERNEL(_pcm_left_multiply_S_offdiagonal, blocks, threads, 0, stream,
+                      output, right_vector, coords, charge_exp, n);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;
@@ -795,9 +810,10 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
     }
     {
         const int ntilex = (n + THREADS * THREADS - 1) / (THREADS * THREADS);
-        const dim3 threads(THREADS * THREADS);
-        const dim3 blocks(ntilex);
-        _pcm_left_multiply_S_diagonal<<<blocks, threads, 0, stream>>>(output, right_vector, S_diag, n);
+        auto threads = make_block(THREADS * THREADS);
+        auto blocks = make_grid(ntilex);
+        LAUNCH_KERNEL(_pcm_left_multiply_S_diagonal, blocks, threads, 0, stream,
+                      output, right_vector, S_diag, n);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;
@@ -811,12 +827,16 @@ int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double 
                         const int n, const bool transpose)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
-    const dim3 threads(THREADS, THREADS);
-    const dim3 blocks(ntilex, 1);
-    if (transpose)
-        _pcm_left_multiply_D< true> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
-    else
-        _pcm_left_multiply_D<false> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, 1);
+    if (transpose) {
+        LAUNCH_KERNEL(_pcm_left_multiply_D<true>, blocks, threads, 0, stream,
+                      output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+    }
+    else {
+        LAUNCH_KERNEL(_pcm_left_multiply_D<false>, blocks, threads, 0, stream,
+                      output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -831,9 +851,10 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
 {
     int ntilex = (n + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntilex, ntiley);
-    _pcm_dD_dS<<<blocks, threads, 0, stream>>>(matrix_dD, matrix_dS, coords, norm_vec, charge_exp, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, ntiley);
+    LAUNCH_KERNEL(_pcm_dD_dS, blocks, threads, 0, stream,
+                  matrix_dD, matrix_dS, coords, norm_vec, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -846,9 +867,10 @@ int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double
                          const int n, const bool transpose)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
-    const dim3 threads(THREADS, THREADS);
-    const dim3 blocks(ntilex, 1);
-    _pcm_left_multiply_dS<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, 1);
+    LAUNCH_KERNEL(_pcm_left_multiply_dS, blocks, threads, 0, stream,
+                  output, right_vector, coords, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -864,9 +886,10 @@ int pcm_left_multiply_ds_one_atom(const cudaStream_t stream, double *output, con
         return 1;
     }
     const int ntilex = (n + THREADS - 1) / THREADS;
-    const dim3 threads(THREADS, THREADS);
-    const dim3 blocks(ntilex, 1);
-    _pcm_left_multiply_dS_one_atom<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n, g0, g1);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, 1);
+    LAUNCH_KERNEL(_pcm_left_multiply_dS_one_atom, blocks, threads, 0, stream,
+                  output, right_vector, coords, charge_exp, n, g0, g1);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -879,12 +902,16 @@ int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double
                          const int n, const bool transpose)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
-    const dim3 threads(THREADS, THREADS);
-    const dim3 blocks(ntilex, 1);
-    if (transpose)
-        _pcm_left_multiply_dD< true> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, norm_vec, n);
-    else
-        _pcm_left_multiply_dD<false> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, norm_vec, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, 1);
+    if (transpose) {
+        LAUNCH_KERNEL(_pcm_left_multiply_dD<true>, blocks, threads, 0, stream,
+                      output, right_vector, coords, charge_exp, norm_vec, n);
+    }
+    else {
+        LAUNCH_KERNEL(_pcm_left_multiply_dD<false>, blocks, threads, 0, stream,
+                      output, right_vector, coords, charge_exp, norm_vec, n);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -899,9 +926,10 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const int ntiley = (n + THREADS - 1) / THREADS;
-    const dim3 threads(THREADS, THREADS);
-    const dim3 blocks(ntilex, ntiley);
-    _pcm_d2D_d2S<<<blocks, threads, 0, stream>>>(matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, ntiley);
+    LAUNCH_KERNEL(_pcm_d2D_d2S, blocks, threads, 0, stream,
+                  matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -915,10 +943,10 @@ int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
                                  const int ngrids, const int natm)
 {
     constexpr int n_thread_per_block = 16; // 32 will cause "too many resources requested for launch", out of register
-    const dim3 threads(n_thread_per_block, n_thread_per_block);
-    const dim3 blocks(natm, natm);
-    _pcm_contract_d2S_offdiagonal<n_thread_per_block> <<<blocks, threads, 0, stream>>>
-        (output, left_vector, right_vector, gridslice, coords, charge_exp, ngrids, natm);
+    auto threads = make_block(n_thread_per_block, n_thread_per_block);
+    auto blocks = make_grid(natm, natm);
+    LAUNCH_KERNEL(_pcm_contract_d2S_offdiagonal<n_thread_per_block>, blocks, threads, 0, stream,
+                  output, left_vector, right_vector, gridslice, coords, charge_exp, ngrids, natm);
     cudaError_t err = cudaGetLastError();
 
     if (err != cudaSuccess) {
@@ -933,9 +961,10 @@ int pcm_d2f_to_d2sii(cudaStream_t stream, const double* F, const double* dF, con
 {
     const int ntilex = (n_grid + THREADS - 1) / THREADS;
     const int ntiley = (n_atom * n_atom + THREADS - 1) / THREADS;
-    const dim3 threads(THREADS, THREADS);
-    const dim3 blocks(ntilex, ntiley);
-    _pcm_d2F_to_d2Sii<<<blocks, threads, 0, stream>>>(F, dF, d2F, charge_exp, d2Sii, n_atom, n_grid);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntilex, ntiley);
+    LAUNCH_KERNEL(_pcm_d2F_to_d2Sii, blocks, threads, 0, stream,
+                  F, dF, d2F, charge_exp, d2Sii, n_atom, n_grid);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

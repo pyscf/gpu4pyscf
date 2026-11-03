@@ -33,6 +33,7 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
 __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
+    setup_context();
     constexpr int WARP_SIZE = 32;
     for (int offset = 16; offset > 0; offset >>= 1) {
         val += __shfl_down_sync(0xffffffff, val, offset);

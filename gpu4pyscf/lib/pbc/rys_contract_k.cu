@@ -26,6 +26,11 @@
 #include "gvhf-rys/build_rys_gxyz.cuh"
 #include "pbc/create_tasks.cu"
 
+#ifdef USE_SYCL
+// libpbc.so is renamed to its own s_pbc_gxyz_offset by pbc/CMakeLists.txt.
+SYCL_EXTERNAL sycl_device_global<GXYZOffset[256]> s_rys_gxyz_offset;
+#endif
+
 #define GOUT_WIDTH1     81
 
 // gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
@@ -39,21 +44,28 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float dm_penalty, int64_t *pool, int *head,
                   int gout_pattern, int reserved_shm_size)
 {
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, cell_j);
+    SHARED_ARRAY(int, ish_cell0);
+    SHARED_ARRAY(int, jsh_cell0);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
+    SHARED_ARRAY(double, ri, [3]);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [2]);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     // sq is short for shl_quartet
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 
     int li = bounds.li;
     int lj = bounds.lj;
@@ -519,10 +531,12 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            dim3 threads(scheme[0], scheme[1]);
+            auto blocks = make_grid(workers, 1);
+            auto threads = make_block(scheme[0], scheme[1]);
+            auto dev_envs = *envs;
             int reserved_shm_size = scheme[3];
-            rys_k_kernel<<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+            LAUNCH_KERNEL( rys_k_kernel, blocks, threads, buflen,
+                dev_envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 dm_penalty, pool, head + offset/256,

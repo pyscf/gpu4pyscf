@@ -15,6 +15,7 @@
  */
 
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 
 #define THREADS        32
 #define BLOCK_DIM   32
@@ -22,8 +23,9 @@
 __global__
 void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
 {
-	int row = blockIdx.x * BLOCK_DIM + threadIdx.x;
-    int col = blockIdx.y * BLOCK_DIM + threadIdx.y;
+    setup_context();
+    int row = blockIdx_x * BLOCK_DIM + threadIdx_x;
+    int col = blockIdx_y * BLOCK_DIM + threadIdx_y;
     if (row >= m || col >= m){
         return;
     }
@@ -38,9 +40,10 @@ extern "C" {
 __host__
 int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, int m, int count){
     int ntile = (m + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile);
-    _add_sparse<<<blocks, threads, 0, stream>>>(a, b, indices, n, m, count);
+    auto threads = make_block(THREADS, THREADS);
+    auto blocks = make_grid(ntile, ntile);
+    LAUNCH_KERNEL(_add_sparse, blocks, threads, 0, stream,
+                  a, b, indices, n, m, count);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

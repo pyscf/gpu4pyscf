@@ -20,7 +20,10 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#pragma push_macro("LAUNCH_KERNEL")
+#undef LAUNCH_KERNEL
 #include "unrolled_int3c2e.cu"
+#pragma pop_macro("LAUNCH_KERNEL")
 #include "build_rys_gxyz.cuh"
 
 #define THREADS         256
@@ -36,17 +39,30 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                     int reorder_aux, int to_sph,
                     int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
-    int thread_id = threadIdx.x;
-    int worker_id = blockIdx.x;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1, nksp;
-    __shared__ int ksh0, ksh1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nf, aux_start;
-    __shared__ int g_size;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int sp_block_id, ksh_block_id;
+    setup_context();
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, nksp);
+    SHARED_ARRAY(int, ksh0);
+    SHARED_ARRAY(int, ksh1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, aux_start);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, ksh_block_id);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    int thread_id = threadIdx_x;
+    int worker_id = blockIdx_x;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -910,9 +926,11 @@ void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
                      int naux, int nao_sph, int pair_compressed)
 
 {
-    int pair_ij = blockIdx.x;
-    int thread_id = threadIdx.x;
-    int aux_id = blockIdx.y * blockDim.x + thread_id;
+    setup_context();
+    int pair_ij = blockIdx_x;
+    int thread_id = threadIdx_x;
+    int aux_id = blockIdx_y * blockDim_x + thread_id;
+
     if (aux_id >= naux) {
         return;
     }
@@ -1581,17 +1599,25 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int to_sph)
 {
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * POOL_SIZE);
     cudaMemset(head, 0, sizeof(int));
-    int3c2e_kernel<<<workers, THREADS, shm_size>>>(
-            out, *envs, pool, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
-    cudaError_t err = cudaGetLastError();
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    auto dev_envs = *envs;
+    LAUNCH_KERNEL( int3c2e_kernel, blocks, threads, shm_size,
+        out, dev_envs, pool, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
+        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
@@ -1605,10 +1631,12 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
 {
     constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
-    dim3 blocks(nshl_pair, aux_batches);
-    cart2sph_kernel<<<blocks, threads>>>(
-            out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
-            naux, nao_sph, pair_compressed);
+    auto blocks = make_grid(nshl_pair, aux_batches);
+    auto thread_block = make_block(threads);
+    auto dev_envs = *envs;
+    LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0,
+        out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets,
+        naux, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));

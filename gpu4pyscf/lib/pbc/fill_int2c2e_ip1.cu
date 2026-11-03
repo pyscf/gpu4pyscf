@@ -34,15 +34,25 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
                             int *gout_stride_lookup)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    setup_context();
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, nbas);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, gout_stride);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    int sp_block_id = blockIdx_x;
+    int thread_id = threadIdx_x;
+
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int nbas;
-    __shared__ int li, lj, nroots, nao, iprim, jprim;
-    __shared__ int gout_stride;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -72,7 +82,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
     int stride_j = li + 2;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
@@ -217,8 +226,10 @@ int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs,
                      int nbatches_shl_pair, int *shl_pair_offsets,
                      uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
     cudaFuncSetAttribute(pbc_int2c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    pbc_int2c2e_ip1_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    LAUNCH_KERNEL( pbc_int2c2e_ip1_kernel, blocks, threads, shm_size,
             out, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();

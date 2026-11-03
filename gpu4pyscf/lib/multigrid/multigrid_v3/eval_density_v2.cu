@@ -37,15 +37,19 @@ void eval_density_kernel(double *rho_c, double *dm, PBCIntEnvVars envs,
     constexpr int threads = WARP_SIZE * TILE;
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    setup_context();
+    int tx = threadIdx_x;
+    int ty = threadIdx_y;
     int thread_id = ty * nsp_per_block + tx;
-    int segment_id = blockIdx.x / atom_mesh_a_max;
-    int a_index_id = blockIdx.x - atom_mesh_a_max * segment_id;
-    __shared__ int a_index;
-    __shared__ int b_start, b_stop;
-    __shared__ int c_start, c_stop, c_index1;
-    extern __shared__ double rho_cache[];
+    int segment_id = blockIdx_x / atom_mesh_a_max;
+    int a_index_id = blockIdx_x - atom_mesh_a_max * segment_id;
+    SHARED_ARRAY(int, a_index);
+    SHARED_ARRAY(int, b_start);
+    SHARED_ARRAY(int, b_stop);
+    SHARED_ARRAY(int, c_start);
+    SHARED_ARRAY(int, c_stop);
+    SHARED_ARRAY(int, c_index1);
+    DYNAMIC_SHARED_PTR(double, rho_cache);
 
     float2 x_range = atom_frac_ranges[       segment_id];
     float2 y_range = atom_frac_ranges[nseg  +segment_id];
@@ -256,11 +260,15 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
 
 extern "C" {
 #define eval_density_kernel_case(li, lj, slice_i, slice_j) \
-    case (li * LMAX1 + lj): \
-        eval_density_kernel<li,lj,slice_i,slice_j><<<ntasks, threads, shmsize>>>( \
-            rho_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
-            atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
-            da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
+    case (li * LMAX1 + lj): { \
+        auto dev_envs = *envs; \
+        auto _threads = make_block(WARP_SIZE, TILE); \
+        auto _grids = make_grid(ntasks); \
+        LAUNCH_KERNEL( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
+            rho_c, dm, dev_envs, factor, shl_pair_offsets, bas_ij_idx, \
+                        atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
+                        da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
+    } \
     break
 
 int evaluate_density_v2(double *rho_c, double *placeholder, double *dm,
@@ -276,7 +284,6 @@ int evaluate_density_v2(double *rho_c, double *placeholder, double *dm,
     int ntasks = nseg * atom_mesh[0];
     int c_stride = (6000 / atom_mesh[1] / TILE) * TILE;
     int shmsize = atom_mesh[1] * c_stride * sizeof(double);
-    dim3 threads(WARP_SIZE, TILE);
     double a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] + dxyz_dabc[1] * dxyz_dabc[4] + dxyz_dabc[2] * dxyz_dabc[5];
     double a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] + dxyz_dabc[1] * dxyz_dabc[7] + dxyz_dabc[2] * dxyz_dabc[8];
     double b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] + dxyz_dabc[4] * dxyz_dabc[7] + dxyz_dabc[5] * dxyz_dabc[8];

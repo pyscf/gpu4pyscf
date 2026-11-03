@@ -18,19 +18,22 @@
 #include "constant_objects.cuh"
 #include <gvhf-rys/rys_constant.cu>
 
+#ifndef USE_SYCL
 __constant__ double c_lattice_vectors[9];
 __constant__ double c_reciprocal_lattice_vectors[9];
 __constant__ double c_dxyz_dabc[9];
+#endif
 
 // input[nc,nx,ny,nz], output[nc,mx,my,mz]
 __global__ static
 void fft_take_kernel(double2* __restrict__ out, double2* __restrict__ in,
                      int mx, int my, int mz, int nx, int ny, int nz, int nc)
 {
-    int x = blockIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int tx = threadIdx.x;
-    int threadsx = blockDim.x;
+    setup_context();
+    int x = blockIdx_x;
+    int y = global_y;
+    int tx = threadIdx_x;
+    int threadsx = blockDim_x;
     if (x >= mx || y >= my) return;
 
     int sx = x;
@@ -55,10 +58,11 @@ __global__ static
 void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
                         int mx, int my, int mz, int nx, int ny, int nz, int nc)
 {
-    int x = blockIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int tx = threadIdx.x;
-    int threadsx = blockDim.x;
+    setup_context();
+    int x = blockIdx_x;
+    int y = global_y;
+    int tx = threadIdx_x;
+    int threadsx = blockDim_x;
     if (x >= mx || y >= my) return;
 
     int sx = x;
@@ -73,8 +77,8 @@ void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
         for (int c = 0; c < nc; ++c) {
             size_t dst = (((size_t)c*nx + sx)*ny + sy)*nz + sz;
             size_t src = (((size_t)c*mx + x )*my + y )*mz + z;
-            out[dst].x += in[src].x;
-            out[dst].y += in[src].y;
+            out[dst] = double2{D2X(out[dst]) + D2X(in[src]),
+                               D2Y(out[dst]) + D2Y(in[src])};
         }
     }
 }
@@ -96,10 +100,11 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     int mx = out_shape[0];
     int my = out_shape[1];
     int mz = out_shape[2];
-    dim3 threads(32, 16);
-    dim3 grids(mx, (my+15)/16);
-    fft_take_kernel<<<grids, threads>>>(
-        out, in, mx, my, mz, in_shape[0], in_shape[1], in_shape[2], counts);
+    int nx = in_shape[0], ny = in_shape[1], nz = in_shape[2];
+    auto threads = make_block(32, 16);
+    auto grids = make_grid(mx, (my+15)/16);
+    LAUNCH_KERNEL( fft_take_kernel, grids, threads, 0,
+                    out, in, mx, my, mz, nx, ny, nz, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_take kernel: %s\n", cudaGetErrorString(err));
@@ -113,10 +118,11 @@ int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int co
     int mx = in_shape[0];
     int my = in_shape[1];
     int mz = in_shape[2];
-    dim3 threads(32, 16);
-    dim3 grids(mx, (my+15)/16);
-    fft_takebak_kernel<<<grids, threads>>>(
-        out, in, mx, my, mz, out_shape[0], out_shape[1], out_shape[2], counts);
+    int nx = out_shape[0], ny = out_shape[1], nz = out_shape[2];
+    auto threads = make_block(32, 16);
+    auto grids = make_grid(mx, (my+15)/16);
+    LAUNCH_KERNEL( fft_takebak_kernel, grids, threads, 0,
+                    out, in, mx, my, mz, nx, ny, nz, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_takebak kernel: %s\n", cudaGetErrorString(err));

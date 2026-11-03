@@ -2,24 +2,34 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gsycl/gpu_compat.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
-
 
 #define KERNEL_ARGS \
     RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, \
     float *q_cond_ij, float *q_cond_kl
 
 #define KERNEL_SETUP() \
-    int tx = threadIdx.x; \
-    int ty = threadIdx.y; \
-    int block_x = blockIdx.x; \
-    int block_y = blockIdx.y; \
-    extern __shared__ double vj_kl_cache[];
+    setup_context(); \
+    int tx = threadIdx_x; \
+    int ty = threadIdx_y; \
+    int block_x = blockIdx_x; \
+    int block_y = blockIdx_y; \
+    DYNAMIC_SHARED_PTR(double, vj_kl_cache);
 
-#define LAUNCH_KERNEL(KERNEL, SHMSIZE) \
-    KERNEL<<<blocks, threads, SHMSIZE>>>(*envs, *jk, *bounds, q_cond_ij, q_cond_kl)
+#define LAUNCH_MD_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
+    auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
+    auto _blocks = make_grid((npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ), \
+                             (npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL)); \
+    auto _threads = make_block(16, 16); \
+    cudaFuncSetAttribute(KERNEL, cudaFuncAttributeMaxDynamicSharedMemorySize, \
+                         ((SHM)+addition_buf)*sizeof(double)); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, \
+        ((SHM)+addition_buf)*sizeof(double), \
+        dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl); \
+}
 
 
 // TILEX=30, TILEY=30
@@ -68,7 +78,7 @@ void md_j_0_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 480; n += 256) {
-        int task_kl = blockIdx.y * 480 + n;
+        int task_kl = blockIdx_y * 480 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -94,7 +104,7 @@ void md_j_0_0(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 30; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 480 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 480 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -138,15 +148,15 @@ void md_j_0_0(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 30; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 480 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 480 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*30] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*30] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*30] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*30] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -215,7 +225,7 @@ void md_j_0_0(KERNEL_ARGS)
         int kl = n / 30;
         int batch_kl = n - kl * 30;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 480 + sq_kl;
+        int task_kl = blockIdx_y * 480 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*480]);
@@ -266,7 +276,7 @@ void md_j_1_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 368; n += 256) {
-        int task_kl = blockIdx.y * 368 + n;
+        int task_kl = blockIdx_y * 368 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -292,7 +302,7 @@ void md_j_1_0(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -336,12 +346,12 @@ void md_j_1_0(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 23; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 368 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 368 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*23] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*23] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -415,7 +425,7 @@ void md_j_1_0(KERNEL_ARGS)
         int kl = n / 23;
         int batch_kl = n - kl * 23;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 368 + sq_kl;
+        int task_kl = blockIdx_y * 368 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*368]);
@@ -469,7 +479,7 @@ void md_j_1_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 160; n += 256) {
-        int task_kl = blockIdx.y * 160 + n;
+        int task_kl = blockIdx_y * 160 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -495,7 +505,7 @@ void md_j_1_1(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 10; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 160 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 160 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -539,15 +549,15 @@ void md_j_1_1(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 10; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 160 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 160 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*10] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*10] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*10] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*10] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -676,7 +686,7 @@ void md_j_1_1(KERNEL_ARGS)
         int kl = n / 10;
         int batch_kl = n - kl * 10;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 160 + sq_kl;
+        int task_kl = blockIdx_y * 160 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*160]);
@@ -727,7 +737,7 @@ void md_j_2_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 256; n += 256) {
-        int task_kl = blockIdx.y * 256 + n;
+        int task_kl = blockIdx_y * 256 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -753,7 +763,7 @@ void md_j_2_0(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -797,12 +807,12 @@ void md_j_2_0(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 16; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 256 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 256 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*16] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -897,7 +907,7 @@ void md_j_2_0(KERNEL_ARGS)
         int kl = n / 16;
         int batch_kl = n - kl * 16;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 256 + sq_kl;
+        int task_kl = blockIdx_y * 256 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*256]);
@@ -948,7 +958,7 @@ void md_j_2_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 480; n += 256) {
-        int task_kl = blockIdx.y * 480 + n;
+        int task_kl = blockIdx_y * 480 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -974,7 +984,7 @@ void md_j_2_1(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -1018,12 +1028,12 @@ void md_j_2_1(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 30; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 480 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 480 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*30] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*30] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1215,7 +1225,7 @@ void md_j_2_1(KERNEL_ARGS)
         int kl = n / 30;
         int batch_kl = n - kl * 30;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 480 + sq_kl;
+        int task_kl = blockIdx_y * 480 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*480]);
@@ -1269,7 +1279,7 @@ void md_j_2_2(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 224; n += 256) {
-        int task_kl = blockIdx.y * 224 + n;
+        int task_kl = blockIdx_y * 224 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -1295,7 +1305,7 @@ void md_j_2_2(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 14; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 224 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 224 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -1339,15 +1349,15 @@ void md_j_2_2(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 14; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 224 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 224 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*14] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*14] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*14] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*14] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1733,7 +1743,7 @@ void md_j_2_2(KERNEL_ARGS)
         int kl = n / 14;
         int batch_kl = n - kl * 14;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 224 + sq_kl;
+        int task_kl = blockIdx_y * 224 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*224]);
@@ -1784,7 +1794,7 @@ void md_j_3_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 736; n += 256) {
-        int task_kl = blockIdx.y * 736 + n;
+        int task_kl = blockIdx_y * 736 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -1810,7 +1820,7 @@ void md_j_3_0(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -1854,12 +1864,12 @@ void md_j_3_0(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 46; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 736 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 736 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*46] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*46] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1993,7 +2003,7 @@ void md_j_3_0(KERNEL_ARGS)
         int kl = n / 46;
         int batch_kl = n - kl * 46;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 736 + sq_kl;
+        int task_kl = blockIdx_y * 736 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*736]);
@@ -2040,7 +2050,7 @@ void md_j_3_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 384; n += 256) {
-        int task_kl = blockIdx.y * 384 + n;
+        int task_kl = blockIdx_y * 384 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -2066,7 +2076,7 @@ void md_j_3_1(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -2110,12 +2120,12 @@ void md_j_3_1(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 24; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 384 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 384 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*24] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*24] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -2421,7 +2431,7 @@ void md_j_3_1(KERNEL_ARGS)
         int kl = n / 24;
         int batch_kl = n - kl * 24;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 384 + sq_kl;
+        int task_kl = blockIdx_y * 384 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*384]);
@@ -2468,7 +2478,7 @@ void md_j_3_2(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 176; n += 256) {
-        int task_kl = blockIdx.y * 176 + n;
+        int task_kl = blockIdx_y * 176 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -2494,7 +2504,7 @@ void md_j_3_2(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -2538,12 +2548,12 @@ void md_j_3_2(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 11; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 176 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 176 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*11] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3180,7 +3190,7 @@ void md_j_3_2(KERNEL_ARGS)
         int kl = n / 11;
         int batch_kl = n - kl * 11;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 176 + sq_kl;
+        int task_kl = blockIdx_y * 176 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*176]);
@@ -3227,7 +3237,7 @@ void md_j_4_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 576; n += 256) {
-        int task_kl = blockIdx.y * 576 + n;
+        int task_kl = blockIdx_y * 576 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -3253,7 +3263,7 @@ void md_j_4_0(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -3297,12 +3307,12 @@ void md_j_4_0(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 36; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 576 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 576 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*36] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*36] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3500,7 +3510,7 @@ void md_j_4_0(KERNEL_ARGS)
         int kl = n / 36;
         int batch_kl = n - kl * 36;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 576 + sq_kl;
+        int task_kl = blockIdx_y * 576 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*576]);
@@ -3547,7 +3557,7 @@ void md_j_4_1(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 288; n += 256) {
-        int task_kl = blockIdx.y * 288 + n;
+        int task_kl = blockIdx_y * 288 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -3573,7 +3583,7 @@ void md_j_4_1(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -3617,12 +3627,12 @@ void md_j_4_1(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 18; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 288 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 288 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*18] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*18] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -4103,7 +4113,7 @@ void md_j_4_1(KERNEL_ARGS)
         int kl = n / 18;
         int batch_kl = n - kl * 18;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 288 + sq_kl;
+        int task_kl = blockIdx_y * 288 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*288]);
@@ -4150,7 +4160,7 @@ void md_j_5_0(KERNEL_ARGS)
     __syncthreads();
 
     for (int n = thread_id; n < 416; n += 256) {
-        int task_kl = blockIdx.y * 416 + n;
+        int task_kl = blockIdx_y * 416 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -4176,7 +4186,7 @@ void md_j_5_0(KERNEL_ARGS)
     }
 
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
-        int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
+        int task_ij0 = blockIdx_x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
             break;
         }
@@ -4220,12 +4230,12 @@ void md_j_5_0(KERNEL_ARGS)
             vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 26; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 416 + batch_kl * 16;
+            int task_kl0 = blockIdx_y * 416 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 break;
             }
-            if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond_ij[task_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx_x*48] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx_y*26] + q_cond_ij[task_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -4643,7 +4653,7 @@ void md_j_5_0(KERNEL_ARGS)
         int kl = n / 26;
         int batch_kl = n - kl * 26;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 416 + sq_kl;
+        int task_kl = blockIdx_y * 416 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*416]);
@@ -4668,75 +4678,35 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
         addition_buf = 256;
     }
     switch (ijkl) {
-    case 0: { // lij=0, lkl=0, tilex=30, tiley=30
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 479) / 480, (npairs_kl + 479) / 480, 1);
-        LAUNCH_KERNEL(md_j_0_0, (2992+addition_buf)*sizeof(double)); break;
-    } break;
-    case 11: { // lij=1, lkl=0, tilex=48, tiley=23
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 367) / 368, 1);
-        LAUNCH_KERNEL(md_j_1_0, (2992+addition_buf)*sizeof(double)); break;
-    } break;
-    case 12: { // lij=1, lkl=1, tilex=10, tiley=10
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 159) / 160, (npairs_kl + 159) / 160, 1);
-        LAUNCH_KERNEL(md_j_1_1, (2944+addition_buf)*sizeof(double)); break;
-    } break;
-    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
-        LAUNCH_KERNEL(md_j_2_0, (3040+addition_buf)*sizeof(double)); break;
-    } break;
-    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
-        cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_2_1, (6112+addition_buf)*sizeof(double)); break;
-    } break;
-    case 24: { // lij=2, lkl=2, tilex=14, tiley=14
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 223) / 224, (npairs_kl + 223) / 224, 1);
-        cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_2_2, (5920+addition_buf)*sizeof(double)); break;
-    } break;
-    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
-        cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_3_0, (6112+addition_buf)*sizeof(double)); break;
-    } break;
-    case 34: { // lij=3, lkl=1, tilex=48, tiley=24
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
-        cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6016+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_3_1, (6016+addition_buf)*sizeof(double)); break;
-    } break;
-    case 35: { // lij=3, lkl=2, tilex=48, tiley=11
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
-        cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_3_2, (5920+addition_buf)*sizeof(double)); break;
-    } break;
-    case 44: { // lij=4, lkl=0, tilex=48, tiley=36
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 575) / 576, 1);
-        cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6064+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_4_0, (6064+addition_buf)*sizeof(double)); break;
-    } break;
-    case 45: { // lij=4, lkl=1, tilex=48, tiley=18
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 287) / 288, 1);
-        cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6000+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_4_1, (6000+addition_buf)*sizeof(double)); break;
-    } break;
-    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
-        dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
-        cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        LAUNCH_KERNEL(md_j_5_0, (6112+addition_buf)*sizeof(double)); break;
-    } break;
+    case 0:  // lij=0, lkl=0, tilex=30, tiley=30
+        LAUNCH_MD_KERNEL(md_j_0_0, 2992, 480, 480) break;
+    case 11: // lij=1, lkl=0, tilex=48, tiley=23
+        LAUNCH_MD_KERNEL(md_j_1_0, 2992, 768, 368) break;
+    case 12: // lij=1, lkl=1, tilex=10, tiley=10
+        LAUNCH_MD_KERNEL(md_j_1_1, 2944, 160, 160) break;
+    case 22: // lij=2, lkl=0, tilex=48, tiley=16
+        LAUNCH_MD_KERNEL(md_j_2_0, 3040, 768, 256) break;
+    case 23: // lij=2, lkl=1, tilex=48, tiley=30
+        LAUNCH_MD_KERNEL(md_j_2_1, 6112, 768, 480) break;
+    case 24: // lij=2, lkl=2, tilex=14, tiley=14
+        LAUNCH_MD_KERNEL(md_j_2_2, 5920, 224, 224) break;
+    case 33: // lij=3, lkl=0, tilex=48, tiley=46
+        LAUNCH_MD_KERNEL(md_j_3_0, 6112, 768, 736) break;
+    case 34: // lij=3, lkl=1, tilex=48, tiley=24
+        LAUNCH_MD_KERNEL(md_j_3_1, 6016, 768, 384) break;
+    case 35: // lij=3, lkl=2, tilex=48, tiley=11
+        LAUNCH_MD_KERNEL(md_j_3_2, 5920, 768, 176) break;
+    case 44: // lij=4, lkl=0, tilex=48, tiley=36
+        LAUNCH_MD_KERNEL(md_j_4_0, 6064, 768, 576) break;
+    case 45: // lij=4, lkl=1, tilex=48, tiley=18
+        LAUNCH_MD_KERNEL(md_j_4_1, 6000, 768, 288) break;
+    case 55: // lij=5, lkl=0, tilex=48, tiley=26
+        LAUNCH_MD_KERNEL(md_j_5_0, 6112, 768, 416) break;
     default: return 0;
     }
     return 1;
 }
+
+#undef LAUNCH_KERNEL
+#undef KERNEL_SETUP
+#undef KERNEL_ARGS
