@@ -224,7 +224,7 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
         ngrids = np.prod(mesh)
         weight = vol / ngrids / nkpts
 
-        dxyz_dabc = a / mesh[:,None]
+        dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
@@ -305,7 +305,7 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
         ngrids = np.prod(mesh)
         weight = vol / ngrids / nkpts
 
-        dxyz_dabc = a / mesh[:,None]
+        dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
@@ -384,15 +384,13 @@ def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_mat_v2
 
-    a = cell.lattice_vectors()
-
     mg_envs = ni.mg_envs
 
     fft_buckets = ni.fft_buckets or []
     stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         mesh = bucket['mesh']
-        dxyz_dabc = a / mesh[:,None]
+        dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
@@ -467,7 +465,7 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
     for bucket in fft_buckets:
         assert bucket['grid_tile_cache'] is not None
         mesh = bucket['mesh']
-        dxyz_dabc = a / mesh[:,None]
+        dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
@@ -528,7 +526,6 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_grad
 
-    a = cell.lattice_vectors()
     nkpts = len(ni.bvkmesh_Ls)
     weight = 1./nkpts
 
@@ -537,7 +534,7 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
     stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         mesh = bucket['mesh']
-        dxyz_dabc = a / mesh[:,None]
+        dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
@@ -801,6 +798,7 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
             buckets.append({
                 'ke_cutoff': ke_upper,
                 'mesh': np.asarray(mesh, dtype=np.int32),
+                'dxyz_dabc': a / mesh[:,None],
                 'lij_patterns': lilj_patterns,
                 'bas_ij_cache': bas_ij_cache,
                 'grid_ranges_cache': grid_ranges_cache,
@@ -2041,6 +2039,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         self.aft_buckets = None
         self.fft_buckets = None
         self.xctype = None
+        self._lattice_vectors = None
+        self._reciprocal_lattice_vectors = None
         return self
 
     def build(self, kmesh=None, xctype='MGGA'):
@@ -2074,9 +2074,11 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             cell.natm, cell.nbas, bvk_ncells, nimgs,
             bvkcell._atm, bvkcell._bas, _env, ao_loc, Ls)
 
-        a = cell.lattice_vectors()
-        b = cell.reciprocal_vectors(norm_to=1)
-        libmgrid.update_lattice_vectors(a.ctypes, b.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        # Retain the host sources for asynchronous symbol copies.
+        a = self._lattice_vectors = cell.lattice_vectors()
+        b = self._reciprocal_lattice_vectors = cell.reciprocal_vectors(norm_to=1)
+        libmgrid.update_lattice_vectors(
+            a.ctypes, b.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         # a penalty to encounter for lattice sum
         rad = cell.rcut / bvkcell.vol**(1./3) + 1

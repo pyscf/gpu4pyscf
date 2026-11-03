@@ -85,12 +85,10 @@ void update_lattice_vectors(double *lattice_vectors,
 {
     cudaMemcpyToSymbolAsync(c_lattice_vectors, lattice_vectors, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
     cudaMemcpyToSymbolAsync(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
-    cudaStreamSynchronize(stream);
 }
 
 void update_dxyz_dabc(double *dxyz_dabc, cudaStream_t stream) {
     cudaMemcpyToSymbolAsync(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
-    cudaStreamSynchronize(stream);
 }
 
 int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts, cudaStream_t stream)
