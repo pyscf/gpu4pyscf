@@ -20,6 +20,7 @@
 #include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
+#include "gvhf-rys/gxyz_offset.cuh"
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
@@ -500,47 +501,6 @@ while (1) {
 }
 }
 
-// Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
-// at (4,4,4,4), and the launcher copies it out in chunks of 256.
-void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
-{
-/*
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    nfl = (ll + 1) * (ll + 2) // 2
-    ioff = np.arange(0, nfi, 3, dtype=np.int8)
-    joff = np.arange(0, nfj, 3, dtype=np.int8)
-    koff = np.arange(0, nfk, 3, dtype=np.int8)
-    loff = np.arange(0, nfl, 3, dtype=np.int8)
-    gxyz_offset = lib.cartesian_prod([ioff, joff, koff, loff])
-    copy = 256 // len(gxyz_offset) + 1
-    return cp.vstack([cp.asarray(gxyz_offset)]*copy, dtype=np.int8)
-*/
-    int nfi = bounds.nfi;
-    int nfj = bounds.nfj;
-    int nfk = bounds.nfk;
-    int nfl = bounds.nfl;
-    int nf = 0;
-    for (int i = 0; i < nfi; i += 3) {
-    for (int j = 0; j < nfj; j += 3) {
-    for (int k = 0; k < nfk; k += 3) {
-    for (int l = 0; l < nfl; l += 3) {
-        gxyz_offset[nf].ioff = i;
-        gxyz_offset[nf].joff = j;
-        gxyz_offset[nf].koff = k;
-        gxyz_offset[nf].loff = l;
-        ++nf;
-    } } } }
-    // n+m must be clamped too: nf need not divide 256, so the last round
-    // would otherwise write past entry 255.
-    for (int n = nf; n < 256; n += nf) {
-        for (int m = 0; m < nf && n+m < 256; ++m) {
-            gxyz_offset[n+m] = gxyz_offset[m];
-        }
-    }
-}
-
 void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                           int shm_size, int gout_stride_max)
 {
@@ -659,8 +619,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
 
     if (!rys_k_unrolled(envs, &kmat, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                         s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers, stream)) {
-        GXYZOffset gxyz_offset[256*3];
-        RYS_make_gxyz_offset(gxyz_offset, bounds);
+        const GXYZOffset *gxyz_offset = RYS_get_gxyz_offset(li, lj, lk, ll);
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
                             ((lk == 0) << 1) |
@@ -672,7 +631,6 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                 cudaMemcpyToSymbolAsync(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
                                    0, cudaMemcpyHostToDevice, stream));
-            cudaStreamSynchronize(stream);
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
