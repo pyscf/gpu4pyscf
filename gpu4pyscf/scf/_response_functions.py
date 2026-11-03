@@ -15,7 +15,7 @@
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf import hf, uhf, rohf
+from gpu4pyscf.scf import hf, uhf, rohf, ghf
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                       singlet=None, hermi=0, grids=None, max_memory=None, with_nlc=True):
@@ -210,6 +210,58 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
 
     return vind
 
+def _gen_ghf_response(mf, mo_coeff=None, mo_occ=None, with_j=True, hermi=0,
+                      grids=None, max_memory=None, with_nlc=True):
+    '''Generate the response to a full (2*nao, 2*nao) GHF density matrices.'''
+    if isinstance(mf, hf.KohnShamDFT):
+        if mo_coeff is None: mo_coeff = mf.mo_coeff
+        if mo_occ is None: mo_occ = mf.mo_occ
+        mol = mf.mol
+        ni = mf._numint
+        if grids is None:
+            grids = mf.grids
+        if grids.coords is None:
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
+        dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+        hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+        if not with_nlc and mf.do_nlc():
+            logger.warn(mf, "NLC contribution in gen_response is NOT included")
+
+        def vind(dm1):
+            if hermi == 2:
+                v1 = cupy.zeros_like(dm1)
+            else:
+                v1 = ni.nr_fxc(mol, grids, mf.xc, dm0, dm1, hermi=hermi)
+                if with_nlc and mf.do_nlc():
+                    from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
+                    nao = dm1.shape[-1] // 2
+                    mo_uks = cupy.stack((mo_coeff[:nao], mo_coeff[nao:]))
+                    occ_uks = cupy.stack((mo_occ, mo_occ))
+                    dm1_sf = (dm1[..., :nao, :nao] + dm1[..., nao:, nao:]).real
+                    with lib.temporary_env(mf, _numint=ni._to_numint1c()):
+                        vnlc = nr_rks_fnlc_mo(mf, mol, mo_uks, occ_uks,
+                                             dm1_sf, return_in_mo=False)
+                    v1[..., :nao, :nao] += vnlc
+                    v1[..., nao:, nao:] += vnlc
+            if with_j:
+                v1 += mf.get_j(mol, dm1, hermi=hermi)
+            if hybrid:
+                v1 -= mf.get_k(mol, dm1, hermi=hermi, omega=omega,
+                               lr_factor=alpha, sr_factor=hyb)
+            return v1
+
+    elif with_j:
+        def vind(dm1):
+            vj, vk = mf.get_jk(mf.mol, dm1, hermi=hermi)
+            return vj - vk
+    else:
+        def vind(dm1):
+            return -mf.get_k(mf.mol, dm1, hermi=hermi)
+    return vind
+
+
 hf.RHF.gen_response = _gen_rhf_response
 uhf.UHF.gen_response = _gen_uhf_response
 rohf.ROHF.gen_response = _gen_uhf_response
+ghf.GHF.gen_response = _gen_ghf_response

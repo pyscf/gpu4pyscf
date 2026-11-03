@@ -528,8 +528,8 @@ def takebak(out, a, indices, axis=-1):
 def transpose_sum(a, stream=None, inplace=True, hermi=1):
     '''
     perform
-    a + a.transpose(0,2,1) for hermi=1 or
-    a - a.transpose(0,2,1) hermi=2
+    a + a.transpose(0,2,1).conj() for hermi=1 or
+    a - a.transpose(0,2,1).conj() hermi=2
     inplace
     '''
     if not inplace:

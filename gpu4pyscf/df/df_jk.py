@@ -217,9 +217,17 @@ class _DFHF:
                                          lr_factor=lr_factor, sr_factor=sr_factor)[1]
                 return vj, vk
 
-            return ghf._get_jk(self, mol, dm, hermi, with_j, with_k,
-                               jkbuild=get_jk_spin_free, omega=omega,
-                               lr_factor=lr_factor, sr_factor=sr_factor)
+            vj, vk = ghf._get_jk(self, mol, dm, hermi, with_j, with_k,
+                                 jkbuild=get_jk_spin_free, omega=omega,
+                                 lr_factor=lr_factor, sr_factor=sr_factor)
+            symmetrize = getattr(dm, 'symmetrize', 0)
+            if with_k and not self.only_dfj and symmetrize:
+                # Hermitian conjugation also swaps the alpha-beta blocks.
+                # Symmetrize the assembled spinor K, not each AO block.
+                shape = vk.shape
+                vk = transpose_sum(vk.reshape(-1, shape[-1], shape[-1]),
+                                   hermi=symmetrize).reshape(shape)
+            return vj, vk
 
         vj = vk = None
         if self.only_dfj:
@@ -742,6 +750,11 @@ def decompose_rdm1_svd(dm, hermi=0):
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
+    '''Build A = factor_l @ factor_r.T and retain its factors for DF exchange.
+
+    symmetrize=1 returns A + A.conj().T, 2 returns A - A.conj().T,
+    and 0 returns A. Conjugation of factor_r must be supplied by the caller.
+    '''
     if factor_l.ndim == 4 and factor_r.ndim == 3:
         dm = contract('snpi,sqi->snpq', factor_l, factor_r)
     else:

@@ -19,6 +19,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.soscf import gen_g_hop_rhf, gen_g_hop_uhf
 from gpu4pyscf.fci.direct_spin1 import davidson1
 from gpu4pyscf.scf.gdm import get_nocc, apply_exp_U
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 from gpu4pyscf.solvent._attach_solvent import SCFWithSolvent
 from gpu4pyscf import __config__
 
@@ -171,7 +172,7 @@ def rhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,
                  nroots=STAB_NROOTS, tol=STAB_TOL):
     assert not with_symmetry
     log = logger.new_logger(mf, verbose)
-    g, hop, hdiag = gen_g_hop_rhf(mf, mf.mo_coeff, mf.mo_occ)
+    g, hop, hdiag = gen_g_hop_rhf(mf, mf.mo_coeff, mf.mo_occ, with_nlc=True)
     hdiag *= 2
     def precond(residuals, eigenvalues):
         hdiagd = hdiag[None, :] - eigenvalues[:, None]
@@ -232,8 +233,8 @@ def _gen_hop_rhf_external(mf, with_symmetry=False, verbose=None):
         x2 = cp.einsum('ps,sq->pq', Fvv, x1)
         x2-= cp.einsum('ps,rp->rs', Foo, x1)
 
-        d1 = 2 * mvir @ x1 @ mocc.conj().T
-        dm1 = d1 - d1.conj().T
+        dm1 = _make_factorized_dm(2 * (mvir @ x1), mocc.conj(),
+                                  symmetrize=2)
 # No Coulomb and fxc contribution for anti-hermitian DM
         v1 = vrespz(dm1)
         x2 += mvir.conj().T @ v1 @ mocc
@@ -246,8 +247,7 @@ def _gen_hop_rhf_external(mf, with_symmetry=False, verbose=None):
         x2 = cp.einsum('ps,sq->pq', Fvv, x1)
         x2-= cp.einsum('ps,rp->rs', Foo, x1)
 
-        d1 = 2 * mvir @ x1 @ mocc.conj().T
-        dm1 = d1 + d1.conj().T
+        dm1 = _make_factorized_dm(2 * (mvir @ x1), mocc.conj())
         v1ao = vresp1(dm1)
         x2 += mvir.conj().T @ v1ao @ mocc
         return x2.real.ravel()
@@ -314,7 +314,7 @@ def uhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,
                  nroots=STAB_NROOTS, tol=STAB_TOL):
     assert not with_symmetry
     log = logger.new_logger(mf, verbose)
-    g, hop, hdiag = gen_g_hop_uhf(mf, mf.mo_coeff, mf.mo_occ)
+    g, hop, hdiag = gen_g_hop_uhf(mf, mf.mo_coeff, mf.mo_occ, with_nlc=True)
     hdiag *= 2
     def precond(residuals, eigenvalues):
         hdiagd = hdiag[None, :] - eigenvalues[:, None]
@@ -371,15 +371,20 @@ def _gen_hop_uhf_external(mf, with_symmetry=False, verbose=None):
     hdiag1 = cp.hstack((h_diaga.ravel(), h_diagb.ravel()))
 
     vrespz = mf.gen_response(with_j=False, hermi=2)
+    nao = mo_coeff.shape[-2]
+    mocc = cp.zeros((2, nao, max(nocca, noccb)), dtype=mo_coeff.dtype)
+    mocc[0, :, :nocca] = mocca.conj()
+    mocc[1, :, :noccb] = moccb.conj()
     def hop_real2complex(x1):
         x1a = x1[:nvira*nocca].reshape(nvira,nocca)
         x1b = x1[nvira*nocca:].reshape(nvirb,noccb)
         x2a = fvva @ x1a - x1a @ fooa
         x2b = fvvb @ x1b - x1b @ foob
 
-        d1a = mvira @ x1a @ mocca.conj().T
-        d1b = mvirb @ x1b @ moccb.conj().T
-        dm1 = cp.stack((d1a - d1a.conj().T, d1b - d1b.conj().T))
+        dm_factor = cp.zeros_like(mocc)
+        dm_factor[0, :, :nocca] = mvira @ x1a
+        dm_factor[1, :, :noccb] = mvirb @ x1b
+        dm1 = _make_factorized_dm(dm_factor, mocc, symmetrize=2)
 
         v1 = vrespz(dm1)
         x2a += mvira.conj().T @ v1[0] @ mocca
@@ -391,20 +396,22 @@ def _gen_hop_uhf_external(mf, with_symmetry=False, verbose=None):
     hdiagba = fvvb.diagonal()[:, None] - fooa.diagonal()
     hdiag2 = cp.hstack((hdiagab.ravel(), hdiagba.ravel()))
 
-    vresp1 = mf.gen_response(with_j=False, hermi=0)
-    # Spin flip GHF solution is not considered
+    vresp1 = mf.to_ghf().gen_response(with_j=False, hermi=1)
+    mocc_ghf = block_diag(mocca, moccb)
     def hop_uhf2ghf(x1):
         x1ab = x1[:nvira*noccb].reshape(nvira,noccb)
         x1ba = x1[nvira*noccb:].reshape(nvirb,nocca)
         x2ab = fvva @ x1ab - x1ab @ foob
         x2ba = fvvb @ x1ba - x1ba @ fooa
 
-        d1ab = mvira @ x1ab @ moccb.conj().T
-        d1ba = mvirb @ x1ba @ mocca.conj().T
-        dm1 = cp.stack((d1ab + d1ba.conj().T, d1ba + d1ab.conj().T))
+        # A rotation between alpha-beta blocks
+        dmo = cp.zeros_like(mocc_ghf)
+        dmo[:nao, nocca:] = mvira @ x1ab
+        dmo[nao:, :nocca] = mvirb @ x1ba
+        dm1 = _make_factorized_dm(dmo, mocc_ghf.conj())
         v1 = vresp1(dm1)
-        x2ab += mvira.conj().T @ v1[0] @ moccb
-        x2ba += mvirb.conj().T @ v1[1] @ mocca
+        x2ab += mvira.conj().T @ v1[:nao, nao:] @ moccb
+        x2ba += mvirb.conj().T @ v1[nao:, :nao] @ mocca
         x2 = cp.hstack((x2ab.real.ravel(), x2ba.real.ravel()))
         return x2
 
