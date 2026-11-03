@@ -139,10 +139,10 @@ static int GINTfill_int3c2e_ipip2(ERITensor *eri, BasisProdOffsets *offsets, GIN
 
 extern "C" {
 
-int GINTfill_int3c2e_ipip2(cudaStream_t stream, BasisProdCache *bpcache, double *eri, int nao,
+int GINTfill_int3c2e_ipip2(BasisProdCache *bpcache, double *eri, int nao,
                    int *strides, int *ao_offsets,
                    int *bins_locs_ij, int *bins_locs_kl, int nbins,
-                   int cp_ij_id, int cp_kl_id, double omega)
+                   int cp_ij_id, int cp_kl_id, double omega, cudaStream_t stream)
 {
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -158,7 +158,8 @@ int GINTfill_int3c2e_ipip2(cudaStream_t stream, BasisProdCache *bpcache, double 
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
+    cudaStreamSynchronize(stream);
 
     ERITensor eritensor;
     eritensor.stride_j = strides[1];

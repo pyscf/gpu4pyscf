@@ -19,7 +19,7 @@
     extern __shared__ double vj_kl_cache[];
 
 #define LAUNCH_KERNEL(KERNEL, SHMSIZE) \
-    KERNEL<<<blocks, threads, SHMSIZE>>>(*envs, *jk, *bounds, q_cond_ij, q_cond_kl)
+    KERNEL<<<blocks, threads, SHMSIZE, stream>>>(*envs, *jk, *bounds, q_cond_ij, q_cond_kl)
 
 
 // TILEX=30, TILEY=30
@@ -4652,7 +4652,7 @@ void md_j_5_0(KERNEL_ARGS)
 }
 
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                  float *q_cond_ij, float *q_cond_kl, double omega)
+                  float *q_cond_ij, float *q_cond_kl, double omega, cudaStream_t stream)
 {
     int li = bounds->li;
     int lj = bounds->lj;

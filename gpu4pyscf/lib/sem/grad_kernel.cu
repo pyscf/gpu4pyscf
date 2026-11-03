@@ -75,8 +75,7 @@ __global__ void calc_pair_e2e_kernel(
 }
 
 extern "C" {
-int launch_calc_pair_e2e_c(
-    const double* w_1d,
+int launch_calc_pair_e2e_c(const double* w_1d,
     const double* P_AA,
     const double* P_BB,
     const double* P_AB,
@@ -85,11 +84,11 @@ int launch_calc_pair_e2e_c(
     const int* natorb,
     const int* kr_offsets,
     double* E_2e_out,
-    int n_pairs
+    int n_pairs, cudaStream_t stream
 ) {
     int threads = 256;
     int blocks = (n_pairs + threads - 1) / threads;
-    calc_pair_e2e_kernel<<<blocks, threads>>>(
+    calc_pair_e2e_kernel<<<blocks, threads, 0, stream>>>(
         w_1d, P_AA, P_BB, P_AB,
         pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs
     );

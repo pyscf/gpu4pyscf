@@ -754,14 +754,14 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
                         RysIntEnvVars *envs, int shm_size,
                         int nbatches_shl_pair, int nksh,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                        int *pair_ij_loc, int *nsp_lookup, double omega)
+                        int *pair_ij_loc, int *nsp_lookup, double omega, cudaStream_t stream)
 {
     assert(n_dm == 1);
     cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
     dim3 threads(THREADS);
     dim3 blocks(nksh, nbatches_shl_pair);
-    contract_int3c2e_kernel<<<blocks, threads, shm_size>>>(
+    contract_int3c2e_kernel<<<blocks, threads, shm_size, stream>>>(
         *envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -777,14 +777,14 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             int nbatches_shl_pair, int nbatches_ksh,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *pair_ij_loc, int *aux_loc,
-                            int *nsp_lookup, double omega)
+                            int *nsp_lookup, double omega, cudaStream_t stream)
 {
     assert(n_dm == 1);
     cudaFuncSetAttribute(contract_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     JKMatrix jk = {vj, NULL, auxvec, n_dm, 0, omega};
     dim3 threads(THREADS);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    contract_auxvec_kernel<<<blocks, threads, shm_size>>>(
+    contract_auxvec_kernel<<<blocks, threads, shm_size, stream>>>(
         *envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
         aux_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();

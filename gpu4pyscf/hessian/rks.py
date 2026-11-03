@@ -815,7 +815,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     d2omega_dgamma2_i     = cupy.empty(ngrids)
     d2omega_drho_dgamma_i = cupy.empty(ngrids)
     libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
@@ -825,7 +824,8 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
         ctypes.c_double(C_in_omega),
-        ctypes.c_int(ngrids)
+        ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     kappa_i         = kappa_prefactor * rho_i**(1.0/6.0)
     dkappa_drho_i   = (kappa_prefactor * (1.0/6.0)) * rho_i**(-5.0/6.0)
@@ -840,7 +840,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     E_i = cupy.empty(ngrids)
 
     libgdft.VXC_vv10nlc_hess_eval_UWABCE(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
@@ -851,7 +850,8 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids)
+        ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     del rho_weight_i
 
@@ -928,7 +928,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         f_gamma_A_i = cupy.empty([natm, 3, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
@@ -952,6 +951,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(3 * natm),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
         d2e += contract("Adg,BDg->ABdD",   drho_dA,   f_rho_A_i * grids_weights)
@@ -991,7 +991,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         U_Bw_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bw_i = cupy.empty([natm, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_EUW_with_weight1(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(E_Bw_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(U_Bw_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bw_i.data.ptr, ctypes.c_void_p),
@@ -1002,6 +1001,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm * 3),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
         # Second half of E_{w,w}^{AB} in Eq 32
@@ -1095,7 +1095,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
@@ -1107,6 +1106,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
         del rho_weight_i
         for i_atom in range(natm):
@@ -1186,7 +1186,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         f_gamma_A_i_full_response = cupy.empty([natm, 3, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(f_rho_A_i_full_response.data.ptr, ctypes.c_void_p),
             ctypes.cast(f_gamma_A_i_full_response.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
@@ -1210,6 +1209,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(dgamma_dA_full_response.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(3 * natm),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
         d2e += contract("Adg,BDg->ABdD",   drho_dA_full_response,   f_rho_A_i_full_response * grids_weights)
@@ -1222,7 +1222,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         rho_weight_i = rho_i * grids_weights
         D_B_i = cupy.empty([natm, 3, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(D_B_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
             ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
@@ -1232,6 +1231,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
         del rho_weight_i
         for i_atom in range(natm):
@@ -1921,6 +1921,7 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
+        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -1944,6 +1945,7 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
+        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
     )
     dweight_dA[grids_atm_idx, 0, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 0, :], axis=[0])
     dweight_dA[grids_atm_idx, 1, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 1, :], axis=[0])
@@ -1999,6 +2001,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
+        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -2023,6 +2026,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
+        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
     )
 
     range_ngrids = cupy.arange(ngrids)
@@ -2134,7 +2138,6 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     d2omega_dgamma2_i     = cupy.empty(ngrids)
     d2omega_drho_dgamma_i = cupy.empty(ngrids)
     libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
@@ -2144,7 +2147,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
         ctypes.c_double(C_in_omega),
-        ctypes.c_int(ngrids)
+        ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     kappa_i         = kappa_prefactor * rho_i**(1.0/6.0)
     dkappa_drho_i   = (kappa_prefactor * (1.0/6.0)) * rho_i**(-5.0/6.0)
@@ -2159,7 +2163,6 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     E_i = cupy.empty(ngrids)
 
     libgdft.VXC_vv10nlc_hess_eval_UWABCE(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
@@ -2170,7 +2173,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids)
+        ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     del rho_weight_i
 
@@ -2242,7 +2246,6 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     f_gamma_A_i = cupy.empty([natm, 3, ngrids], order = "C")
 
     libgdft.VXC_vv10nlc_hess_eval_f_t(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
@@ -2266,6 +2269,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(3 * natm),
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     del drho_dA, dgamma_dA
 
@@ -2482,7 +2486,6 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
@@ -2494,6 +2497,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
         del rho_weight_i
         for i_atom in range(natm):
@@ -2511,7 +2515,6 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         U_Bw_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bw_i = cupy.empty([natm, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_EUW_with_weight1(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(E_Bw_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(U_Bw_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bw_i.data.ptr, ctypes.c_void_p),
@@ -2522,6 +2525,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm * 3),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
         f_rho_grid_response_i = (E_Bw_i + E_Bgr_i) + ((U_Bw_i + U_Bgr_i) * dkappa_drho_i + (W_Bw_i + W_Bgr_i) * domega_drho_i) * rho_i
@@ -3708,7 +3712,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     d2omega_dgamma2_i     = cupy.empty(ngrids)
     d2omega_drho_dgamma_i = cupy.empty(ngrids)
     libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
@@ -3718,7 +3721,8 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
         ctypes.c_double(C_in_omega),
-        ctypes.c_int(ngrids)
+        ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     kappa_i         = kappa_prefactor * rho_i**(1.0/6.0)
     dkappa_drho_i   = (kappa_prefactor * (1.0/6.0)) * rho_i**(-5.0/6.0)
@@ -3732,7 +3736,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     C_i = cupy.empty(ngrids)
     E_i = cupy.empty(ngrids) # Not used
     libgdft.VXC_vv10nlc_hess_eval_UWABCE(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
@@ -3743,7 +3746,8 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids)
+        ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     del rho_weight_i
     del E_i
@@ -3806,7 +3810,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         f_gamma_t_i = cupy.empty([n_dm1_batch, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
@@ -3830,6 +3833,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
             ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(n_dm1_batch),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
         del rho_t_i, gamma_t_i
 

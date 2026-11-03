@@ -192,7 +192,8 @@ def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_a
         err = libpbc.fill_bvk_triu_axis0(
             ctypes.cast(a.data.ptr, ctypes.c_void_p),
             ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nao), ctypes.c_int(bvk_ncells))
+            ctypes.c_int(nao), ctypes.c_int(bvk_ncells),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('fill_bvk_triu failed')
     else:
@@ -210,7 +211,8 @@ def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_a
             ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
             ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(pair_address)),
-            ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(naux))
+            ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(naux),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('fill_bvk_triu failed')
     return a
@@ -309,7 +311,8 @@ class SRInt3c2eOpt:
             ctypes.byref(self._int3c2e_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff), ctypes.c_int(symmetric))
+            ctypes.c_float(log_cutoff), ctypes.c_int(symmetric),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         mask = img_counts > 0
         dd_bas_ij_cache = {}
@@ -338,7 +341,8 @@ class SRInt3c2eOpt:
                     ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(coef.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(npairs),
-                    ctypes.c_float(math.log(dressed_precision)))
+                    ctypes.c_float(math.log(dressed_precision)),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError('estimate_aft_Ecut kernel failed')
                 ke_cutoff = mesh_to_ke(cell.lattice_vectors(), self.mesh).min()
@@ -384,7 +388,8 @@ class SRInt3c2eOpt:
                 ctypes.byref(self._int3c2e_envs),
                 ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff))
+                ctypes.c_float(log_cutoff),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
 
@@ -406,7 +411,8 @@ class SRInt3c2eOpt:
                     ctypes.byref(self._int3c2e_envs),
                     ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff))
+                    ctypes.c_float(log_cutoff),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 self.dd_ft_opt = dd_ft_opt = FTOpt.from_intopt(self)
                 dd_ft_opt.bas_ij_cache = dd_bas_ij_cache
                 dd_ft_opt.img_idx = img_idx
@@ -617,7 +623,8 @@ class SRInt3c2eOpt:
                 ctypes.c_int(not cart),
                 ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff))
+                ctypes.c_float(log_cutoff),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel')
             return out
@@ -697,7 +704,8 @@ class SRInt3c2eOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm failed')
         if hermi == 1:
@@ -768,7 +776,8 @@ class SRInt3c2eOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 

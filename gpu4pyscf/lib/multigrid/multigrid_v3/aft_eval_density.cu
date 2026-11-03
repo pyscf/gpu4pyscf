@@ -220,7 +220,7 @@ int orth_contract_aopair_dm(double *outR, double *outI,
                             PBCIntEnvVars *envs, int *shl_pair_offsets,
                             int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                             int *mesh_cum, int *nimgs_cum, int *mesh,
-                            int nbatches_shl_pair, double factor)
+                            int nbatches_shl_pair, double factor, cudaStream_t stream)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -229,7 +229,7 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     int ntiles_y = (mesh_y + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
-    orth_aopair_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS>>>(
+    orth_aopair_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS, 0, stream>>>(
         outR, outI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, ntiles, factor);
     cudaError_t err = cudaGetLastError();

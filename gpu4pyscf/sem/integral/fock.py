@@ -469,7 +469,8 @@ def get_jk(mol, dm):
             ctypes.cast(_LOCAL_ROW_IDX.data.ptr, ctypes.c_void_p), 
             ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(mol.npairs)),
-            ctypes.c_int(int(nao))
+            ctypes.c_int(int(nao)),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
         )
 
         if err != 0:
@@ -524,7 +525,8 @@ def get_jk(mol, dm):
             ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(mol.natm)),
             ctypes.c_int(int(nao)),
-            ctypes.c_int(int(num_d_pairs))
+            ctypes.c_int(int(num_d_pairs)),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
         )
 
         if err != 0:

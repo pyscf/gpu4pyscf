@@ -249,7 +249,8 @@ class Gradients(GradientsBase):
                 _ptr(fake_tore), _ptr(xfac), _ptr(alpb),
                 _ptr(fake_guess1), _ptr(fake_guess2), _ptr(fake_guess3),
                 _ptr(v_par6), ctypes.c_double(mol.BOHR),
-                _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out)
+                _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
             )
             if err != 0:
                 raise RuntimeError("Failed in global transform for gradients")
@@ -264,7 +265,8 @@ class Gradients(GradientsBase):
             err = libsem.launch_calc_pair_e2e_c(
                 _ptr(w_out), _ptr(P_AA), _ptr(P_BB), _ptr(P_AB),
                 _ptr(fake_pair_i), _ptr(fake_pair_j), _ptr(fake_natorb), _ptr(kr_offsets),
-                _ptr(E_2e_out), ctypes.c_int(n_pairs)
+                _ptr(E_2e_out), ctypes.c_int(n_pairs),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
             )
             if err != 0:
                 raise RuntimeError("Failed in pairwise E_2e calculation")

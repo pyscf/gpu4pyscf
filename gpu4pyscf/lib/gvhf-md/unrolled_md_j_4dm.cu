@@ -18,7 +18,7 @@
     extern __shared__ double vj_kl_cache[];
 
 #define LAUNCH_KERNEL(KERNEL, SHMSIZE) \
-    KERNEL<<<blocks, threads, SHMSIZE>>>(*envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_size)
+    KERNEL<<<blocks, threads, SHMSIZE, stream>>>(*envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_size)
 
 
 // TILEX=21, TILEY=21
@@ -10991,7 +10991,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
 } }
 
 int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                      float *q_cond_ij, float *q_cond_kl, double omega, int dm_size)
+                      float *q_cond_ij, float *q_cond_kl, double omega, int dm_size, cudaStream_t stream)
 {
     int li = bounds->li;
     int lj = bounds->lj;

@@ -113,7 +113,8 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
-        ctypes.cast(GvT.data.ptr, ctypes.c_void_p))
+        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('build_ft_ao failed')
     if sort_output or not cell_sorted:
@@ -214,7 +215,8 @@ class FTOpt:
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff),
-            ctypes.c_int(int(self.permutation_symmetry)))
+            ctypes.c_int(int(self.permutation_symmetry)),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
         self.bas_ij_cache = bas_ij_cache = {}
@@ -252,7 +254,8 @@ class FTOpt:
             ctypes.byref(self._aft_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
         return self
@@ -447,7 +450,8 @@ class FTOpt:
                 ctypes.c_int(nGv),
                 ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(compressing),
-                ctypes.c_int(not cart))
+                ctypes.c_int(not cart),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('build_ft_aopair kernel failed')
             return out
@@ -551,7 +555,8 @@ class FTOpt:
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(1),
-                        ctypes.c_int(nao), ctypes.c_int(nGv*2))
+                        ctypes.c_int(nao), ctypes.c_int(nGv*2),
+                        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 return out.transpose(1,3,0,2)
             else:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
@@ -581,7 +586,8 @@ class FTOpt:
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(conj_mapping_ki.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(nkpts),
-                        ctypes.c_int(nao), ctypes.c_int(nGv*2))
+                        ctypes.c_int(nao), ctypes.c_int(nGv*2),
+                        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 return out.transpose(0,3,1,2)
         return ft_kernel
 
@@ -647,7 +653,8 @@ class FTOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
-            ctypes.c_int(compressing))
+            ctypes.c_int(compressing),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 

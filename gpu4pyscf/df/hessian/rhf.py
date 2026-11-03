@@ -256,7 +256,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(aux_ao_offset),
-                ctypes.c_int(naux_in_batch))
+                ctypes.c_int(naux_in_batch),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('ejk_int3c2e_ip2 failed')
             if num_devices > 1:
@@ -629,7 +630,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(0),
-            ctypes.c_int(naux))
+            ctypes.c_int(naux),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('ejk_int3c2e_ip2 failed')
         return ej
@@ -1244,7 +1246,8 @@ def _int2c2e_ip2_per_atom(mol, dm, omega=None, lr_factor=None, sr_factor=None):
         ctypes.c_int(nbatches_shl_pair),
         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('e_int2c2e_ip2 failed')
     ejk = ejk + ejk.transpose(1,0,3,2)
@@ -1331,11 +1334,11 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
                 naux, nao_pair = a.shape
                 stream = cp.cuda.get_current_stream()
                 libvhf_rys.transpose_write(
-                    ctypes.cast(stream.ptr, ctypes.c_void_p),
                     a.ctypes,
                     ctypes.cast(dfobj._cderi[device_id].data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux), ctypes.c_int(nao_pair),
-                    ctypes.c_int(0), ctypes.c_int(nao_pair))
+                    ctypes.c_int(0), ctypes.c_int(nao_pair),
+                    ctypes.cast(stream.ptr, ctypes.c_void_p))
                 stream.synchronize()
                 dfobj._cderi[device_id] = a
             multi_gpu.run(transfer_to_host, non_blocking=True)

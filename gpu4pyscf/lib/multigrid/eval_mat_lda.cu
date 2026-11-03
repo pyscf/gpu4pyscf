@@ -201,25 +201,25 @@ static size_t buflen_lda(int l, int tile)
 extern "C" {
 int MG_eval_mat_lda_orth(double *out, double *rho, MGridEnvVars envs,
                          int l, int n_radius, int *mesh, int nshl_pair,
-                         int *bas_ij_idx, double *pool, int workers)
+                         int *bas_ij_idx, double *pool, int workers, cudaStream_t stream)
 {
     MGridBounds bounds = {
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
-    cudaMemset(batch_head, 0, sizeof(uint32_t));
+    cudaMemsetAsync(batch_head, 0, sizeof(uint32_t), stream);
 
     switch (l) {
-    case 0: eval_mat_lda_kernel<0,32> <<<workers, THREADS, buflen_lda(0,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 1: eval_mat_lda_kernel<1,32> <<<workers, THREADS, buflen_lda(1,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 2: eval_mat_lda_kernel<2,16> <<<workers, THREADS, buflen_lda(2,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 3: eval_mat_lda_kernel<3,16> <<<workers, THREADS, buflen_lda(3,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 4: eval_mat_lda_kernel<4,16> <<<workers, THREADS, buflen_lda(4,16)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 5: eval_mat_lda_kernel<5, 8> <<<workers, THREADS, buflen_lda(5, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 6: eval_mat_lda_kernel<6, 8> <<<workers, THREADS, buflen_lda(6, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 7: eval_mat_lda_kernel<7, 8> <<<workers, THREADS, buflen_lda(7, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
-    case 8: eval_mat_lda_kernel<8, 8> <<<workers, THREADS, buflen_lda(8, 8)>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 0: eval_mat_lda_kernel<0,32> <<<workers, THREADS, buflen_lda(0,32), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 1: eval_mat_lda_kernel<1,32> <<<workers, THREADS, buflen_lda(1,32), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 2: eval_mat_lda_kernel<2,16> <<<workers, THREADS, buflen_lda(2,16), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 3: eval_mat_lda_kernel<3,16> <<<workers, THREADS, buflen_lda(3,16), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 4: eval_mat_lda_kernel<4,16> <<<workers, THREADS, buflen_lda(4,16), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 5: eval_mat_lda_kernel<5, 8> <<<workers, THREADS, buflen_lda(5, 8), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 6: eval_mat_lda_kernel<6, 8> <<<workers, THREADS, buflen_lda(6, 8), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 7: eval_mat_lda_kernel<7, 8> <<<workers, THREADS, buflen_lda(7, 8), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
+    case 8: eval_mat_lda_kernel<8, 8> <<<workers, THREADS, buflen_lda(8, 8), stream>>>(out, rho, envs, bounds, pool, batch_head); break;
     default: 
         fprintf(stderr, "MG_eval_mat_lda_orth does not support l>8\n");
         cudaFree(batch_head);

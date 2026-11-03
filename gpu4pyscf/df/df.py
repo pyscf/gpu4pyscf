@@ -681,11 +681,11 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
-                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p),
                     cderi_cpu.ctypes,
                     ctypes.cast(cderi_gpu.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux), ctypes.c_int(cderi_npairs),
-                    ctypes.c_int(p0), ctypes.c_int(p1))
+                    ctypes.c_int(p0), ctypes.c_int(p1),
+                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p))
                 if err != 0:
                     raise RuntimeError('transpose_write cderi_cpu failed')
 

@@ -140,7 +140,8 @@ class Int3c2eOpt:
                 ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
-                ctypes.c_double(omega))
+                ctypes.c_double(omega),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('contract_int3c2e_dm kernel failed')
         if hermi == 1:
@@ -204,7 +205,8 @@ class Int3c2eOpt:
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(aux_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(aux_xyz_loc.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(auxmol.nbas))
+                ctypes.c_int(auxmol.nbas),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             err = libvhf_md.contract_int3c2e_auxvec(
                 ctypes.cast(vj_xyz[i_dm].data.ptr, ctypes.c_void_p),
                 ctypes.cast(aux_xyz.data.ptr, ctypes.c_void_p),
@@ -218,7 +220,8 @@ class Int3c2eOpt:
                 ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(aux_xyz_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
-                ctypes.c_double(omega))
+                ctypes.c_double(omega),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('contract_int3c2e_auxvec kernel failed')
             _Rt_to_dm(mol, vj_xyz[i_dm], shl_pair_idx, pair_loc, int3c2e_envs, out=vj[i_dm])

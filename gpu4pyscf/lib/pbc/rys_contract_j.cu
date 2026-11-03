@@ -472,7 +472,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                 int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                int64_t *pool, int nbas_cell0, int *bas, double omega)
+                int64_t *pool, int nbas_cell0, int *bas, double omega, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -515,7 +515,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int)*3);
+    cudaMemsetAsync(head, 0, sizeof(int)*3, stream);
 
     if (1) {
         GXYZOffset gxyz_offset[256*3];
@@ -528,9 +528,10 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
 
         auto launch = [&](auto offset, int tile_chunk) {
             checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
+                cudaMemcpyToSymbolAsync(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
+                                   0, cudaMemcpyHostToDevice, stream));
+                cudaStreamSynchronize(stream);
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
@@ -545,7 +546,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
             }
             dim3 threads(scheme[0], scheme[1]);
             int reserved_shm_size = scheme[3];
-            rys_j_kernel<<<workers, threads, buflen>>>(
+            rys_j_kernel<<<workers, threads, buflen, stream>>>(
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,

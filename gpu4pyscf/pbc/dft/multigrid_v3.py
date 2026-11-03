@@ -127,7 +127,8 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
             ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
             (ctypes.c_int*3)(*mesh),
             ctypes.c_int(nbatches_shl_pair),
-            ctypes.c_double(weight))
+            ctypes.c_double(weight),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_orth_aopair_dm kernel failed')
         _inv_take_fft_submesh(rhoG, (rhoR, rhoI), mesh)
@@ -185,7 +186,8 @@ def _aft_eval_xc_matrix(ni, vxcG, out=None):
             ctypes.cast(mesh_cum.data.ptr, ctypes.c_void_p),
             ctypes.cast(nimgs_cum.data.ptr, ctypes.c_void_p),
             (ctypes.c_int*3)(*mesh),
-            ctypes.c_int(len(bas_ij_idx)))
+            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_orth_aopair_coulG kernel failed')
 
@@ -222,7 +224,7 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
         weight = vol / ngrids / nkpts
 
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
         rhoR.fill(0)
@@ -251,7 +253,8 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
                 (ctypes.c_int*3)(*atom_mesh),
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
+                ctypes.c_double(bucket['negligible']),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
@@ -301,7 +304,7 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
         weight = vol / ngrids / nkpts
 
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
         rhoR.fill(0)
@@ -332,7 +335,8 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
                 ctypes.c_int(ntiles),
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
+                ctypes.c_double(bucket['negligible']),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
@@ -386,7 +390,7 @@ def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
@@ -414,7 +418,8 @@ def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
                 ctypes.cast(grid_frac_ranges.data.ptr, ctypes.c_void_p),
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_int(len(bas_ij_idx)),
-                ctypes.c_double(bucket['negligible']))
+                ctypes.c_double(bucket['negligible']),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
@@ -459,7 +464,7 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
         assert bucket['grid_tile_cache'] is not None
         mesh = bucket['mesh']
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
@@ -490,7 +495,8 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
                 ctypes.cast(grid_tile_idx.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(grid_tile_idx)),
                 (ctypes.c_int*3)(*mesh),
-                ctypes.c_double(bucket['negligible']))
+                ctypes.c_double(bucket['negligible']),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
@@ -527,7 +533,7 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes)
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
@@ -558,7 +564,8 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_int(len(bas_ij_idx)),
                 ctypes.c_double(weight),
-                ctypes.c_double(bucket['negligible']))
+                ctypes.c_double(bucket['negligible']),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('evaluate_xc_grad kernel failed')
     return grad_sigma
@@ -608,7 +615,8 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, precision, xctype):
         ctypes.c_int(npairs),
         ctypes.c_int(li_inc), ctypes.c_int(lj_inc),
         ctypes.c_float(math.log(precision/3)),
-        ctypes.c_float(undressed_threshold))
+        ctypes.c_float(undressed_threshold),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('grid range kernel failed')
     return pair_ke, grid_frac_ranges, primary_atoms
@@ -757,7 +765,8 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
                     ctypes.cast(grid_ranges.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(len(bas_ij_idx)),
-                    ctypes.c_int(nseg))
+                    ctypes.c_int(nseg),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError('atom_grid_ranges kernel failed')
                 atom_grid_ranges_cache.append(atom_grid_ranges)
@@ -827,7 +836,8 @@ def _non_trivial_bvk_pairs(ni, precision):
         ctypes.byref(ni.mg_envs),
         ctypes.cast(Ls.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nimgs),
-        ctypes.c_float(math.log(precision)))
+        ctypes.c_float(math.log(precision)),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('bvk_ovlp_mask_estimation kernel failed')
 
@@ -851,7 +861,8 @@ def _bvk_pairs_to_supmol_pairs(ni, bas_ij_idx, precision, xctype):
         ctypes.c_int(npairs),
         ctypes.c_float(math.log(precision)),
         ctypes.c_int(is_mgga),
-        ctypes.cast(counts.data.ptr, ctypes.c_void_p))
+        ctypes.cast(counts.data.ptr, ctypes.c_void_p),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('bvk_ovlp_mask_estimation kernel failed')
     supmol_bas_ij_idx = supmol_bas_ij_idx[:int(counts[0].get())]
@@ -880,7 +891,8 @@ def _aft_Ecut_estimation(ni, bas_ij_idx, ke_max, precision, xctype='LDA'):
         # Set the upper limit of Ecut. This ensures all high-Ecut orbital pairs
         # are handled by the last bucket in fft_buckets
         ctypes.c_float(ke_max),
-        ctypes.c_int(is_mgga))
+        ctypes.c_int(is_mgga),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('Ecut kernel failed')
     return Ecut
@@ -919,7 +931,8 @@ def _grid_range_to_tile_info_converter(fft_buckets, cell):
             (ctypes.c_int*3)(*mesh),
             ctypes.c_int(npairs),
             ctypes.c_int(nbas),
-            ctypes.cast(tile_counts.data.ptr, ctypes.c_void_p))
+            ctypes.cast(tile_counts.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('grid_range_to_tiles failed')
         n = int(tile_counts[0].get())
@@ -961,7 +974,8 @@ def _take_fft_submesh(a, mesh, out=None):
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         (ctypes.c_int*3)(*mesh),
         (ctypes.c_int*3)(*inp_shape),
-        ctypes.c_int(counts))
+        ctypes.c_int(counts),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('fft_take kernel failed')
     return out
@@ -989,7 +1003,8 @@ def _inv_take_fft_submesh(out, a, mesh):
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         (ctypes.c_int*3)(*out_shape),
         (ctypes.c_int*3)(*mesh),
-        ctypes.c_int(counts))
+        ctypes.c_int(counts),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('fft_takebak kernel failed')
     return out
@@ -2056,7 +2071,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
         a = cell.lattice_vectors()
         b = cell.reciprocal_vectors(norm_to=1)
-        libmgrid.update_lattice_vectors(a.ctypes, b.ctypes)
+        libmgrid.update_lattice_vectors(a.ctypes, b.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         # a penalty to encounter for lattice sum
         rad = cell.rcut / bvkcell.vol**(1./3) + 1

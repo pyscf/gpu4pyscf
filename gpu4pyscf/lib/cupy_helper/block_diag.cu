@@ -40,7 +40,7 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
 }
 
 extern "C" {
-int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
+int block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols, cudaStream_t stream)
 {
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ndiags);

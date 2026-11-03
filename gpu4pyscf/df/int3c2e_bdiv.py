@@ -301,7 +301,8 @@ class Int3c2eOpt:
                 ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ao_pair_offset), ctypes.c_int(aux_ao_offset),
                 ctypes.c_int(naux), ctypes.c_int(reorder_aux),
-                ctypes.c_int(not cart))
+                ctypes.c_int(not cart),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
@@ -378,7 +379,8 @@ class Int3c2eOpt:
             ctypes.c_int(len(shl_pair_offsets) - 1),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm failed')
         if hermi == 1:
@@ -438,7 +440,8 @@ class Int3c2eOpt:
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec kernel failed')
         log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
@@ -473,7 +476,8 @@ class Int3c2eOpt:
             ctypes.cast(sph_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.cast(cart_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(bas_ij_idx)),
-            ctypes.c_int(naux), ctypes.c_int(0), ctypes.c_int(compressed))
+            ctypes.c_int(naux), ctypes.c_int(0), ctypes.c_int(compressed),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         return out
 
     def pair_and_diag_indices(self, cart=None, original_ao_order=True):
@@ -765,7 +769,8 @@ def _create_pair_recontractor(mol, int3c2e_context):
             ctypes.cast(out_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(inp_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(coef.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(naux), ctypes.c_int(count))
+            ctypes.c_int(naux), ctypes.c_int(count),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('recontract_ao_pair kernel failed')
         return out
@@ -845,7 +850,8 @@ def _int3c2e_ip1_evaluator(int3c2e_opt, scheme, batch_size,
             ctypes.c_int(0),
             ctypes.c_int(aux_ao_offset),
             ctypes.c_int(nao_pair),
-            ctypes.c_int(naux))
+            ctypes.c_int(naux),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
         return out

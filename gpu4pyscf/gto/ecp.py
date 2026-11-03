@@ -35,7 +35,8 @@ ecp_cart_argtypes = [
     ctypes.c_void_p,
     ctypes.c_int,
     ctypes.c_int,
-    ctypes.c_int
+    ctypes.c_int,
+    ctypes.c_void_p,  # stream
 ]
 
 libecp.ECP_cart.argtypes = ecp_cart_argtypes
@@ -176,7 +177,8 @@ def get_ecp(mol):
                     tasks.data.ptr, ntasks,
                     ecpbas.data.ptr, ecploc.data.ptr,
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
-                    li, lj, lk)
+                    li, lj, lk,
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError('ECP CUDA kernel failed.')
     coeff = cp.asarray(coeff)
@@ -240,7 +242,8 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
                     tasks.data.ptr, ntasks,
                     ecpbas.data.ptr, ecploc.data.ptr,
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
-                    li, lj, lk)
+                    li, lj, lk,
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError('ECP CUDA kernel failed.')
 
@@ -313,7 +316,8 @@ def get_ecp_ipip(mol, ip_type='ipipv', ecp_atoms=None):
                     tasks.data.ptr, ntasks,
                     ecpbas.data.ptr, ecploc.data.ptr,
                     atm.data.ptr, bas.data.ptr, env.data.ptr,
-                    li, lj, lk)
+                    li, lj, lk,
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError('ECP CUDA kernel failed.')
 

@@ -37,23 +37,22 @@ _libxc = load_library('libxc', path='gpu4pyscf/lib/deps/lib')
 libgdft = load_library('libgdft')
 libgdft.GDFT_xc_lda.argtypes = (
     ctypes.c_void_p,
-    ctypes.c_void_p,
     ctypes.c_int,
     ctypes.c_void_p,
     POINTER(xc_lda_out_params),
-    POINTER(xc_lda_out_params))
+    POINTER(xc_lda_out_params),
+    ctypes.c_void_p)
 
 libgdft.GDFT_xc_gga.argtypes = (
-    ctypes.c_void_p,
     ctypes.c_void_p,
     ctypes.c_int,
     ctypes.c_void_p,
     ctypes.c_void_p,
     POINTER(xc_gga_out_params),
-    POINTER(xc_gga_out_params))
+    POINTER(xc_gga_out_params),
+    ctypes.c_void_p)
 
 libgdft.GDFT_xc_mgga.argtypes = (
-    ctypes.c_void_p,
     ctypes.c_void_p,
     ctypes.c_int,
     ctypes.c_void_p,
@@ -61,7 +60,8 @@ libgdft.GDFT_xc_mgga.argtypes = (
     ctypes.c_void_p,
     ctypes.c_void_p,
     POINTER(xc_mgga_out_params),
-    POINTER(xc_mgga_out_params))
+    POINTER(xc_mgga_out_params),
+    ctypes.c_void_p)
 
 _libxc.xc_version_string.restype = ctypes.c_char_p
 _libxc_version = _libxc.xc_version_string().decode()
@@ -248,12 +248,12 @@ class XCfun:
                     setattr(buf_params, label, array[1].data.ptr)
             stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_lda(
-                stream.ptr,
                 self.xc_func,
                 npoints,
                 inp['rho'].data.ptr,
                 ctypes.byref(out_params),
-                ctypes.byref(buf_params)
+                ctypes.byref(buf_params),
+                stream.ptr
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_gga')
@@ -276,13 +276,13 @@ class XCfun:
 
             stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_gga(
-                stream.ptr,
                 self.xc_func,
                 npoints,
                 inp['rho'].data.ptr,
                 inp['sigma'].data.ptr,
                 ctypes.byref(out_params),
-                ctypes.byref(buf_params)
+                ctypes.byref(buf_params),
+                stream.ptr
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_gga')
@@ -306,7 +306,6 @@ class XCfun:
             stream = cupy.cuda.get_current_stream()
             lapl = cupy.empty(0)
             err = libgdft.GDFT_xc_mgga(
-                stream.ptr,
                 self.xc_func,
                 npoints,
                 inp['rho'].data.ptr,
@@ -314,7 +313,8 @@ class XCfun:
                 lapl.data.ptr,
                 inp['tau'].data.ptr,
                 ctypes.byref(out_params),
-                ctypes.byref(buf_params)
+                ctypes.byref(buf_params),
+                stream.ptr
             )
             if err != 0:
                 raise RuntimeError('Failed in xc_mgga')

@@ -435,7 +435,7 @@ extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bo
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    float dm_penalty, int64_t *pool, int *head, int workers);
+                    float dm_penalty, int64_t *pool, int *head, int workers, cudaStream_t stream);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -445,7 +445,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                int64_t *pool, int nbas_cell0, int *bas, double omega)
+                int64_t *pool, int nbas_cell0, int *bas, double omega, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -488,12 +488,12 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int)*3);
+    cudaMemsetAsync(head, 0, sizeof(int)*3, stream);
 
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
-                           diffuse_exps, dm_penalty, pool, head, workers)) {
+                           diffuse_exps, dm_penalty, pool, head, workers, stream)) {
         GXYZOffset gxyz_offset[256*3];
         RYS_make_gxyz_offset(gxyz_offset, bounds);
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -504,9 +504,10 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
         auto launch = [&](auto offset, int tile_chunk) {
             checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
+                cudaMemcpyToSymbolAsync(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
+                                   0, cudaMemcpyHostToDevice, stream));
+            cudaStreamSynchronize(stream);
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
@@ -521,7 +522,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             }
             dim3 threads(scheme[0], scheme[1]);
             int reserved_shm_size = scheme[3];
-            rys_k_kernel<<<workers, threads, buflen>>>(
+            rys_k_kernel<<<workers, threads, buflen, stream>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,

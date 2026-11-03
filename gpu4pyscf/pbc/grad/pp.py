@@ -130,7 +130,8 @@ def _derivatives_intor(cross_int1e, dm, kern, deriv):
         ctypes.cast(cross_int1e.bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
         ctypes.c_int(cross_int1e.cell1.nao),
-        ctypes.c_int(cross_int1e.cell2.nao))
+        ctypes.c_int(cross_int1e.cell2.nao),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError(f'{kern} failed')
 
