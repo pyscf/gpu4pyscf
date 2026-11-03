@@ -549,7 +549,7 @@ def _atomic_1e_x(xmol):
     for i in range(xmol.natm):
         symb = mol.atom_symbol(i)
         idx = asarray(np.where(ao_labels == i)[0])
-        idx = np.append(idx, idx+nao)
+        idx = cp.append(idx, idx+nao)
         x[idx[:,None],idx] = x_conf[symb]
     return x
 
