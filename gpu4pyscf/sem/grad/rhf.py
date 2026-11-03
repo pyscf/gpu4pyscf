@@ -207,6 +207,7 @@ class Gradients(GradientsBase):
         E_total_disp = cp.zeros((n_pairs, 6), dtype=cp.float64)
 
         # Loop over 6 displacements to evaluate E_AB incrementally
+        stream = cp.cuda.get_current_stream()
         for d_idx in range(6):
             coords_i_disp = coords_i + disp_vec[d_idx]
             coords_j_disp = coords_j
@@ -250,7 +251,7 @@ class Gradients(GradientsBase):
                 _ptr(fake_guess1), _ptr(fake_guess2), _ptr(fake_guess3),
                 _ptr(v_par6), ctypes.c_double(mol.BOHR),
                 _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+                ctypes.c_void_p(stream.ptr)
             )
             if err != 0:
                 raise RuntimeError("Failed in global transform for gradients")
@@ -266,7 +267,7 @@ class Gradients(GradientsBase):
                 _ptr(w_out), _ptr(P_AA), _ptr(P_BB), _ptr(P_AB),
                 _ptr(fake_pair_i), _ptr(fake_pair_j), _ptr(fake_natorb), _ptr(kr_offsets),
                 _ptr(E_2e_out), ctypes.c_int(n_pairs),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+                ctypes.c_void_p(stream.ptr)
             )
             if err != 0:
                 raise RuntimeError("Failed in pairwise E_2e calculation")

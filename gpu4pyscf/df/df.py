@@ -485,6 +485,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
     with cupy.cuda.Device(device_id):
+        stream = cupy.cuda.get_current_stream()
         assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
@@ -557,9 +558,9 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
-                    cupy.cuda.get_current_stream().synchronize()
+                    stream.synchronize()
                     copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
-                    cupy.cuda.get_current_stream().synchronize()
+                    stream.synchronize()
             elif num_devices > 1:
                 # Multi-GPU case, copy data to other Devices
                 for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):

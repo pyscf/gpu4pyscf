@@ -633,6 +633,7 @@ def _recontract_matrix(mol, mat):
     recontraction_idx = cp.asarray(mol.recontraction_idx)
     nao = mol.mol.nao
     tmp = cp.zeros((counts, nao, ncol))
+    stream = cp.cuda.get_current_stream()
     err = libvhf_rys.bra_from_sorted(
         ctypes.cast(tmp.data.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
@@ -644,7 +645,7 @@ def _recontract_matrix(mol, mat):
         ctypes.c_int(len(recontract_bas)), ctypes.c_int(mol.nbas),
         ctypes.c_int(ncol), ctypes.c_int(counts),
         ctypes.c_int(cart),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.c_void_p(stream.ptr))
     assert err == 0
 
     out = cp.zeros((counts, nao, nao))
@@ -659,7 +660,7 @@ def _recontract_matrix(mol, mat):
         ctypes.c_int(len(recontract_bas)), ctypes.c_int(mol.nbas),
         ctypes.c_int(nao*counts),
         ctypes.c_int(cart),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.c_void_p(stream.ptr))
     assert err == 0
 
     if mat_ndim == 2:

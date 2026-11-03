@@ -306,6 +306,7 @@ def assign_pairs_to_blocks(
     n_blocks = np.prod(n_blocks_abc)
     n_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype=cp.int32)
     n_unstable_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype = cp.int32)
+    stream = cp.cuda.get_current_stream()
     err = libgpbc.count_pairs_on_blocks(
         cast_to_pointer(n_pairs_on_blocks),
         cast_to_pointer(n_unstable_pairs_on_blocks),
@@ -324,7 +325,7 @@ def assign_pairs_to_blocks(
         cast_to_pointer(atm),
         cast_to_pointer(bas),
         cast_to_pointer(env),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.c_void_p(stream.ptr)
     )
     has_unstable_pairs = (n_unstable_pairs_on_blocks[-1] > 0)
     if not has_warned_instability and has_unstable_pairs:
@@ -364,7 +365,7 @@ def assign_pairs_to_blocks(
         cast_to_pointer(atm),
         cast_to_pointer(bas),
         cast_to_pointer(env),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.c_void_p(stream.ptr)
     )
 
     return (
@@ -648,11 +649,12 @@ def sort_gaussian_pairs(mydf, xc_type="LDA", gamma_point=False, unrestricted=Fal
     reciprocal_lattice_vectors = np.asarray(np.linalg.inv(lattice_vectors.T), order="C")
 
     reciprocal_norms = np.linalg.norm(reciprocal_lattice_vectors, axis=1)
+    stream = cp.cuda.get_current_stream()
     libgpbc.update_lattice_vectors(
         lattice_vectors.ctypes,
         reciprocal_lattice_vectors.ctypes,
         reciprocal_norms.ctypes,
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.c_void_p(stream.ptr)
     )
 
     tasks = getattr(mydf, "tasks", None)
@@ -679,7 +681,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA", gamma_point=False, unrestricted=Fal
         )
 
         dxyz_dabc = lattice_vectors / mesh[:,None]
-        libgpbc.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        libgpbc.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
         n_blocks_abc = np.asarray(np.ceil(mesh / block_size), dtype=cp.int32)
         equivalent_cell_in_localized, coeff_in_localized = (
             subcell_in_localized_region.decontract_basis(to_cart=True, aggregate=True)

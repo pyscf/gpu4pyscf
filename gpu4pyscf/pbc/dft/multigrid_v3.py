@@ -218,13 +218,14 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
     mg_envs = ni.mg_envs
 
     fft_buckets = ni.fft_buckets or []
+    stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
         weight = vol / ngrids / nkpts
 
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
         rhoR.fill(0)
@@ -254,7 +255,7 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_double(weight),
                 ctypes.c_double(bucket['negligible']),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
@@ -298,13 +299,14 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
     fft_buckets = ni.fft_buckets or []
     tile_info = _grid_range_to_tile_info_converter(fft_buckets, cell)
 
+    stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
         weight = vol / ngrids / nkpts
 
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         rhoR = ndarray(mesh, dtype=np.complex128, buffer=work)
         rhoR.fill(0)
@@ -336,7 +338,7 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_double(weight),
                 ctypes.c_double(bucket['negligible']),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('evaluate_density kernel failed')
 
@@ -387,10 +389,11 @@ def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
     mg_envs = ni.mg_envs
 
     fft_buckets = ni.fft_buckets or []
+    stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
@@ -419,7 +422,7 @@ def _eval_xc_mat_v2(ni, vxcG, out=None, work=None):
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_int(len(bas_ij_idx)),
                 ctypes.c_double(bucket['negligible']),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
@@ -460,11 +463,12 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
     mg_envs = ni.mg_envs
 
     fft_buckets = ni.fft_buckets or []
+    stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         assert bucket['grid_tile_cache'] is not None
         mesh = bucket['mesh']
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
@@ -496,7 +500,7 @@ def _eval_xc_mat_v1(ni, vxcG, out=None, work=None):
                 ctypes.c_int(len(grid_tile_idx)),
                 (ctypes.c_int*3)(*mesh),
                 ctypes.c_double(bucket['negligible']),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('evaluate_xc_mat kernel failed')
     return vxc_mat
@@ -530,10 +534,11 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
 
     mg_envs = ni.mg_envs
 
+    stream = cp.cuda.get_current_stream()
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         dxyz_dabc = a / mesh[:,None]
-        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
 
         sub_vrhoG = _take_fft_submesh(vrhoG, mesh, work[:2])
         sub_vrhoR = ndarray(mesh, dtype=np.float64, buffer=work[2])
@@ -565,7 +570,7 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
                 ctypes.c_int(len(bas_ij_idx)),
                 ctypes.c_double(weight),
                 ctypes.c_double(bucket['negligible']),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('evaluate_xc_grad kernel failed')
     return grad_sigma

@@ -257,7 +257,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                 ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(aux_ao_offset),
                 ctypes.c_int(naux_in_batch),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('ejk_int3c2e_ip2 failed')
             if num_devices > 1:

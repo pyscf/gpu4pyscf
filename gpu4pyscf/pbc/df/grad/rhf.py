@@ -322,6 +322,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         buf3 = cp.empty(nao_pair*Gblksize, dtype=np.complex128)
         buf_auxG = cp.empty(naux*Gblksize, dtype=np.complex128)
+        stream = cp.cuda.get_current_stream()
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
             GvT = cp.asarray(Gv[p0:p1].T, order='C')
@@ -368,7 +369,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
@@ -445,7 +446,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aux_ft_envs),
                 ctypes.c_int(p1-p0),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('ft_ao_deriv failed')
 
@@ -759,6 +760,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             vG += vG_FR
         GvT = cp.asarray(Gv.T.ravel())
         ej_sigma_aux = cp.zeros([cell.natm+3, 3])
+        stream = cp.cuda.get_current_stream()
         err = libpbc.PBC_ft_ao_deriv(
             ctypes.cast(ej_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
             ctypes.cast(ej_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
@@ -767,7 +769,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.byref(aux_ft_envs),
             ctypes.c_int(ngrids),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_void_p(stream.ptr))
         if err != 0:
             raise RuntimeError('ft_ao_deriv failed')
 
@@ -789,7 +791,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
@@ -809,7 +811,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, hermi=0, omega=None, verbose=None,
                 ctypes.cast(dd_bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dd_shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 

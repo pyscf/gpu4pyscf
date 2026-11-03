@@ -1913,6 +1913,7 @@ def get_dweight_dA(mol, grids, grid_range = None):
     assert Ar_distance.shape == (mol.natm, ngrids)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
+    stream = cupy.cuda.get_current_stream()
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
@@ -1921,7 +1922,7 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
+        ctypes.c_void_p(stream.ptr),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -1945,7 +1946,7 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
+        ctypes.c_void_p(stream.ptr),
     )
     dweight_dA[grids_atm_idx, 0, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 0, :], axis=[0])
     dweight_dA[grids_atm_idx, 1, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 1, :], axis=[0])
@@ -1993,6 +1994,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
     assert Ar_distance.shape == (mol.natm, ngrids)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
+    stream = cupy.cuda.get_current_stream()
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
@@ -2001,7 +2003,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
+        ctypes.c_void_p(stream.ptr),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -2026,7 +2028,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
+        ctypes.c_void_p(stream.ptr),
     )
 
     range_ngrids = cupy.arange(ngrids)

@@ -579,7 +579,7 @@ class _VHFOpt:
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     mol._bas.ctypes, mol._env.ctypes,
-                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
                 kern_counts += 1
@@ -702,7 +702,7 @@ class _VHFOpt:
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
 
-            err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('CUDA kernel initialization')
 
@@ -745,7 +745,7 @@ class _VHFOpt:
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     mol._bas.ctypes, mol._env.ctypes,
                     ctypes.c_int(nao_pairs),
-                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
                 kern_counts += 1
@@ -883,7 +883,7 @@ class _VHFOpt:
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     mol._bas.ctypes,
-                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
                 kern_counts += 1
@@ -1049,6 +1049,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
     bas_ij_cache = {} # The effective shell pair = ish*nbas+jsh
     shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
     sp0 = sp1 = 0
+    stream = cp.cuda.get_current_stream()
     for i, j in pair_keys:
         li = uniq_l[i]
         lj = uniq_l[j]
@@ -1065,7 +1066,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
             ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nish), ctypes.c_int(njsh),
             ctypes.c_int(nbas), ctypes.c_int(tile),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_void_p(stream.ptr))
         pair_ij = pair_ij[ovlp_mask[pair_ij]]
         bas_ij_cache[i,j] = cp.asarray(pair_ij, dtype=np.uint32)
         nshl_pair = len(pair_ij)
@@ -1098,7 +1099,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('int2e_qcond_estimator kernel failed')
 
@@ -1116,7 +1117,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
             ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(bas_ij_idx)),
             ctypes.c_double(omega),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_void_p(stream.ptr))
         if err != 0:
             raise RuntimeError('fill_s_estimator kernel failed')
 

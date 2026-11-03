@@ -389,7 +389,6 @@ def _vv10nlc(rho_drho, coords, weights, nlc_pars):
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     E_i = cupy.empty(ngrids)
-    stream = cupy.cuda.get_current_stream()
     err = libgdft.VXC_vv10nlc_fock_eval_UWE(
         ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(W_i.data.ptr, ctypes.c_void_p),

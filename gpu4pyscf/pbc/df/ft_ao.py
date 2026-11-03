@@ -209,6 +209,7 @@ class FTOpt:
 
         nbas = cell.nbas
         img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
+        stream = cp.cuda.get_current_stream()
         libpbc.bvk_ovlp_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(self._aft_envs),
@@ -216,7 +217,7 @@ class FTOpt:
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff),
             ctypes.c_int(int(self.permutation_symmetry)),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_void_p(stream.ptr))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
         self.bas_ij_cache = bas_ij_cache = {}
@@ -255,7 +256,7 @@ class FTOpt:
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_void_p(stream.ptr))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
         return self

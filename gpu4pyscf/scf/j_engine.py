@@ -223,7 +223,7 @@ class _VHFOpt(jk._VHFOpt):
                     ctypes.c_float(log_cutoff),
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes,
-                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                    ctypes.c_void_p(stream.ptr))
 
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:

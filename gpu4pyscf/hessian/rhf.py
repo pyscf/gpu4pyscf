@@ -318,6 +318,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
+        stream = cupy.cuda.get_current_stream()
         for i, j, k, l in tasks:
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
@@ -356,7 +357,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
-                    ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+                    ctypes.c_void_p(stream.ptr))
 
                 err2 = kern2(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
@@ -383,7 +384,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
-                    ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+                    ctypes.c_void_p(stream.ptr))
 
                 if err1 != 0 or err2 != 0:
                     raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
