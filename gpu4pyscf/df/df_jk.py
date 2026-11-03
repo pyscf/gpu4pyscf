@@ -545,10 +545,11 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True,
         dm_sparse[:,diags] *= .5
 
     def proc():
-        factor_l = cp.asarray(dm_factor_l).reshape(nspin,-1,nao,nocc)
+        # Cross-device copies require C- or F-contiguous factors.
+        factor_l = cp.asarray(dm_factor_l, order='A').reshape(nspin,-1,nao,nocc)
         factor_r = dm_factor_r
         if factor_r is not None:
-            factor_r = cp.asarray(factor_r).reshape(nspin,-1,nao,nocc)
+            factor_r = cp.asarray(factor_r, order='A').reshape(nspin,-1,nao,nocc)
 
         vj = vk = None
         if with_j:
