@@ -233,6 +233,32 @@ def _check_grad_numerical(mol, tol=1e-6, xc='hf', disp=None, tda=False,
     return grad_ana
 
 
+def _check_triplet_grad_numerical(xc, tda, tol, delta=0.005):
+    """A restricted triplet's transition density carries no charge, so its energy has no
+    LR-PCM term and its gradient must not have one either."""
+    def triplet(coords):
+        mol1 = mol.copy()
+        mol1.set_geom_(coords, unit='Ang')
+        mol1.build()
+        td = get_td(cal_mf(mol1, xc, 'CPCM', False), tda, xc)
+        td.singlet = False
+        td.nstates = 3
+        td.kernel()
+        assert td.converged.all()
+        return td
+
+    coords = mol.atom_coords(unit='Ang')
+    grad_ana = triplet(coords).nuc_grad_method().kernel(state=1)
+    for i, j in ([0, 2], [2, 1]):
+        step = np.zeros_like(coords)
+        step[i, j] = delta
+        e_add = triplet(coords + step).e_tot[0]
+        e_minus = triplet(coords - step).e_tot[0]
+        grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+        assert abs(grad_ana[i, j] - grad_fdiff) < tol
+    return grad_ana
+
+
 class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_hf_CPCM(self):
         """
@@ -334,6 +360,12 @@ class KnownValues(unittest.TestCase):
         mf = mol2.UKS(xc='b3lyp').to_gpu().PCM().run()
         td2 = mf.TDA(equilibrium_solvation=True).run()
         self.assertAlmostEqual((td2.e_tot[0]-td1.e_tot[0])/0.002, g1[0,2], 5)
+
+    def test_grad_tda_triplet_hf_CPCM(self):
+        _check_triplet_grad_numerical('hf', tda=True, tol=1e-4)
+
+    def test_grad_tddft_triplet_b3lyp_CPCM(self):
+        _check_triplet_grad_numerical('b3lyp', tda=False, tol=1e-4)
 
     def test_scanner(self):
         mol = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
