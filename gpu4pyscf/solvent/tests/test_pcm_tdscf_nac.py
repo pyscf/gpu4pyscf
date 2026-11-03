@@ -971,7 +971,7 @@ class KnownValues(unittest.TestCase):
         nac1.kernel()
         assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-5
 
-    def test_nac_tda_df_camb3lyp_singlet_ee_fdiff_IEFPCM(self):
+    def test_nac_tda_df_camb3lyp_singlet_ee_fdiff_IEFPCM_high_cost(self):
         """
         compare with finite difference
         """

@@ -150,7 +150,7 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
-    def test_hessian_hybrid(self):
+    def test_hessian_hybrid_high_cost(self):
         print('-----testing DF B3LYP Hessian----')
         mf = _make_rks(mol_sph, 'b3lyp')
         mf.conv_tol_cpscf = 1e-7
@@ -290,7 +290,7 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
-    def test_hessian_uks_cart(self):
+    def test_hessian_uks_cart_high_cost(self):
         print('-----testing DF Hessian (cartesian)----')
         mf = _make_uks(mol_cart, 'b3lyp')
         mf.conv_tol_cpscf = 1e-7

@@ -124,7 +124,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-7
         assert test_n_cycle <= ref_n_cycle + 5
 
-    def test_gdm_uks_spin_eq_0(self):
+    def test_gdm_uks_spin_eq_0_high_cost(self):
         mol = pyscf.M(
             atom = """
                 C        0.98632600      -1.52268500      -0.15943600

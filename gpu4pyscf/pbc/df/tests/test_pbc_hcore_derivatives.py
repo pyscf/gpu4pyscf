@@ -294,7 +294,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_hcore_derivatives[-3:, :] - ref_hcore_derivatives[-3:, :])) < 3e-7
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_gdf_hcore_derivatives_krks(self):
+    def test_gdf_hcore_derivatives_krks_high_cost(self):
         cell = pyscf.M(
             a = '''0.      1.7834  1.7834
                    1.7834  0.      1.7834

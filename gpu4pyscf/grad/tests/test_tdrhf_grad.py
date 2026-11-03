@@ -181,7 +181,7 @@ def _check_grad(mol, tol=1e-5, lindep=1.0E-12, disp=None, tda=False, method="cpu
 
 
 class KnownValues(unittest.TestCase):
-    def test_grad_tda_singlet_ecp_cpu(self):
+    def test_grad_tda_singlet_ecp_cpu_high_cost(self):
         mol_ecp = pyscf.M(atom=atom_ecp, basis="def2-svp", ecp={"I": "def2-svp"},
                           output="/dev/null", verbose=1)
         _check_grad(mol_ecp, tol=1e-6, tda=True, method="cpu")

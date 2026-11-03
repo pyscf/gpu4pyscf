@@ -400,7 +400,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient[:-3] - ref_gradient[:-3])) < 1e-9
         assert np.max(np.abs(test_gradient[-3:] - ref_gradient[-3:])) < 3e-8
 
-    def test_xc_gradient_mgga_without_response(self):
+    def test_xc_gradient_mgga_without_response_high_cost(self):
         cell = pyscf.M(
             a = '''0.      1.7834  1.7834
                    1.7834  0.      1.7834
@@ -502,7 +502,7 @@ class KnownValues(unittest.TestCase):
         ref_gradient = numerical_gradient_exc_becke(cell, "r2scan", (1,1,1), 'def2-universal-jkfit', (50,194), dm, unrestricted=True)
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
-    def test_xc_gradient_unrestricted_k_with_response(self):
+    def test_xc_gradient_unrestricted_k_with_response_high_cost(self):
         cell = pyscf.M(
             a = '''0.      1.7934  1.7834
                    1.7834  0.      1.7834

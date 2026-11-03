@@ -149,7 +149,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(np.linalg.norm(grad_ana - ref_fdiff), 0, 4)
         self.check_single_component(mf, atom_id=0, axis_id=2)
 
-    def test_grad_cons_spin(self):
+    def test_grad_cons_spin_high_cost(self):
         spin_constraints = [ [0], [1.5] ]
         
         mf = ucdft.CDFT_UKS(mol, 
@@ -164,7 +164,7 @@ class KnownValues(unittest.TestCase):
 
         self.check_single_component(mf, atom_id=0, axis_id=0)
 
-    def test_grad_cons_mixed(self):
+    def test_grad_cons_mixed_high_cost(self):
         charge_constraints = [ [1], [0.8] ]
         spin_constraints = [ [0], [1.0] ]
         

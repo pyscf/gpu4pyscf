@@ -362,7 +362,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_almo_eda_2_wb97xv_svp_df(self):
+    def test_almo_eda_2_wb97xv_svp_df_high_cost(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
             "total"                   : -52.53194727429772,
@@ -849,7 +849,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 2e-7
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_almo_eda_2_customized_dispersion(self):
+    def test_almo_eda_2_customized_dispersion_high_cost(self):
         # ### Q-Chem input difference
         # # METHOD                      PBE0
         # # DFT_D                       D4

@@ -486,7 +486,7 @@ def test_ejk_sr_derivatives_gamma_point():
         return cp.einsum('ij,ji->', vk, dm).real * -.5 * .5
     _check_strain(ek[-3:], cell, eval_ejk, tol=2e-6)
 
-def test_ejk_sr_derivatives_kpts():
+def test_ejk_sr_derivatives_kpts_high_cost():
     cell = pyscf.M(
         atom = '''
         H   1.757    0.    0.4696
@@ -587,7 +587,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     ref *= 2
     assert abs(ejk - ref).max() < 1e-6
 
-def test_ejk_ip1_per_atom_kpts():
+def test_ejk_ip1_per_atom_kpts_high_cost():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174

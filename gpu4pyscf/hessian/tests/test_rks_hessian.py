@@ -40,10 +40,10 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _check_vxc(method, xc='LDA'):
+def _check_vxc(method, xc='LDA', grid_level=1):
     mf = dft.rks.RKS(mol, xc=xc)
     mf.conv_tol = 1e-14
-    mf.grids.level = 1
+    mf.grids.level = grid_level
     mf.kernel()
     dm = mf.make_rdm1()
     hobj = mf.Hessian()
@@ -84,7 +84,7 @@ class KnownValues(unittest.TestCase):
         _check_vxc('_get_vxc_diag', xc='PBE')
         _check_vxc('_get_vxc_diag', xc='TPSS')
 
-    def test_vxc_deriv1(self):
+    def test_vxc_deriv1_high_cost(self):
         _check_vxc('_get_vxc_deriv1', xc='LDA')
         _check_vxc('_get_vxc_deriv1', xc='PBE')
         _check_vxc('_get_vxc_deriv1', xc='TPSS')
@@ -94,27 +94,27 @@ class KnownValues(unittest.TestCase):
         _check_vxc('_get_vxc_deriv2', xc='PBE')
         _check_vxc('_get_vxc_deriv2', xc='TPSS')
 
-    def test_hessian_lda(self, disp=None):
+    def test_hessian_lda_high_cost(self, disp=None):
         print('-----testing LDA Hessian----')
         mf = mol.RKS(xc='LDA').run()
         _vs_cpu(mf, tol=5e-6)
 
-    def test_hessian_gga(self):
+    def test_hessian_gga_high_cost(self):
         print('-----testing PBE Hessian----')
         mf = mol.RKS(xc='PBE').run()
         _vs_cpu(mf, tol=2e-5)
 
-    def test_hessian_hybrid(self):
+    def test_hessian_hybrid_high_cost(self):
         print('-----testing B3LYP Hessian----')
         mf = mol.RKS(xc='b3lyp').run()
         _vs_cpu(mf, tol=3e-5)
 
-    def test_hessian_mgga(self):
+    def test_hessian_mgga_high_cost(self):
         print('-----testing M06 Hessian----')
         mf = mol.RKS(xc='m06').run()
         _vs_cpu(mf, tol=1e-6)
 
-    def test_hessian_rsh(self):
+    def test_hessian_rsh_high_cost(self):
         print('-----testing wb97 Hessian----')
         mf = mol.RKS(xc='wb97').run()
         _vs_cpu(mf, tol=2e-6)
@@ -125,7 +125,7 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mf)
 
     @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
-    def test_hessian_pbe_D3(self):
+    def test_hessian_pbe_D3_high_cost(self):
         print('-----testing PBE Hessian with D3BJ----')
         mf = mol.RKS(xc='PBE')
         mf.conv_tol = 1e-14
@@ -134,7 +134,7 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mf, tol=2e-5)
 
     @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
-    def test_hessian_pbe_D4(self):
+    def test_hessian_pbe_D4_high_cost(self):
         print('-----testing PBE Hessian with D4----')
         mf = mol.RKS(xc='PBE')
         mf.conv_tol = 1e-14
@@ -143,7 +143,7 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mf, tol=2e-5)
 
     @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
-    def test_consistency_b3lyp_d3_hess(self):
+    def test_consistency_b3lyp_d3_hess_high_cost(self):
         print('----- testing B3LYP-D3 consistency ------')
         mf1 = mol.RKS()
         mf1.conv_tol = 1e-14
@@ -158,6 +158,56 @@ class KnownValues(unittest.TestCase):
         mf2.kernel()
         hess2 = mf2.Hessian().kernel()
         assert abs(hess1 - hess2).max() < 1e-8
+
+
+class SmallGrid(unittest.TestCase):
+    # Keep the full basis/grid regressions above; use a minimal basis and coarse
+    # quadrature here to compare CPU/GPU derivatives in the routine test suite.
+    def make_mf(self, xc, disp=None):
+        small_mol = mol.copy()
+        small_mol.basis = 'sto3g'
+        small_mol.build(False, False)
+        mf = small_mol.RKS(xc=xc)
+        mf.grids.level = 0
+        mf.conv_tol = 1e-14
+        mf.disp = disp
+        return mf.run()
+
+    def test_hessian_lda(self):
+        _vs_cpu(self.make_mf('LDA'), tol=5e-6)
+
+    def test_hessian_gga(self):
+        _vs_cpu(self.make_mf('PBE'), tol=2e-5)
+
+    def test_hessian_hybrid(self):
+        _vs_cpu(self.make_mf('b3lyp'), tol=3e-5)
+
+    def test_hessian_mgga(self):
+        _vs_cpu(self.make_mf('m06'), tol=1e-6)
+
+    def test_hessian_rsh(self):
+        _vs_cpu(self.make_mf('wb97'), tol=2e-6)
+
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
+    def test_hessian_pbe_d3bj(self):
+        _vs_cpu(self.make_mf('PBE', disp='d3bj'), tol=2e-5)
+
+    @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
+    def test_hessian_pbe_d4(self):
+        _vs_cpu(self.make_mf('PBE', disp='d4'), tol=2e-5)
+
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
+    def test_consistency_b3lyp_d3_hess(self):
+        mf1 = self.make_mf('b3lyp', disp='d3bj')
+        mf2 = self.make_mf('b3lyp-d3bj')
+        hess1 = mf1.Hessian().kernel()
+        hess2 = mf2.Hessian().kernel()
+        assert abs(hess1 - hess2).max() < 1e-8
+
+    def test_vxc_deriv1(self):
+        for xc in ('LDA', 'PBE', 'TPSS'):
+            with self.subTest(xc=xc):
+                _check_vxc('_get_vxc_deriv1', xc=xc, grid_level=0)
 
 
 if __name__ == "__main__":

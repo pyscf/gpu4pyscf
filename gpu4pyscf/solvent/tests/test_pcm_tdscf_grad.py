@@ -364,7 +364,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_triplet_hf_CPCM(self):
         _check_triplet_grad_numerical('hf', tda=True, tol=1e-4)
 
-    def test_grad_tddft_triplet_b3lyp_CPCM(self):
+    def test_grad_tddft_triplet_b3lyp_CPCM_high_cost(self):
         _check_triplet_grad_numerical('b3lyp', tda=False, tol=1e-4)
 
     def test_scanner(self):
