@@ -1226,6 +1226,8 @@ class SpinFlipTDA(TDBase):
         states -= 1
         es = self.e[states] - self.e[ref]
         f = (2./3.) * cp.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        f = f.get()  # cp.einsum always returns a device array (cupy uploads host
+        # operands); return host observables, as the CPU version does
         if isinstance(state, int):
             return f[0]
         else:
@@ -1437,11 +1439,12 @@ class SpinFlipTDA(TDBase):
             e_ev = np.asarray(self.e[i]) * nist.HARTREE2EV
             log.note('Excited State %3d: %12.5f eV   <S^2>: %6.4f', i + 1, e_ev, S2)
             if log.verbose >= logger.INFO:
+                xw = abs(x).get() if isinstance(x, cp.ndarray) else abs(x)  # logging-only host copy
                 if self.extype == 0:
-                    for o, v in zip(*np.where(abs(x).get() > 0.1)):  # .get(): logging-only host copy
+                    for o, v in zip(*np.where(xw > 0.1)):
                         log.info('    %4db -> %4da %12.5f', o + 1, v + 1 + nocc_a, x[o, v])
                 elif self.extype == 1:
-                    for o, v in zip(*np.where(abs(x).get() > 0.1)):  # .get(): logging-only host copy
+                    for o, v in zip(*np.where(xw > 0.1)):
                         log.info('    %4da -> %4db %12.5f', o + 1, v + 1 + nocc_b, x[o, v])
 
 
