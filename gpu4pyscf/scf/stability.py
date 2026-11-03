@@ -17,6 +17,7 @@ import cupy as cp
 from cupyx.scipy.linalg import block_diag, expm
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.soscf import gen_g_hop_rhf, gen_g_hop_uhf
+from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.fci.direct_spin1 import davidson1
 from gpu4pyscf.scf.gdm import get_nocc, apply_exp_U
 from gpu4pyscf.df.df_jk import _make_factorized_dm
@@ -396,7 +397,12 @@ def _gen_hop_uhf_external(mf, with_symmetry=False, verbose=None):
     hdiagba = fvvb.diagonal()[:, None] - fooa.diagonal()
     hdiag2 = cp.hstack((hdiagab.ravel(), hdiagba.ravel()))
 
-    vresp1 = mf.to_ghf().gen_response(with_j=False, hermi=1)
+    if isinstance(mf, KohnShamDFT):
+        gmf = mf.to_gks()
+        gmf.collinear = 'mcol'
+    else:
+        gmf = mf.to_ghf()
+    vresp1 = gmf.gen_response(with_j=False, hermi=1)
     mocc_ghf = block_diag(mocca, moccb)
     def hop_uhf2ghf(x1):
         x1ab = x1[:nvira*noccb].reshape(nvira,noccb)
