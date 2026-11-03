@@ -1408,10 +1408,12 @@ def condense(opname, a, loc_x, loc_y=None):
         nx, ny = int(a.shape[-2]), int(a.shape[-1])
         a = a.reshape(-1, nx, ny)  # (counts, nx, ny)
 
-    # Work with host-side integer indices; windows stay on device
+    # Work with host-side integer indices; windows stay on device.
+    # Explicit D2H via asnumpy (small index arrays) instead of relying on
+    # the __array__ backstop.
     a = dpnp.asarray(a, order='C')
-    loc_x = np.asarray(loc_x, dtype=np.int32)
-    loc_y = np.asarray(loc_y, dtype=np.int32)
+    loc_x = np.asarray(dpnp.asnumpy(loc_x) if isinstance(loc_x, dpnp.ndarray) else loc_x, dtype=np.int32)
+    loc_y = np.asarray(dpnp.asnumpy(loc_y) if isinstance(loc_y, dpnp.ndarray) else loc_y, dtype=np.int32)
     nloc_x = loc_x.size - 1
     nloc_y = loc_y.size - 1
     counts, nx, ny = a.shape
