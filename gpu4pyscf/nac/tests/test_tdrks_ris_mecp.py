@@ -78,7 +78,7 @@ class KnownValues(unittest.TestCase):
         optimized_mol = ci_optimizer.optimize()
         assert abs(mol.atom_coords() - optimized_mol.atom_coords()).max() < 3e-4
 
-    def test_mecp_hf_tda_singlet_geom_check(self):
+    def test_mecp_hf_tda_singlet_geom_check_high_cost(self):
         mff = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mff.kernel()
         tdf = tdscf.ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)

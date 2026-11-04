@@ -260,7 +260,44 @@ def _check_triplet_grad_numerical(xc, tda, tol, delta=0.005):
 
 
 class KnownValues(unittest.TestCase):
+    def _check_small_pcm_gradient(self, reference, xc='hf', solvent='CPCM', singlet=True):
+        small_mol = pyscf.M(atom=atom, basis='sto3g', verbose=0)
+        if xc == 'hf':
+            mf = small_mol.RHF().PCM().to_gpu()
+        else:
+            mf = small_mol.RKS(xc=xc).PCM().to_gpu()
+            mf.grids.level = 1
+        mf.with_solvent.method = solvent
+        mf.with_solvent.lebedev_order = 11
+        mf.with_solvent.eps = 78
+        mf.run(conv_tol=1e-12)
+        assert mf.converged
+        td = mf.TDA(equilibrium_solvation=True)
+        td.singlet = singlet
+        td.kernel(nstates=2)
+        assert td.converged.all()
+        g = td.nuc_grad_method().kernel(state=1)
+        assert np.max(np.abs(g - reference)) < 1e-6
+
     def test_grad_tda_singlet_hf_CPCM(self):
+        reference = np.array([[0.0, 0.0, 0.321429091910],
+                              [0.0, 0.275260095367, -0.160714545955],
+                              [0.0, -0.275260095367, -0.160714545955]])
+        self._check_small_pcm_gradient(reference)
+
+    def test_grad_tda_triplet_hf_CPCM(self):
+        reference = np.array([[0.0, 0.0, 0.298954018454],
+                              [0.0, 0.263663759771, -0.149477009227],
+                              [0.0, -0.263663759771, -0.149477009227]])
+        self._check_small_pcm_gradient(reference, singlet=False)
+
+    def test_grad_tda_singlet_b3lyp_COSMO(self):
+        reference = np.array([[0.0, 0.0, 0.354804213785],
+                              [0.0, 0.294935390649, -0.177473658171],
+                              [0.0, -0.294935390649, -0.177473658171]])
+        self._check_small_pcm_gradient(reference, xc='b3lyp', solvent='COSMO')
+
+    def test_grad_tda_singlet_hf_CPCM_high_cost(self):
         """
         $rem
         JOBTYPE              force
@@ -315,7 +352,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_b3lyp_IEPPCM(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='IEFPCM')
 
-    def test_grad_tda_singlet_b3lyp_COSMO(self):
+    def test_grad_tda_singlet_b3lyp_COSMO_high_cost(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='COSMO')
 
     @pytest.mark.slow
@@ -361,10 +398,10 @@ class KnownValues(unittest.TestCase):
         td2 = mf.TDA(equilibrium_solvation=True).run()
         self.assertAlmostEqual((td2.e_tot[0]-td1.e_tot[0])/0.002, g1[0,2], 5)
 
-    def test_grad_tda_triplet_hf_CPCM(self):
+    def test_grad_tda_triplet_hf_CPCM_high_cost(self):
         _check_triplet_grad_numerical('hf', tda=True, tol=1e-4)
 
-    def test_grad_tddft_triplet_b3lyp_CPCM(self):
+    def test_grad_tddft_triplet_b3lyp_CPCM_high_cost(self):
         _check_triplet_grad_numerical('b3lyp', tda=False, tol=1e-4)
 
     def test_scanner(self):

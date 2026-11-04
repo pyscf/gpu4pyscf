@@ -95,7 +95,7 @@ class KnownValues(unittest.TestCase):
             hess_cpu = hessobj.kernel()
             assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
-    def test_df_mgga(self):
+    def test_df_mgga_high_cost(self):
         mf = dft.UKS(mol, xc='tpss').density_fit()
         mf.conv_tol = 1e-10
         mf.grids.level = 1

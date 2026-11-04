@@ -560,7 +560,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_frequency - ref_frequency)) < 1 # In cm^-1
 
-    def test_rks_df_against_qchem(self):
+    def test_rks_df_against_qchem_high_cost(self):
         mol = pyscf.M(
             atom = """
                         C 0.000000 0.000000 0.000000

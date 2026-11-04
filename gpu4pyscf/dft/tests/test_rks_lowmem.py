@@ -67,7 +67,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-8
 
-    def test_rks_wb97m(self):
+    def test_rks_wb97m_high_cost(self):
         print('-------- wb97mv -------------')
         e_tot = run_dft('wb97mv', mol_sph)
         e_ref = mol_sph.RKS(xc='wb97mv').kernel()

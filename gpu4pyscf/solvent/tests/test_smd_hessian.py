@@ -228,7 +228,7 @@ H -0.646 -0.464 -0.804
     #                 'bug for SMD.radii_table in pyscf')
     @unittest.skipIf(cpu_smd.libsolvent is None,
                      'CPU SMD reference requires PySCF built with ENABLE_SMD=ON')
-    def test_to_gpu_to_cpu(self):
+    def test_to_gpu_to_cpu_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
