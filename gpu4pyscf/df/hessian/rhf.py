@@ -1236,10 +1236,10 @@ def _int2c2e_ip2_per_atom(mol, dm, omega=None, lr_factor=None, sr_factor=None):
     err = libvhf_rys.e_int2c2e_ip2(
         ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs),
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor),
-        ctypes.byref(rys_envs),
         ctypes.c_int(shm_size_max),
         ctypes.c_int(nbatches_shl_pair),
         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
