@@ -398,7 +398,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_derivatives[:-3, :] - ref_derivatives[:-3, :])) < 1e-7
         assert np.max(np.abs(test_derivatives[-3:, :] - ref_derivatives[-3:, :])) < 5e-6
 
-    def test_gdf_hcore_derivatives_kuks(self):
+    def test_gdf_hcore_derivatives_kuks_high_cost(self):
         cell = pyscf.M(
             a = '''0.      1.7834  1.8834
                    1.7834  0.      1.7834

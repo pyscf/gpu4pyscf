@@ -676,7 +676,7 @@ class KnownValues(unittest.TestCase):
         for reference_dft_gradient, test_dft_gradient in zip(reference_dft_gradients, test_dft_gradients):
             assert np.max(np.abs(test_dft_gradient - reference_dft_gradient)) < 1e-6
 
-    def test_almo_eda_2_pbe0_charged_df(self):
+    def test_almo_eda_2_pbe0_charged_df_high_cost(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
             "total"                   : -536.3265135788014,

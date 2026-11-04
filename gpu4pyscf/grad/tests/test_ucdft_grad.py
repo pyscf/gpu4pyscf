@@ -95,7 +95,7 @@ class KnownValues(unittest.TestCase):
         
         self.assertAlmostEqual(grad_val_ana, grad_val_num, delta=1e-4)
 
-    def test_grad_cons_orbital(self):
+    def test_grad_cons_orbital_high_cost(self):
         charge_constraints = [ ['0 O 2py'], [1.2] ]
         mf = ucdft.CDFT_UKS(mol, 
                     charge_constraints=charge_constraints, 
@@ -122,7 +122,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(np.linalg.norm(grad_ana - ref_fdiff), 0, 4)
         self.check_single_component(mf, atom_id=0, axis_id=2)
 
-    def test_grad_cons_atom(self):
+    def test_grad_cons_atom_high_cost(self):
         charge_constraints = [ [0, ['1 H 1s']], [8.1, 0.95] ]
         mf = ucdft.CDFT_UKS(mol, 
                     charge_constraints=charge_constraints, 

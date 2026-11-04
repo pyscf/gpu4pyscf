@@ -214,6 +214,23 @@ class KnownValues(unittest.TestCase):
         assert test_n_cycle <= ref_n_cycle + 15
 
     def test_gdm_uks_spin_neq_0(self):
+        mol = pyscf.M(atom='O 0 0 0; H 0 -.757 .587; H 0 .757 .587',
+                      basis='sto3g', charge=1, spin=1, verbose=0)
+        mf = UKS(mol, xc='wb97x').density_fit()
+        mf.grids.level = 1
+        mf.conv_tol = 1e-10
+        mf.conv_tol_grad = 1e-6
+        dm = mf.get_init_guess(key='qchem_sad')
+        ref = mf.copy().run(dm0=dm)
+        test = gdm(mf)
+        test.kernel(dm0=dm)
+        test = test.undo_gdm()
+        assert test.converged and ref.converged
+        assert abs(test.e_tot - ref.e_tot) < 1e-8
+        assert abs(test.spin_square()[0] - ref.spin_square()[0]) < 1e-6
+        assert abs(test.Gradients().kernel() - ref.Gradients().kernel()).max() < 5e-5
+
+    def test_gdm_uks_spin_neq_0_high_cost(self):
         mol = pyscf.M(
             atom = """
                 C        0.94054455      -0.01152091      -0.00390959

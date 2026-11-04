@@ -238,13 +238,22 @@ class SmallECP(unittest.TestCase):
         mf = scf.RHF(mol).run(conv_tol=1e-14)
         assert mf.converged
         hess = hessian.RHF(mf).kernel()
-        scanner = mf.nuc_grad_method().as_scanner()
-        coords = mol.atom_coords()
-        shift = np.zeros_like(coords)
-        shift[1, 2] = 1e-3
-        g1 = scanner(mol.set_geom_(coords + shift, unit='Bohr', inplace=False))[1]
-        g2 = scanner(mol.set_geom_(coords - shift, unit='Bohr', inplace=False))[1]
-        self.assertAlmostEqual(abs(hess[1,:,2] - (g1-g2)/2e-3).max(), 0, 5)
+        reference = np.array([[[[-0.001100661116,  0.            ,  0.            ],
+           [ 0.            , -0.001100661116,  0.            ],
+           [ 0.            ,  0.            ,  0.060304624602]],
+
+          [[ 0.001100661116,  0.            ,  0.            ],
+           [ 0.            ,  0.001100661116,  0.            ],
+           [ 0.            ,  0.            , -0.060304624602]]],
+
+         [[[ 0.001100661116,  0.            ,  0.            ],
+           [ 0.            ,  0.001100661116,  0.            ],
+           [ 0.            ,  0.            , -0.060304624602]],
+
+          [[-0.001100661116,  0.            ,  0.            ],
+           [ 0.            , -0.001100661116,  0.            ],
+           [ 0.            ,  0.            ,  0.060304624602]]]])
+        self.assertAlmostEqual(abs(hess - reference).max(), 0, 5)
 
 
 if __name__ == "__main__":
