@@ -393,6 +393,9 @@ def _gen_hop_uhf_external(mf, with_symmetry=False, verbose=None):
         x2 = cp.hstack((x2a.ravel(), x2b.ravel()))
         return x2
 
+    raise NotImplementedError("uhf2ghf external instability functionality has not been fully verified or tested yet. "
+                              "If you still wish to use it, please remove this error and proceed with caution.")
+
     hdiagab = fvva.diagonal()[:, None] - foob.diagonal()
     hdiagba = fvvb.diagonal()[:, None] - fooa.diagonal()
     hdiag2 = cp.hstack((hdiagab.ravel(), hdiagba.ravel()))

@@ -636,10 +636,51 @@ class KnownValues(unittest.TestCase):
             assert test_real2complex_eigenvalue is not None, "Failed to extract real2complex eigenvalues"
             assert test_external_eigenvalue is not None, "Failed to extract external eigenvalues"
 
-        # Reference values obtained from pyscf
+        # Reference values obtained from pyscf (except internal stability, because pyscf doesn't support nlc response. Internal stability is consistency check)
         ref_energy = -109.013856823531
+        ref_internal_eigenvalue = np.array([-0.03569274, -0.03504085,  0.18731157])
         ref_real2complex_eigenvalue = np.array([-0.05818666,  0.00259714,  0.00325815])
         ref_external_eigenvalue = np.array([-0.17444401, -0.09853754, -0.09843318])
+        ref_mocc_i_1 = cp.array([[-0.7706089 ,  0.63083252, -0.15518054, -0.16523859,  0.03068437,  0.00032263,  0.00013138],
+            [-0.01801541,  0.01536295,  0.35813563,  0.39311716, -0.0840005 ,  0.00151091, -0.00040215],
+            [ 0.00510433, -0.0063455 ,  0.35581193,  0.40938028, -0.10647801, -0.00454128, -0.00010597],
+            [-0.00079777,  0.00055956,  0.0567087 , -0.04305594,  0.44607443, -0.02151643,  0.02358893],
+            [-0.00012713,  0.00001017,  0.00218153, -0.00259043,  0.02041088,  0.47435673, -0.47453308],
+            [-0.000131  ,  0.0000136 ,  0.00239806, -0.00276881,  0.02408924,  0.00527374,  0.00992355],
+            [ 0.0004723 , -0.0021027 ,  0.02838893, -0.01588365,  0.28950615, -0.01905782,  0.01524734],
+            [ 0.00031323, -0.00005062,  0.00200346, -0.00129156,  0.01376509,  0.32166504, -0.3269158 ],
+            [ 0.00031509, -0.00006162,  0.0021125 , -0.0013357 ,  0.01616164,  0.01948767,  0.02822489],
+            [-0.63073833, -0.77069229, -0.15523237,  0.16523081,  0.03061752,  0.00043078, -0.00013109],
+            [-0.01469831, -0.0186752 ,  0.35795409, -0.3929508 , -0.08404883,  0.00241987,  0.00045678],
+            [ 0.00394588,  0.00731976,  0.35658334, -0.4095981 , -0.10580774, -0.00772965,  0.00000561],
+            [ 0.000697  ,  0.00072762, -0.05644128, -0.04332571, -0.44597005, -0.02901928, -0.02526229],
+            [-0.00006464,  0.00001544, -0.00366829, -0.00154043, -0.0226995 ,  0.00784671, -0.00706075],
+            [-0.00006079,  0.00001896, -0.00387007, -0.00181388, -0.02637994,  0.47470126,  0.47384062],
+            [-0.0002133 , -0.0022151 , -0.02891369, -0.01584653, -0.28994037, -0.0149181 , -0.01597804],
+            [ 0.00036669, -0.00003699, -0.0005648 , -0.00047841, -0.01394436,  0.01986574, -0.0264984 ],
+            [ 0.00036311, -0.00004855, -0.0006893 , -0.00057364, -0.01633024,  0.32051387,  0.32638219],
+            [ 0.0000285 , -0.00005594, -0.0007167 ,  0.00013093, -0.00021057, -0.0036142 ,  0.00017975],
+            [-0.00131262, -0.00022165, -0.00463971,  0.00049523, -0.00394782,  0.0299712 ,  0.00044267]])
+        ref_mocc_i_2 = cp.array([[-0.7706089 ,  0.63083252, -0.15518054, -0.16523859,  0.0306844 ,  0.00032264, -0.00013139],
+            [-0.01801541,  0.01536295,  0.35813572,  0.39311734, -0.08400065,  0.00151092,  0.00040236],
+            [ 0.00510434, -0.0063455 ,  0.35581185,  0.40938004, -0.10647797, -0.00454134,  0.00010574],
+            [-0.00079778,  0.00055956,  0.05670819, -0.04305588,  0.44608171, -0.02398488, -0.0261397 ],
+            [-0.00012747,  0.0000107 ,  0.002111  , -0.00255583,  0.02184816,  0.00791538, -0.00727625],
+            [-0.00013065,  0.00001306,  0.00246893, -0.00280358,  0.02264429,  0.4741826 ,  0.47446572],
+            [ 0.00047231, -0.0021027 ,  0.02838876, -0.01588353,  0.28951069, -0.02064749, -0.01711815],
+            [ 0.00031425, -0.00005082,  0.00197355, -0.00125888,  0.01470981,  0.02130305, -0.02640528],
+            [ 0.00031406, -0.00006142,  0.00214247, -0.00136851,  0.01521174,  0.32143876,  0.32698766],
+            [-0.63073833, -0.77069229, -0.15523239,  0.16523081,  0.03061748,  0.00043075,  0.00013111],
+            [-0.01469829, -0.01867518,  0.35795436, -0.39295099, -0.08404861,  0.00242006, -0.00045662],
+            [ 0.00394586,  0.00731974,  0.35658309, -0.40959784, -0.10580774, -0.00772968, -0.00000608],
+            [ 0.00069699,  0.0007276 , -0.05644112, -0.04332608, -0.44597852, -0.02654848,  0.02271592],
+            [-0.0000648 ,  0.00001522, -0.00359227, -0.00159401, -0.02415207,  0.47490064, -0.4739037 ],
+            [-0.00006062,  0.0000192 , -0.00394645, -0.00176006, -0.02491963,  0.00518177,  0.00970631],
+            [-0.00021329, -0.00221508, -0.02891349, -0.0158467 , -0.28994535, -0.0133265 ,  0.01411057],
+            [ 0.00036616, -0.00003709, -0.00054011, -0.00049275, -0.01487764,  0.32070191, -0.32630346],
+            [ 0.00036363, -0.00004846, -0.00071412, -0.00055924, -0.01539205,  0.01808973,  0.02831289],
+            [ 0.0000285 , -0.00005594, -0.00071669,  0.00013098, -0.00021056, -0.0036142 , -0.00018   ],
+            [-0.00131262, -0.00022165, -0.00463962,  0.00049519, -0.0039478 ,  0.0299715 , -0.00044055]])
         ref_mocc_ea_1 = cp.array([
             [ 0.7706072 , -0.63068733, -0.15727335,  0.16677584,  0.02308061,  0.0001756 ,  0.00000001],
             [ 0.01940899, -0.01647029,  0.37662993, -0.41634741, -0.06687092,  0.00189988,  0.00000014],
@@ -708,6 +749,7 @@ class KnownValues(unittest.TestCase):
         ])
 
         assert np.abs(test_energy - ref_energy) < 2e-8 # PySCF and GPU4PySCF vv10 grid density cutoff is slightly different
+        assert np.max(np.abs(test_internal_eigenvalue - ref_internal_eigenvalue)) < 1e-6
         assert np.max(np.abs(test_real2complex_eigenvalue - ref_real2complex_eigenvalue)) < 1e-6
         assert np.max(np.abs(test_external_eigenvalue - ref_external_eigenvalue)) < 1e-6
 
@@ -716,6 +758,11 @@ class KnownValues(unittest.TestCase):
 
         nocc = mol.nelec[0]
         S = mf.get_ovlp()
+
+        test_mocc_i = test_mo_i[:, :nocc]
+        diff_i1 = cp.max(cp.abs(cp.abs(ref_mocc_i_1.T @ S @ test_mocc_i) - cp.eye(nocc)))
+        diff_i2 = cp.max(cp.abs(cp.abs(ref_mocc_i_2.T @ S @ test_mocc_i) - cp.eye(nocc)))
+        assert diff_i1 < 1e-4 or diff_i2 < 1e-4
 
         test_mocc_ea = test_mo_e[0, :, :nocc]
         diff_ea1 = cp.max(cp.abs(cp.abs(ref_mocc_ea_1.T @ S @ test_mocc_ea) - cp.eye(nocc)))
@@ -1284,7 +1331,7 @@ class KnownValues(unittest.TestCase):
             mol.stdout = output
             mol.verbose = 4
 
-            mf = UKS(mol, xc = "wB97MV").density_fit(auxbasis = "def2-universal-jkfit")
+            mf = UKS(mol, xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit")
             mf.grids.atom_grid = (99,590)
             mf.nlcgrids.atom_grid = (50,194)
             mf.conv_tol = 1e-10
@@ -1306,13 +1353,14 @@ class KnownValues(unittest.TestCase):
                         raise ValueError("Unknown eigenvalue type: " + line)
             assert test_internal_eigenvalue is not None, "Failed to extract internal eigenvalues"
 
-        # Reference values obtained from pyscf
+        # Reference values obtained from pyscf (except internal stability, because pyscf doesn't support nlc response. Internal stability is consistency check)
         ref_energy = -108.581266667147
+        ref_internal_eigenvalue = np.array([0.03508718, 0.03531283, 0.13819957])
         assert np.abs(test_energy - ref_energy) < 2e-8 # PySCF and GPU4PySCF vv10 grid density cutoff is slightly different
-        assert np.all(test_internal_eigenvalue > 0)
 
         assert test_stable_i is True
 
+        assert np.max(np.abs(test_internal_eigenvalue - ref_internal_eigenvalue)) < 1e-6
         assert cp.max(cp.abs(test_mo_i - mf.mo_coeff)) < 1e-14
 
     def test_stability_uhf_pcm_unstable(self):
