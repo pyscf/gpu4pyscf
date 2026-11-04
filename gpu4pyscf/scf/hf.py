@@ -811,6 +811,7 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
         # Its pointers refer to the previous _env and can cause invalid integral
         # reads. Clear it here until the fix is available in supported PySCF versions.
         mol_atom._ecpbas = np.zeros((0, gto.BAS_SLOTS), dtype=np.int32)
+        mol_atom.magmom = []
         mol_atom.build(False, False)
 
         mf_atom = mf_template.copy()
