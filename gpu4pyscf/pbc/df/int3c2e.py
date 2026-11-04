@@ -707,6 +707,10 @@ class SRInt3c2eOpt:
         return vj_aux
 
     def contract_auxvec(self, auxvec, kpts=None, sort_output=True):
+        """Contract to AO matrices; None or a 1D k-point returns a 2D matrix."""
+        is_single_kpt = kpts is None or kpts.ndim == 1
+        if kpts is not None:
+            kpts = kpts.reshape(-1, 3)
         assert auxvec.dtype == np.float64
         assert auxvec.ndim == 1
         assert len(auxvec) == self.auxcell.nao
@@ -784,7 +788,7 @@ class SRInt3c2eOpt:
         vj = hermi_triu(vj)
         if sort_output:
             vj = cell.apply_CT_mat_C(vj)
-        return vj
+        return vj[0] if is_single_kpt else vj
 
 def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)

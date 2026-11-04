@@ -265,7 +265,7 @@ def get_j(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None):
     vj = get_j_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band)
     assert vj.ndim == 4
     if kpts_band is None:
-        vj = vj[:,0,:,:]
+        return vj.reshape(dm.shape)
     if dm.ndim == 2:
         vj = vj[0]
     return vj
@@ -300,7 +300,7 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
     vk = get_k_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band, exxdiv)
     assert vk.ndim == 4
     if kpts_band is None:
-        vk = vk[:,0,:,:]
+        return vk.reshape(dm.shape)
     if dm.ndim == 2:
         vk = vk[0]
     return vk

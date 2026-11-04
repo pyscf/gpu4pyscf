@@ -46,7 +46,7 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -89,12 +89,22 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
 def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
 
+    Args:
+        mydf : AFTDF object
+            Provides the cell and reciprocal-space mesh.
+            mydf.kpts has no effects.
+
     Kwargs:
-        mesh: custom mesh grids. By default mesh is determined by the
-        function _guess_eta from module pbc.df.gdf_builder.
+        kpts : (3,) or (nkpts, 3) ndarray, optional
+            None means a single Gamma point.
+
+    Returns:
+        cupy.ndarray
+            Shape (nao, nao) for None or a 1D k-point.
+            (nkpts, nao, nao) for k-points.
     '''
     cell = mydf.cell
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -111,8 +121,19 @@ def get_pp(mydf, kpts=None):
 def get_nuc(mydf, kpts=None):
     '''Get the periodic nuc-el AO matrix, with G=0 removed.
 
+    Args:
+        mydf : AFTDF object
+            Provides the cell and reciprocal-space mesh.
+            mydf.kpts has no effects.
+
     Kwargs:
-        function _guess_eta from module pbc.df.gdf_builder.
+        kpts : (3,) or (nkpts, 3) ndarray, optional
+            None means a single Gamma point.
+
+    Returns:
+        cupy.ndarray
+            Shape (nao, nao) for None or a 1D k-point.
+            (nkpts, nao, nao) for k-points.
     '''
     return _get_pp_loc_part1(mydf, kpts, with_pseudo=False)
 
@@ -334,33 +355,41 @@ class AFTDF(lib.StreamObject):
         return utils.to_cpu(self, out=out)
 
 def _check_kpts(kpts, dm=None):
-    '''Check if the argument kpts is a single k-point'''
+    '''Normalize k-point sampling and optionally validate the density layout.
+
+    None selects Gamma. None or a 1D k-point sets is_single_kpt=True;
+    2D k-points, including a (1, 3) Gamma batch, set it to False.
+
+    If dm is supplied, single-point sampling requires an RHF (nao, nao)
+    or UHF (2, nao, nao) density. Batched sampling requires KRHF
+    (nkpts, nao, nao) or KUHF (2, nkpts, nao, nao) densities.
+
+    Returns an (nkpts, 3) k-point array and is_single_kpt.
+    '''
     if dm is None:
         if kpts is None:
             kpts = np.zeros((1, 3))
-        is_single_kpt = kpts.ndim == 1
+            is_single_kpt = True
+        else:
+            is_single_kpt = kpts.ndim == 1
         return kpts.reshape(-1, 3), is_single_kpt
 
-    is_single_kpt = True
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-        if (dm.ndim == 2 or # RHF
-            (dm.ndim == 3 and len(dm) == 2)): # UHF
-            return kpts, is_single_kpt
-
-    if kpts.ndim == 1:
-        kpts = kpts.reshape(1, 3)
+    if kpts is None or kpts.ndim == 1:
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        is_single_kpt = True
         assert (dm.ndim == 2 or # RHF
                 (dm.ndim == 3 and len(dm) == 2)) # UHF
+        return kpts.reshape(1, 3), is_single_kpt
+
+    is_single_kpt = False
+    nkpts = len(kpts)
+    if dm.ndim == 2:
+        raise RuntimeError('dm.ndim == 2, incompatible with kpts')
+    elif dm.ndim == 3: # KRHF
+        assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
     else:
-        is_single_kpt = False
-        nkpts = len(kpts)
-        if dm.ndim == 2:
-            raise RuntimeError('dm.ndim == 2, incompatible with kpts')
-        elif dm.ndim == 3: # KRHF
-            assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
-        else: # KUHF
-            assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
+        assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
     return kpts, is_single_kpt
 
 def _fake_nuc(cell, with_pseudo=True):

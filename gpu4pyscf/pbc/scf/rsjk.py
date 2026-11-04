@@ -226,13 +226,11 @@ class PBCJKMatrixOpt:
 
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
                   omega=None, lr_factor=0, sr_factor=1, verbose=None):
-        '''
-        Build kpts adapted K matrices
-        Return a (*, nkpts, nao, nao) array.
+        '''Build short-range K matrices with the same shape as dm.
 
-        If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
-        matrix is still evaluated as the k-point sampling case. The "nkpts"
-        dimension is set to 1
+        None selects a single Gamma point, as does a 1D zero k-point.
+        Single-point Gamma sampling requires a real density matrix.
+        Explicit 2D k-points retain the batched sampling convention.
         '''
         log = logger.new_logger(self, verbose)
         cell = self.cell
@@ -440,7 +438,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, _ = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
@@ -610,13 +608,11 @@ class PBCJKMatrixOpt:
         return wcoulG
 
     def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None):
-        '''
-        Build kpts adapted K matrices
-        Return a (*, nkpts, nao, nao) array.
+        '''Build short-range J matrices with the same shape as dm.
 
-        If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
-        matrix is still evaluated as the k-point sampling case. The "nkpts"
-        dimension is set to 1
+        None selects a single Gamma point, as does a 1D zero k-point.
+        Single-point Gamma sampling requires a real density matrix.
+        Explicit 2D k-points retain the batched sampling convention.
         '''
         log = logger.new_logger(self)
         cell = self.cell
@@ -916,7 +912,7 @@ class PBCJKMatrixOpt:
         dms = transpose_sum(dms)
         dms *= .5
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _check_kpts(kpts)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             if is_single_kpt:
@@ -1082,7 +1078,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, _ = _check_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)

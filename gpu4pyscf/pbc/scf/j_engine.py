@@ -128,13 +128,11 @@ class PBCJMatrixOpt:
     estimate_cutoff_with_penalty = PBCJKMatrixOpt.estimate_cutoff_with_penalty
 
     def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None, verbose=None):
-        '''
-        Build K for the sorted_mol over the sampled k-points.
-        Return a (*, nkpts, nao, nao) array.
+        '''Build short-range J matrices with the same shape as dm.
 
-        If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
-        matrix is still evaluated as the k-point sampling case. The "nkpts"
-        dimension is set to 1
+        None selects a single Gamma point, as does a 1D zero k-point.
+        Single-point Gamma sampling requires a real density matrix.
+        Explicit 2D k-points retain the batched sampling convention.
         '''
         log = logger.new_logger(self, verbose)
         prim_cell = cell = self.cell

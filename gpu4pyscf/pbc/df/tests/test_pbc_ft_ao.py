@@ -194,6 +194,13 @@ class KnownValues(unittest.TestCase):
 
         mydf  = AFTDF(cell).set(mesh=mesh)
         jref = mydf.get_jk(dm, with_k=False)[0]
+        assert vj.shape == jref.shape
+        batch = ft_opt.contract_rhoG(coulG, -Gv, kpts=np.zeros((1, 3)))
+        single = ft_opt.contract_rhoG(coulG, -Gv, kpts=np.zeros(3))
+        assert batch.shape == (1,) + vj.shape
+        assert single.shape == vj.shape
+        cp.testing.assert_allclose(vj, batch[0], atol=1e-12, rtol=0)
+        cp.testing.assert_allclose(vj, single, atol=1e-12, rtol=0)
         assert abs(vj - jref).max().get() < 1e-9
 
     @unittest.skip('FTOpt.contract_dm with kpts not supported')
@@ -214,6 +221,7 @@ class KnownValues(unittest.TestCase):
 
         mydf  = AFTDF(cell).set(mesh=mesh)
         jref = mydf.get_jk(dm, kpts=kpts, with_k=False)[0]
+        assert vj.shape == jref.shape
         assert abs(vj - jref).max().get() < 1e-9
 
     def test_gen_ft_kernel(self):

@@ -1036,9 +1036,11 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
-    if is_single_kpt:
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    elif is_single_kpt:
         kpts = kpts.reshape(1, 3)
     if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
@@ -1087,6 +1089,8 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
 
 def get_nuc(cell, kpts=None):
     '''Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis.
     '''
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1096,11 +1100,13 @@ def get_nuc(cell, kpts=None):
 
 def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
+
+    None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis.
     '''
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
     t1 = log.timer_debug1('get_pp_loc_part2', *t0)

@@ -74,6 +74,8 @@ def _sorted_fake_cell_vnl(cell):
     return fakecell, hl_blocks, pattern, splits
 
 def get_pp_nl_gpu(cell, kpts=None):
+    """Nonlocal pseudopotential; None or a 1D k-point returns one AO matrix."""
+    is_single_kpt = kpts is None or np.ndim(kpts) == 1
     if kpts is None:
         kpts_lst = np.zeros((1, 3))
     else:
@@ -107,4 +109,4 @@ def get_pp_nl_gpu(cell, kpts=None):
         tmp = contract('nij,jknlq->iknlq', hl_block, ilp)
         ilp_conj = cp.conjugate(ilp, out=ilp)
         contract('iknlp,iknlq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
-    return ppnl
+    return ppnl[0] if is_single_kpt else ppnl

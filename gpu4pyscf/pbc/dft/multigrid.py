@@ -700,9 +700,9 @@ def eval_nucG(cell, mesh):
     return nucG
 
 def get_nuc(ni, kpts=None):
+    """None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis."""
     assert kpts is None or is_zero(kpts)
-    if kpts is None or kpts.ndim == 1:
-        is_single_kpt = True
+    is_single_kpt = kpts is None or kpts.ndim == 1
     kpts = np.zeros((1, 3))
     cell = ni.cell
     mesh = ni.mesh
@@ -840,11 +840,12 @@ void ''' + fn_name + '''(
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+
+    None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis.
     '''
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     assert kpts is None or is_zero(kpts)
-    if kpts is None or kpts.ndim == 1:
-        is_single_kpt = True
+    is_single_kpt = kpts is None or kpts.ndim == 1
     kpts = np.zeros((1, 3))
 
     cell = ni.cell

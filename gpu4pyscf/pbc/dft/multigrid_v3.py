@@ -1644,8 +1644,9 @@ def get_rho(ni, dm_kpts, kpts=None):
     return rhoR
 
 def get_nuc(ni, kpts=None):
+    """None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis."""
     cell = ni.cell
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1666,12 +1667,14 @@ def get_nuc(ni, kpts=None):
 
 def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+
+    None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis.
     """
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:

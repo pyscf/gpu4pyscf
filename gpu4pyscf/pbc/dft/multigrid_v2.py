@@ -1399,9 +1399,10 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 
 #FIXME: merge to multigrid_v1.get_pp
 def get_nuc(ni, kpts=None):
+    """None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis."""
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1417,10 +1418,12 @@ def get_nuc(ni, kpts=None):
 
 #FIXME: merge to multigrid_v1.get_pp
 def get_pp(ni, kpts=None):
-    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
+    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+    None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis.
+    """
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:

@@ -275,6 +275,13 @@ C    D
     auxvec = cp.asarray(np.random.rand(auxcell.nao))
     vj = opt.contract_auxvec(opt.auxcell.apply_C_dot(auxvec))
     ref = cp.einsum('pqr,r->pq', j3c, auxvec)
+    assert vj.shape == ref.shape
+    batch = opt.contract_auxvec(opt.auxcell.apply_C_dot(auxvec), np.zeros((1, 3)))
+    single = opt.contract_auxvec(opt.auxcell.apply_C_dot(auxvec), np.zeros(3))
+    assert batch.shape == (1,) + ref.shape
+    assert single.shape == ref.shape
+    cp.testing.assert_allclose(vj, batch[0], atol=1e-12, rtol=0)
+    cp.testing.assert_allclose(vj, single, atol=1e-12, rtol=0)
     assert abs(vj - ref).max() < 1e-10
 
 def test_contract_dm_kpts():

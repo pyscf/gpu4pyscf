@@ -35,8 +35,24 @@ from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 
 def get_nuc(mydf, kpts=None):
+    '''Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    Args:
+        mydf : FFTDF object
+            Provides the cell and reciprocal-space mesh.
+            mydf.kpts has no effects.
+
+    Kwargs:
+        kpts : (3,) or (nkpts, 3) ndarray, optional
+            None means a single Gamma point.
+
+    Returns:
+        cupy.ndarray
+            Shape (nao, nao) for None or a 1D k-point.
+            (nkpts, nao, nao) for k-points.
+    '''
     from gpu4pyscf.pbc.dft import numint
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -72,9 +88,23 @@ def get_nuc(mydf, kpts=None):
 
 def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+
+    Args:
+        mydf : FFTDF object
+            Provides the cell and reciprocal-space mesh.
+            mydf.kpts has no effects.
+
+    Kwargs:
+        kpts : (3,) or (nkpts, 3) ndarray, optional
+            None means a single Gamma point.
+
+    Returns:
+        cupy.ndarray
+            Shape (nao, nao) for None or a 1D k-point.
+            (nkpts, nao, nao) for k-points.
     '''
     from gpu4pyscf.pbc.dft import numint
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:

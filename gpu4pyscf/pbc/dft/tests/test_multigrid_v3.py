@@ -240,7 +240,7 @@ class KnownValues(unittest.TestCase):
                     'Zn': [[0], 0.50704497116043, 0, [], 0]},
             unit='Bohr', precision=1e-6, verbose=0)
         ref = pseudo.get_pp(cell)
-        out = multigrid.MultiGridNumInt(cell).get_pp().get()[0]
+        out = multigrid.MultiGridNumInt(cell).get_pp().get()
         assert abs(out-ref).max() < 1e-6
 
     def test_get_nuc(self):
