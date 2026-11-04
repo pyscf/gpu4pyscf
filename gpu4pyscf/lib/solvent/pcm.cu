@@ -843,7 +843,7 @@ int pcm_dd_ds(double *matrix_dD, double *matrix_dS,
 
 int pcm_left_multiply_ds(double *output, const double *right_vector,
                          const double *coords, const double *charge_exp,
-                         const int n, const bool transpose, const cudaStream_t stream)
+                         const int n, const cudaStream_t stream)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const dim3 threads(THREADS, THREADS);
