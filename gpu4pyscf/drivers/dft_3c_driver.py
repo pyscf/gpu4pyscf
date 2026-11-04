@@ -34,6 +34,7 @@ from pyscf import dft
 from pyscf.hessian import thermo
 from pyscf.lib import logger
 from gpu4pyscf.dispersion import dftd3, dftd4, gcp
+from gpu4pyscf.scf.dispersion import _get_dispersion_mol
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -61,6 +62,13 @@ def parse_3c(xc_name):
         raise RuntimeError('Unknow xc functionals for parsing 3c')
 
 def get_dispersion(mol, xc, grad=True):
+    natm = mol.natm
+    mol, atom_idx = _get_dispersion_mol(mol)
+    if len(atom_idx) == 0:
+        res = dict(energy=0.)
+        if grad:
+            res['gradient'] = np.zeros([natm,3])
+        return res
     if xc == 'b97-3c':
         d3_model = dftd3.DFTD3Dispersion(mol, xc=xc, atm=True)
         res = d3_model.get_dispersion(grad=grad)
@@ -75,6 +83,10 @@ def get_dispersion(mol, xc, grad=True):
         res = d4_model.get_dispersion(grad=grad)
     else:
         raise NotImplementedError
+    if grad:
+        gradient = np.zeros([natm,3])
+        gradient[atom_idx] = res['gradient']
+        res['gradient'] = gradient
     return res
 
 def gen_disp_fun(xc_disp, xc_gcp):
@@ -82,8 +94,10 @@ def gen_disp_fun(xc_disp, xc_gcp):
     Generate a function to calculate the sum of dispersion and gcp contributions
     """
     def get_disp(mf, disp=None, with_3body=None, verbose=None):
-        mol = mf.mol
+        mol, atom_idx = _get_dispersion_mol(mf.mol)
         energy = 0.0
+        if len(atom_idx) == 0:
+            return energy
         if xc_disp is not None:
             res = get_dispersion(mol, xc_disp, grad=False)
             energy += res.get('energy')
@@ -102,7 +116,10 @@ def gen_disp_grad_fun(xc_disp, xc_gcp):
     """
     def get_disp_grad(mf_grad, disp=None, with_3body=None, verbose=None):
         mf = mf_grad.base
-        mol = mf.mol
+        mol, atom_idx = _get_dispersion_mol(mf.mol)
+        full_gradient = np.zeros([mf.mol.natm,3])
+        if len(atom_idx) == 0:
+            return full_gradient
         gradient = 0.0
         if xc_disp is not None:
             res = get_dispersion(mol, xc_disp, grad=True)
@@ -112,7 +129,8 @@ def gen_disp_grad_fun(xc_disp, xc_gcp):
             gcp_model = gcp.GCP(mol, method=xc_gcp)
             res = gcp_model.get_counterpoise(grad=True)
             gradient += res['gradient']
-        return gradient
+        full_gradient[atom_idx] = gradient
+        return full_gradient
     return get_disp_grad
 
 def gen_disp_hess_fun(xc_disp, xc_gcp):
@@ -123,12 +141,16 @@ def gen_disp_hess_fun(xc_disp, xc_gcp):
         mf = mf_hess.base
         mol = mf.mol
         natm = mol.natm
-        h_disp = np.empty([natm,natm,3,3])
+        h_disp = np.zeros([natm,natm,3,3])
+        mol, atom_idx = _get_dispersion_mol(mol)
+        nreal = len(atom_idx)
+        if nreal == 0:
+            return h_disp
 
-        coords = mf_hess.mol.atom_coords()
+        coords = mol.atom_coords()
         mol = mol.copy()
         eps = 1e-5
-        for i in range(natm):
+        for i in range(nreal):
             for j in range(3):
                 coords[i,j] += eps
                 mol.set_geom_(coords, unit='Bohr')
@@ -153,7 +175,7 @@ def gen_disp_hess_fun(xc_disp, xc_gcp):
                     g2 += res['gradient']
 
                 coords[i,j] += eps
-                h_disp[i,:,j,:] = (g1 - g2)/(2.0*eps)
+                h_disp[atom_idx[i],atom_idx,j,:] = (g1 - g2)/(2.0*eps)
         return h_disp
     return get_disp_hess
 
