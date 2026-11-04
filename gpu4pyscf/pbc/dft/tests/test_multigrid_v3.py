@@ -319,7 +319,7 @@ class KnownValues(unittest.TestCase):
         ni.enable_aft = False
         ni.allow_mesh_reduction = False
         dm_sc = multigrid._wannier_transform_dm(
-            ni, cp.asarray(dm), None, xctype='MGGA')[0]
+            ni, cp.asarray(dm), np.zeros((1, 3)), xctype='MGGA')[0]
         rhoG, tauG = multigrid._eval_density(ni, dm_sc, with_tau=True)
         weight = cell.vol / np.prod(cell.mesh)
         rho = ifft(rhoG, cell.mesh).real.ravel() / weight
@@ -407,7 +407,7 @@ class KnownValues(unittest.TestCase):
 
         vxcG = fft(cp.asarray(weights).reshape(cell.mesh), cell.mesh)
         out = multigrid._eval_xc_mat(ni, vxcG)
-        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        out = multigrid._inverse_wannier_transform_fock(ni, out, np.zeros((1, 3)))[0]
         np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
 
     def test_eval_mgga_mat_skewed_lattice(self):
@@ -434,7 +434,7 @@ class KnownValues(unittest.TestCase):
 
         vxcG = [fft(cp.asarray(w).reshape(cell.mesh), cell.mesh) for w in weights]
         out = multigrid._eval_xc_mat(ni, vxcG)
-        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        out = multigrid._inverse_wannier_transform_fock(ni, out, np.zeros((1, 3)))[0]
         np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
 
     def test_get_vxc_lda_kpts(self):

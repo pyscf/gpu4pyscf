@@ -5,6 +5,7 @@ import numpy as np
 import cupy as cp
 import pytest
 from pyscf.pbc import gto
+from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.pbc.df import aft, fft, df, ft_ao, int2c2e, int3c2e
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2, multigrid_v3, numint
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
@@ -98,6 +99,7 @@ def test_jk_preserves_density_shape(cell, factory, shape):
     obj = factory(cell)
     vj, vk = obj.get_jk(dm)
     assert vj.shape == vk.shape == dm.shape
+    assert vj.dtype == vk.dtype == np.float64
     refj, refk = obj.get_jk(dm, kpts=np.zeros((1, 3)))
     cp.testing.assert_allclose(vj, refj, atol=1e-10, rtol=0)
     cp.testing.assert_allclose(vk, refk, atol=1e-10, rtol=0)
@@ -136,7 +138,8 @@ def test_scf_uses_stored_sampling(cell):
 
 
 @pytest.mark.parametrize('engine,method', [
-    ('rsjk', '_get_j_sr'), ('rsjk', '_get_k_sr'), ('j_engine', '_get_j_sr')])
+    ('rsjk', '_get_j_sr'), ('rsjk', '_get_k_sr'),
+    ('rsjk', '_get_j_lr'), ('rsjk', '_get_k_lr'), ('j_engine', '_get_j_sr')])
 @pytest.mark.parametrize('spin_batch', [False, True])
 def test_direct_jk_gamma_density_shape(cell, engine, method, spin_batch):
     from gpu4pyscf.pbc.scf import rsjk, j_engine
@@ -150,8 +153,12 @@ def test_direct_jk_gamma_density_shape(cell, engine, method, spin_batch):
     single = get_matrix(dm, hermi=1, kpts=np.zeros(3))
     batch = get_matrix(dm, hermi=1, kpts=np.zeros((1, 3)))
     assert default.shape == single.shape == batch.shape == dm.shape
+    assert default.dtype == single.dtype == batch.dtype == np.float64
     cp.testing.assert_allclose(default, single, atol=1e-10, rtol=0)
     cp.testing.assert_allclose(default, batch, atol=1e-10, rtol=0)
+    if engine == 'rsjk':
+        sampling = get_matrix(dm, hermi=1, kpts=KPoints(cell))
+        cp.testing.assert_allclose(default, sampling, atol=1e-10, rtol=0)
 
 
 @pytest.mark.parametrize('spin_batch', [False, True])
@@ -167,6 +174,8 @@ def test_rsjk_gamma_derivative_density_layout(cell, spin_batch):
     assert default.shape == single.shape == batch.shape == (cell.natm+3, 3)
     np.testing.assert_allclose(default, single, atol=1e-10, rtol=0)
     np.testing.assert_allclose(default, batch, atol=1e-10, rtol=0)
+    sampling = opt._get_ejk_derivatives(dm, kpts=KPoints(cell))
+    np.testing.assert_allclose(default, sampling, atol=1e-10, rtol=0)
 
 
 @pytest.mark.parametrize('factory', [aft.AFTDF, fft.FFTDF, df.GDF])
@@ -232,6 +241,8 @@ def test_contracted_potential_kpoint_shapes(cell, method):
     single = contract(*args, kpts=kpts[1])
     one = contract(*args, kpts=kpts[1:2])
     batch = contract(*args, kpts=kpts)
+    sampling = contract(*args, kpts=KPoints(cell, kpts))
+    cp.testing.assert_allclose(sampling, batch, atol=1e-10, rtol=0)
     assert gamma.shape == single.shape == (cell.nao, cell.nao)
     assert gamma_batch.shape == one.shape == (1, cell.nao, cell.nao)
     assert batch.shape == (3, cell.nao, cell.nao)
@@ -255,3 +266,152 @@ def test_fourier_nonzero_single_and_batch(cell):
     assert single.dtype == one.dtype == batch.dtype == np.complex128
     cp.testing.assert_allclose(single, one[0], atol=1e-10, rtol=0)
     cp.testing.assert_allclose(single, batch[1], atol=1e-10, rtol=0)
+
+
+@pytest.mark.parametrize('kind', ['none', 'single', 'batch', 'kpoints'])
+def test_fourier_cached_gamma_shape(cell, kind):
+    kpts = {'none': None, 'single': np.zeros(3),
+            'batch': np.zeros((1, 3)),
+            'kpoints': KPoints(cell, np.zeros((1, 3)))}[kind]
+    Gv = cell.get_Gv([3]*3)
+    kernel = ft_ao.FTOpt(cell).gen_ft_kernel(kpts=kpts)
+    reference = ft_ao.ft_aopair(cell, Gv)
+    if kind in ('batch', 'kpoints'):
+        reference = reference[None]
+    result = kernel(Gv)
+    assert result.shape == reference.shape
+    cp.testing.assert_allclose(result, reference, atol=1e-12, rtol=0)
+    assert kernel(Gv, kpts=np.zeros(3)).shape == (len(Gv), cell.nao, cell.nao)
+    assert kernel(Gv, kpts=np.zeros((1, 3))).shape == (1, len(Gv), cell.nao, cell.nao)
+
+
+def test_fourier_kpoints(cell):
+    kpts = cell.make_kpts([3, 1, 1])
+    sampling = KPoints(cell, kpts)
+    Gv = cell.get_Gv([3]*3)
+    reference = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=kpts)
+    result = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=sampling)
+    cp.testing.assert_allclose(result, reference, atol=1e-12, rtol=0)
+    opt = ft_ao.FTOpt(cell, [3, 1, 1])
+    kernel = opt.gen_ft_kernel(kpts=sampling)
+    cp.testing.assert_allclose(kernel(Gv), reference, atol=1e-12, rtol=0)
+    cp.testing.assert_allclose(kernel(Gv, kpts=sampling), reference, atol=1e-12, rtol=0)
+    rhoG = cp.ones(len(Gv), dtype=np.complex128)
+    cp.testing.assert_allclose(opt.contract_rhoG(rhoG, Gv, sampling),
+                               opt.contract_rhoG(rhoG, Gv, kpts), atol=1e-12, rtol=0)
+
+
+@pytest.mark.parametrize('factory', [aft.AFTDF, fft.FFTDF, df.GDF])
+@pytest.mark.parametrize('nkpts', [1, 3])
+def test_df_kpoints_object(cell, factory, nkpts):
+    kpts = cell.make_kpts([nkpts, 1, 1])
+    sampling = KPoints(cell, kpts)
+    obj = factory(cell, kpts=kpts)
+    for method in ('get_nuc', 'get_pp'):
+        get_matrix = getattr(obj, method)
+        result = get_matrix(sampling)
+        reference = get_matrix(kpts)
+        assert result.shape == (nkpts, cell.nao, cell.nao)
+        assert result.dtype == reference.dtype
+        cp.testing.assert_allclose(result, reference, atol=1e-10, rtol=0)
+    dm = cp.stack([cp.eye(cell.nao)*.6, cp.eye(cell.nao)*.4])
+    dm = cp.repeat(dm[:, None], nkpts, axis=1)
+    for result, reference in zip(obj.get_jk(dm, kpts=sampling),
+                                 obj.get_jk(dm, kpts=kpts)):
+        assert result.shape == dm.shape
+        assert result.dtype == reference.dtype
+        cp.testing.assert_allclose(result, reference, atol=1e-10, rtol=0)
+
+
+@pytest.mark.parametrize('method', ['get_ej_derivatives', 'get_ek_derivatives'])
+def test_aft_gamma_derivative_sampling(cell, method):
+    dm = cp.eye(cell.nao)
+    derivative = getattr(aft.AFTDF(cell), method)
+    reference = derivative(dm)
+    assert reference.shape == (cell.natm+3, 3)
+    for kpts in (np.zeros(3), np.zeros((1, 3)), KPoints(cell)):
+        result = derivative(dm, kpts=kpts)
+        assert result.dtype == reference.dtype == np.float64
+        cp.testing.assert_allclose(result, reference, atol=1e-10, rtol=0)
+
+
+@pytest.mark.parametrize('factory', [aft.AFTDF, fft.FFTDF])
+def test_df_stored_sampling(cell, factory):
+    kpts = cell.make_kpts([3, 1, 1])
+    obj = factory(cell, kpts=kpts)
+    if factory is aft.AFTDF:
+        result = cp.concatenate([x for x, _, _ in obj.ft_loop(mesh=[3]*3)], axis=1)
+        reference = cp.concatenate([x for x, _, _ in
+                                    obj.ft_loop(mesh=[3]*3, kpts=kpts)], axis=1)
+        assert result.shape == (3, 27, cell.nao, cell.nao)
+    else:
+        dm = cp.repeat(cp.eye(cell.nao)[None], 3, axis=0)
+        result = obj.get_j_e1(dm)
+        reference = obj.get_j_e1(dm, kpts=KPoints(cell, kpts))
+    cp.testing.assert_allclose(result, reference, atol=1e-10, rtol=0)
+
+
+@pytest.mark.parametrize('container', [list, tuple])
+def test_fft_exchange_array_like_kpts(cell, container):
+    from gpu4pyscf.pbc.df import fft_jk
+    obj = fft.FFTDF(cell)
+    dm = cp.eye(cell.nao)[None]
+    reference = fft_jk.get_k_kpts(obj, dm, kpts=np.zeros((1, 3)))
+    result = fft_jk.get_k_kpts(obj, dm, kpts=container([[0., 0., 0.]]))
+    assert result.shape == dm.shape
+    assert result.dtype == np.float64
+    cp.testing.assert_allclose(result, reference, atol=1e-12, rtol=0)
+
+
+@pytest.mark.parametrize('spin', [False, True])
+@pytest.mark.parametrize('kind', ['none', 'single', 'batch', 'kpoints'])
+def test_format_jks_original_sampling(cell, spin, kind):
+    from gpu4pyscf.pbc.df.fft_jk import _format_jks
+    kpts = {'none': None, 'single': np.zeros(3),
+            'batch': np.zeros((1, 3)), 'kpoints': KPoints(cell)}[kind]
+    shape = (cell.nao, cell.nao)
+    if kind in ('batch', 'kpoints'):
+        shape = (1,) + shape
+    if spin:
+        shape = (2,) + shape
+    dm = cp.zeros(shape)
+    bands = cell.make_kpts([2, 1, 1])
+    values = cp.arange((2 if spin else 1)*2*cell.nao**2).reshape(-1, 2, cell.nao, cell.nao)
+    result = _format_jks(values, dm, bands, kpts)
+    expected_shape = (2, 2, cell.nao, cell.nao) if spin else (2, cell.nao, cell.nao)
+    assert result.shape == expected_shape
+    cp.testing.assert_array_equal(result, values.reshape(expected_shape))
+
+
+@pytest.mark.parametrize('spin', [False, True])
+def test_fft_exchange_original_sampling_with_bands(cell, spin):
+    from gpu4pyscf.pbc.df import fft_jk
+    obj = fft.FFTDF(cell)
+    dm = cp.eye(cell.nao)
+    if spin:
+        dm = cp.stack([dm*.6, dm*.4])
+    batch_dm = cp.expand_dims(dm, axis=-3)
+    bands = cell.make_kpts([2, 1, 1])
+    reference = fft_jk.get_k_kpts(obj, batch_dm, kpts=np.zeros((1, 3)), kpts_band=bands)
+    for kpts in (None, np.zeros(3)):
+        result = fft_jk.get_k_kpts(obj, dm, kpts=kpts, kpts_band=bands)
+        assert result.shape == reference.shape
+        cp.testing.assert_allclose(result, reference, atol=1e-11, rtol=0)
+    # A public caller may accept a vector band, but the formatter receives 2D.
+    result = fft_jk.get_k_kpts(obj, dm, kpts=None, kpts_band=bands[1])
+    assert result.shape == dm.shape[:-2] + (1, cell.nao, cell.nao)
+    cp.testing.assert_allclose(result[..., 0, :, :], reference[..., 1, :, :], atol=1e-11, rtol=0)
+
+
+@pytest.mark.parametrize('factory', [multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt])
+def test_multigrid_j_original_sampling_with_bands(cell, factory):
+    if factory is multigrid_v2.MultiGridNumInt and multigrid_v2.libgpbc is None:
+        pytest.skip('multigrid v2 kernels not compiled')
+    ni = factory(cell)
+    dm = cp.eye(cell.nao)
+    bands = np.zeros((1, 3))
+    reference = ni.get_j(dm[None], kpts=np.zeros((1, 3)), kpts_band=bands)
+    for kpts in (None, np.zeros(3)):
+        result = ni.get_j(dm, kpts=kpts, kpts_band=bands)
+        assert result.shape == reference.shape == (1, cell.nao, cell.nao)
+        cp.testing.assert_allclose(result, reference, atol=1e-11, rtol=0)

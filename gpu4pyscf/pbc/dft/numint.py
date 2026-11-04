@@ -84,8 +84,9 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
     '''
     Returns:
         ao_kpts: (nkpts, [comp], ngrids, nao) ndarray
-            AO values at each k-point. None selects Gamma and omits the
-            k-point axis, as does an explicit 1D k-point.
+            AO values at each k-point. kpts and the presence of a k-point
+            axis follow the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()

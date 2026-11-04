@@ -34,7 +34,7 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
@@ -46,11 +46,7 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
     kpt_allow = np.zeros(3)
     if cell.dimension > 0:
         ke_guess = aft_cpu.estimate_ke_cutoff(cell, cell.precision)
@@ -96,19 +92,15 @@ def get_pp(mydf, kpts=None):
 
     Kwargs:
         kpts : (3,) or (nkpts, 3) ndarray, optional
-            None means a single Gamma point.
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
 
     Returns:
         cupy.ndarray
-            Shape (nao, nao) for None or a 1D k-point.
-            (nkpts, nao, nao) for k-points.
+            AO matrix with dimensions following the kpts convention.
     '''
     cell = mydf.cell
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
@@ -128,12 +120,12 @@ def get_nuc(mydf, kpts=None):
 
     Kwargs:
         kpts : (3,) or (nkpts, 3) ndarray, optional
-            None means a single Gamma point.
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
 
     Returns:
         cupy.ndarray
-            Shape (nao, nao) for None or a 1D k-point.
-            (nkpts, nao, nao) for k-points.
+            AO matrix with dimensions following the kpts convention.
     '''
     return _get_pp_loc_part1(mydf, kpts, with_pseudo=False)
 
@@ -250,11 +242,12 @@ class AFTDF(lib.StreamObject):
             cell = cell.cell
         if mesh is None:
             mesh = self.mesh
-        if bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         if kpts is None:
             assert is_zero(q)
             kpts = self.kpts
+        kpts, _ = _normalize_kpts(kpts)
+        if bvk_kmesh is None:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
         ft_opt = FTOpt(cell, bvk_kmesh).build()
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
@@ -321,7 +314,7 @@ class AFTDF(lib.StreamObject):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                   with_k, exxdiv, omega)
@@ -357,8 +350,8 @@ class AFTDF(lib.StreamObject):
 def _check_kpts(kpts, dm=None):
     '''Normalize k-point sampling and optionally validate the density layout.
 
-    None selects Gamma. None or a 1D k-point sets is_single_kpt=True;
-    2D k-points, including a (1, 3) Gamma batch, set it to False.
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
 
     If dm is supplied, single-point sampling requires an RHF (nao, nao)
     or UHF (2, nao, nao) density. Batched sampling requires KRHF

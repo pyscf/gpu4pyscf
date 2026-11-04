@@ -40,7 +40,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.gto.mole import (
     group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
@@ -68,13 +68,19 @@ def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
 def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
     '''Analytical Fourier transform orbital-pair on Gv grids.
 
-    None or a 1D k-point returns (nGv, nao, nao); 2D input retains the k-point axis.
+    Kwargs:
+        q:
+            Momentum transfer kptj - kpti. Defaults to zero.
+        kptjs:
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+
+    Returns:
+        cupy.ndarray
+            Shape (nGv, nao, nao) for single-point input or
+            (nkpts, nGv, nao, nao) for batched input.
     '''
-    is_single_kpt = kptjs is None or kptjs.ndim == 1
-    if kptjs is None:
-        kptjs = np.zeros((1, 3))
-    else:
-        kptjs = kptjs.reshape(-1, 3)
+    kptjs, is_single_kpt = _normalize_kpts(kptjs)
     if q is None:
         q = np.zeros(3)
     ft_kernel = gen_ft_kernel(cell, kptjs)
@@ -481,8 +487,8 @@ class FTOpt:
             cart = True
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
-        kpts_cached = kpts
-        kpts_cached_is_gamma_point = kpts is None or is_zero(kpts)
+        kpts_cached, is_single_kpt_cached = _normalize_kpts(kpts)
+        kpts_cached_is_gamma_point = is_zero(kpts_cached)
 
         pair_address = self.pair_and_diag_indices(
             cart, original_ao_order=transform_ao)[0]
@@ -516,8 +522,9 @@ class FTOpt:
         def ft_kernel(Gv, q=None, kpts=None, kj_idx=None, out=None, buf=None):
             '''
             Analytical FT for orbital products. The output tensor has the shape
-            [nk, nGv, nao, nao]. None uses cached sampling; when no sampling
-            is cached, or a 1D point is selected, the k-point axis is omitted.
+            [nk, nGv, nao, nao]. The k-index is omitted for the single k-point case.
+
+            If kpts=None, the cached kpts will be used.
 
             kj_idx indicates the mapping between ki and kj index that satisfies
             kpt_j - kpt_i == q. If permutation_symmetry is enabled, it must be
@@ -533,13 +540,11 @@ class FTOpt:
 
             if kpts is None:
                 kpts = kpts_cached
+                is_single_kpt = is_single_kpt_cached
                 kpts_is_gamma_point = kpts_cached_is_gamma_point
             else:
+                kpts, is_single_kpt = _normalize_kpts(kpts)
                 kpts_is_gamma_point = is_zero(kpts)
-
-            is_single_kpt = kpts is None or kpts.ndim == 1
-            if kpts is not None:
-                kpts = kpts.reshape(-1, 3)
 
             if kpts_is_gamma_point and bvk_ncells == 1:
                 assert at_gamma_point
@@ -567,7 +572,9 @@ class FTOpt:
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(1),
                         ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 out = out.transpose(1,3,0,2)
-                return out[0] if is_single_kpt else out
+                if is_single_kpt:
+                    out = out[0]
+                return out
             else:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
                 kpts = asarray(kpts, order='C')
@@ -598,7 +605,9 @@ class FTOpt:
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(nkpts),
                         ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 out = out.transpose(0,3,1,2)
-                return out[0] if is_single_kpt else out
+                if is_single_kpt:
+                    out = out[0]
+                return out
         return ft_kernel
 
     def contract_dm(self, dm, Gv, kpts=None):
@@ -629,11 +638,13 @@ class FTOpt:
         return rhoG
 
     def contract_rhoG(self, rhoG, Gv, kpts=None, sort_output=True):
-        """Contract to AO matrices; None or a 1D k-point returns a 2D matrix."""
-        is_single_kpt = kpts is None or kpts.ndim == 1
-        if kpts is not None:
-            kpts = kpts.reshape(-1, 3)
+        '''Contract to AO matrices.
+
+        kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         cell = self.cell
         nsp_per_block, gout_stride, shm_size = ft_ao_scheme(nGv_per_block=16)
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -671,7 +682,7 @@ class FTOpt:
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 
-        if kpts is None or is_zero(kpts):
+        if is_zero(kpts):
             if bvk_ncells != 1:
                 vj = vj.sum(axis=1)[None]
             else:
@@ -685,7 +696,9 @@ class FTOpt:
         vj = hermi_triu(vj)
         if sort_output:
             vj = cell.apply_CT_mat_C(vj)
-        return vj[0] if is_single_kpt else vj
+        if is_single_kpt:
+            vj = vj[0]
+        return vj
 
 def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,
                  nGv_per_block=32, cache_cart_idx=False):

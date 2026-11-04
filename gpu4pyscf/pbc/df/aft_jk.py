@@ -38,17 +38,15 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE, _check_rsh_factors
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     if kpts_band is not None:
         return get_j_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band)
 
-    if kpts is None:
-        kpts = np.zeros((1,3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    input_kpts = kpts
+    kpts, _ = _normalize_kpts(kpts)
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -62,7 +60,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     if is_zero(kpts):
         vj_kpts = vj_kpts.real
-    return _format_jks(vj_kpts, dm_kpts, kpts_band, kpts)
+    return _format_jks(vj_kpts, dm_kpts, kpts_band, input_kpts)
 
 def _update_vj_(vj_kpts, Gpq, dms, coulG, weight=None):
     r'''Compute the Coulomb matrix
@@ -82,10 +80,8 @@ def _update_vj_(vj_kpts, Gpq, dms, coulG, weight=None):
 
 def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     raise NotImplementedError
-    if kpts is None:
-        kpts = np.zeros((1,3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    input_kpts = kpts
+    kpts, _ = _normalize_kpts(kpts)
     dm_kpts = lib.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
@@ -108,17 +104,15 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     if is_zero(kpts_band):
         vj_kpts = vj_kpts.real
-    return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
+    return _format_jks(vj_kpts, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
                omega=None, lr_factor=None, sr_factor=None):
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
-    if kpts is None:
-        kpts = np.zeros((1,3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(kpts)
 
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -418,12 +412,8 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
         _get_weighted_coulG_strain_derivatives as get_wcoulG)
     log = logger.new_logger(mydf)
     cell = mydf.cell
-    if kpts is None:
-        kpts = np.zeros((1,3))
-        kmesh = np.array([1, 1, 1])
-    else:
-        kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    kmesh = kpts_to_kmesh(cell, kpts)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
@@ -526,12 +516,8 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
     cell = mydf.cell
-    if kpts is None:
-        kpts = np.zeros((1,3))
-        kmesh = np.array([1, 1, 1])
-    else:
-        kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    kmesh = kpts_to_kmesh(cell, kpts)
     is_gamma_point = is_zero(kpts)
     dm0 = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dm0.shape[:3]

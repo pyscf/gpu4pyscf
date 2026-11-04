@@ -80,6 +80,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         or list of vj if the input dm_kpts is a list of DMs
     '''
     assert kpts is None or is_zero(kpts)
+    input_kpts = kpts
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -92,7 +93,8 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     vj_kpts = _get_j_pass2(ni, vG, hermi, kpts_band)
-    return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
+    return _format_jks(vj_kpts, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
 
 def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     cell = ni.cell
@@ -495,6 +497,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             or list of veff if the input dm_kpts is a list of DMs
     '''
     assert kpts is None or is_zero(kpts)
+    input_kpts = kpts
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -557,7 +560,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _get_j_pass2(ni, wv_freq[None,0], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[None,4], hermi, kpts_band, verbose=log)
-    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = _format_jks(veff, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
 
     shape = list(dm_kpts.shape)
     if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
@@ -591,6 +595,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             or list of veff if the input dm_kpts is a list of DMs
     '''
     assert kpts is None or is_zero(kpts)
+    input_kpts = kpts
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -656,7 +661,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
-    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = _format_jks(veff, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
 
     shape = list(dm_kpts.shape) # [spin,nkpts,nao,nao]
     if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
@@ -700,7 +706,11 @@ def eval_nucG(cell, mesh):
     return nucG
 
 def get_nuc(ni, kpts=None):
-    """None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis."""
+    """Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+    """
     assert kpts is None or is_zero(kpts)
     is_single_kpt = kpts is None or kpts.ndim == 1
     kpts = np.zeros((1, 3))
@@ -841,7 +851,8 @@ void ''' + fn_name + '''(
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
 
-    None selects Gamma and returns (nao, nao); 2D kpts retain the k-point axis.
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     assert kpts is None or is_zero(kpts)

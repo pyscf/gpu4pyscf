@@ -42,7 +42,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
 from gpu4pyscf.pbc.df.ft_ao import (
     libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -707,10 +707,12 @@ class SRInt3c2eOpt:
         return vj_aux
 
     def contract_auxvec(self, auxvec, kpts=None, sort_output=True):
-        """Contract to AO matrices; None or a 1D k-point returns a 2D matrix."""
-        is_single_kpt = kpts is None or kpts.ndim == 1
-        if kpts is not None:
-            kpts = kpts.reshape(-1, 3)
+        """Contract to AO matrices.
+
+        kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        """
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         assert auxvec.dtype == np.float64
         assert auxvec.ndim == 1
         assert len(auxvec) == self.auxcell.nao
@@ -776,7 +778,7 @@ class SRInt3c2eOpt:
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
-        if kpts is None or is_zero(kpts):
+        if is_zero(kpts):
             vj = vj.sum(axis=1)
             vj = vj.reshape(1,nao,nao)
         else:

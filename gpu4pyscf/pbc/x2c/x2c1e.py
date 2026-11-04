@@ -175,7 +175,9 @@ class PBCX2CHelper(mol_x2c.X2CHelperBase):
 
 class SpinFreeX2CHelper(PBCX2CHelper):
     def get_hcore(self, cell=None, kpts=None):
-        """None selects Gamma; None or a 1D point returns a 2D matrix."""
+        """kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        """
         if cell is None: cell = self.cell
         if cell.has_ecp():
             raise NotImplementedError
@@ -225,7 +227,9 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         return h1
 
     def get_xmat(self, cell=None, kpts=None):
-        """None selects Gamma; None or a 1D point returns a 2D matrix."""
+        """kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        """
         if cell is None: cell = self.cell
         if cell.has_ecp():
             raise NotImplementedError

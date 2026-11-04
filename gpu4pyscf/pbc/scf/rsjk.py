@@ -39,13 +39,12 @@ from gpu4pyscf.scf.jk import (
     _check_rsh_factors, _TimingCollector,
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH, THREADS)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
-from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
@@ -242,7 +241,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
@@ -438,7 +437,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, _ = _check_kpts(kpts)
+        kpts, _ = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
@@ -625,7 +624,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True
@@ -798,12 +797,8 @@ class PBCJKMatrixOpt:
         cell = self.cell
         assert cell.dimension == 3
 
-        if kpts is None:
-            kpts = np.zeros((1,3))
-            kmesh = [1] * 3
-        else:
-            kpts = kpts.reshape(-1, 3)
-            kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        kpts, _ = _normalize_kpts(kpts)
+        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
@@ -912,7 +907,7 @@ class PBCJKMatrixOpt:
         dms = transpose_sum(dms)
         dms *= .5
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             if is_single_kpt:
@@ -1078,7 +1073,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, _ = _check_kpts(kpts)
+        kpts, _ = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
@@ -1822,10 +1817,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     return pair_cache
 
 def _guess_omega(cell, kpts=None):
-    if kpts is None or kpts.ndim == 1:
-        nkpts = 1
-    else:
-        nkpts = len(kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
     ng = int(5e4/(nao*nkpts**.65))
     ng = (max(3, ng) // 2) * 2 + 1
