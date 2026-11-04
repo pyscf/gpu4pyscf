@@ -14,10 +14,10 @@ on:
         default: "2.2.0"
       libxc_version:
         required: false
-        default: "0.8.1"
+        default: "0.9.0"
       dispersion_version:
         required: false
-        default: "1.5.0"
+        default: "1.6.0"
 
 jobs:
   manual-single-gpu:
