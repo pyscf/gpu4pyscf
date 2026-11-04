@@ -3,6 +3,6 @@ gpu4pyscf-libxc-cuda12x==0.9.0
 cupy-cuda12x==13.4.1
 pyscf==2.14.0
 basis-set-exchange==0.11
-pyscf-dispersion==1.6.0
+pyscf-dispersion==1.7.0
 geometric==1.1.0
 packaging~=24.0
