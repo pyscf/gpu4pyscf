@@ -6,9 +6,11 @@
     methods (RKS, ROKS, UKS and GKS)
   - Direct SCF and density fitting
   - Second-order SCF
+  - Geometric direct minimization (GDM) SCF solver
   - Conversions between restricted, unrestricted and generalized HF/KS references
   - SAD initial guesses with spin-averaged or high-spin atomic densities,
     including Q-Chem-style guesses
+  - GPU SAP and VSAP initial guesses
   - Fermi and Gaussian smearing
   - LDA, GGA, meta-GGA, hybrid and range-separated hybrid functionals via LibXC
   - VV10 nonlocal correlation, including analytical gradients and Hessians
