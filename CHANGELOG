@@ -3,9 +3,11 @@ v1.9.1 (2026-11-03)
 * New Features
   - Geometric direct minimization for SCF calculations. (#978)
   - GPU SAP and VSAP initial guesses. (#997)
-  - GPU stability analysis for restricted and unrestricted Hartree-Fock references. (#1005)
+  - GPU internal stability analysis for RHF, RKS, UHF and UKS, and external stability analysis for RHF, RKS and UHF. (#1005)
 * Fixes
   - GPU OOM in density-fitted Hessian calculations. (#973, #992)
+  - Numerical instability in density-fitted RHF and UHF gradients with nearly linearly dependent auxiliary bases. (#1019)
+  - Spurious magnetic-moment warnings in SAD and AUTOSAD initial guesses. (#1020)
   - Range-separated Coulomb matrices with multiple density matrices. (#990)
   - Multigrid v3 synchronization bug, affecting Coulomb and XC matrices and stress tensors. (#986)
   - Multigrid v2 pair-list indexing and synchronization bug. (#995)
