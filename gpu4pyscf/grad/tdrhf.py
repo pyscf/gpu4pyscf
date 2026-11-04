@@ -130,7 +130,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         veff = vj[1] * 2 - vk[1]
     else:
         veff = -vk[1]
-    if with_solvent:
+    if with_solvent and singlet:
+        # A triplet's transition density carries no charge, so it has no
+        # LR-PCM term (see WithSolventTDSCF.gen_response)
         veff += td_grad.solvent_response(dmxpy + dmxpy.T)
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T

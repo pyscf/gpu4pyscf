@@ -330,7 +330,7 @@ void type1_cart(double *gctr,
 
 
 __global__
-void type1_cart(double *gctr,
+void type1_cart_general(double *gctr,
                 const int LI, const int LJ,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
