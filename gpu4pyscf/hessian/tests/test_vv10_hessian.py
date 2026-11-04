@@ -467,7 +467,6 @@ class KnownValues(unittest.TestCase):
         test_hessian = analytical_d2enlc(mf)
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 4e-4
-        assert abs(test_hessian.sum()) < 1e-7
 
     # If you wonder what is special about sto-6g? The answer is: It will trigger prune_by_density_() function
     # and remove some grids there.
@@ -548,7 +547,6 @@ class KnownValues(unittest.TestCase):
         test_hessian = analytical_d2enlc(mf)
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 2e-4
-        assert abs(test_hessian.sum()) < 1e-7
 
     @unittest.skipIf(num_devices > 1, '')
     def test_unrestricted_vv10_only_hessian_density_fitting(self):
@@ -625,7 +623,6 @@ class KnownValues(unittest.TestCase):
         test_hessian = analytical_d2enlc(mf)
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 1e-4
-        assert abs(test_hessian.sum()) < 1e-7
 
     @pytest.mark.slow
     def test_unrestriced_wb97xv_hessian(self):

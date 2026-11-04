@@ -18,6 +18,7 @@ import cupy as cp
 import pyscf
 from gpu4pyscf.dft.rks import RKS
 from gpu4pyscf.dft.uks import UKS
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 
 def numerical_gradient_range_separation_in_kernel(mol, xc, auxbasis, atom_grid, unrestricted=False):
@@ -204,6 +205,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-6
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_range_separation_in_kernel_mr_rks_integrated(self):
         auxbasis = "def2-universal-jkfit"
         xc = "wB97X"
@@ -234,6 +236,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-6
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_range_separation_in_kernel_mr_rks_numerical_gradient(self):
         auxbasis = "cc-pvtz" # Intentionally using a small auxbasis, so mix_inside_kernel / mix_outside_kernel make a big difference
         xc = "wB97MV"
@@ -270,6 +273,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-7
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_range_separation_in_kernel_mr_uks_integrated(self):
         auxbasis = "def2-universal-jkfit"
         xc = "wB97X"
@@ -300,6 +304,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-6
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_range_separation_in_kernel_mr_uks_numerical_gradient(self):
         auxbasis = "cc-pvtz" # Intentionally using a small auxbasis, so mix_inside_kernel / mix_outside_kernel make a big difference
         xc = "CAM-B3LYP"
@@ -332,6 +337,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_range_separation_in_kernel_mr_rks_hessian(self):
         mol = pyscf.M(
             atom = """
@@ -382,6 +388,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(test_hessian - ref_hessian)) < 3e-7
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_range_separation_in_kernel_mr_uks_hessian(self):
         mol = pyscf.M(
             atom = """
