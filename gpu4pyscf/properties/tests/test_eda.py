@@ -1089,7 +1089,8 @@ class EDAResponse(unittest.TestCase):
         for mol in molecules + [merged]:
             ref = cpu_dft.RKS(mol, xc='PBE0')
             ref.grids.atom_grid = grid
-            ref.conv_tol = conv_tol
+            ref.conv_tol = 1e-12
+            ref.conv_tol_grad = 1e-8
             if mol is merged:
                 # The tight STO-3G charged complex has a small HOMO-LUMO gap. A
                 # small level shift preserves the converged state while making the
