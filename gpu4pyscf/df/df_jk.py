@@ -622,7 +622,6 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True,
     return vj, vk
 
 def get_j(dfobj, dm, hermi=1):
-    from gpu4pyscf.lib.cusolver import LinAlgError
     from gpu4pyscf.df.int3c2e_bdiv import int2c2e
     from gpu4pyscf.df import j_engine_3c2e
     if dfobj.intopt is None:
@@ -632,7 +631,7 @@ def get_j(dfobj, dm, hermi=1):
         j2c = int2c2e(dfobj.auxmol)
         try:
             dfobj._cd_j2c = cholesky(j2c), 'cd'
-        except LinAlgError:
+        except RuntimeError:  # cusolver.LinAlgError and any backend equivalent both subclass RuntimeError
             from gpu4pyscf.df.df import LINEAR_DEP_THR
             w, v = cp.linalg.eigh(j2c)
             keep = cp.where(w > LINEAR_DEP_THR)[0]
@@ -653,8 +652,13 @@ def get_j(dfobj, dm, hermi=1):
 
     j2c, tag = dfobj._cd_j2c
     if tag == 'cd':
-        rhoj = solve_triangular(j2c, rhoj.T, lower=True)
-        rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
+        if rhoj.ndim == 1:
+            # 1-d: .T is a no-op, but dpnp deprecates .T on non-2D arrays
+            rhoj = solve_triangular(j2c, rhoj, lower=True)
+            rhoj = solve_triangular(j2c.T, rhoj, lower=False)
+        else:
+            rhoj = solve_triangular(j2c, rhoj.T, lower=True)
+            rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
     else:
         rhoj = rhoj.dot(j2c).dot(j2c.T)
 

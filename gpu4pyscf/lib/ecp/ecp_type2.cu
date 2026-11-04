@@ -417,7 +417,7 @@ void type2_cart(double * __restrict__ gctr,
 }
 
 __global__
-void type2_cart(double * __restrict__ gctr,
+void type2_cart_general(double * __restrict__ gctr,
                 const int LI, const int LJ, const int LC,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,

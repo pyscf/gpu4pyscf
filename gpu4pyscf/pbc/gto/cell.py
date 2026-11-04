@@ -108,4 +108,4 @@ def get_uniform_grids(cell, mesh=None, wrap_around=True):
     qv[:,:,:,0] = freqs[0][:,None,None]
     qv[:,:,:,1] = freqs[1][None,:,None]
     qv[:,:,:,2] = freqs[2][None,None,:]
-    return np.dot(qv.reshape(-1, 3), cp.asarray(cell.lattice_vectors()))
+    return cp.dot(qv.reshape(-1, 3), cp.asarray(cell.lattice_vectors()))
