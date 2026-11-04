@@ -548,7 +548,7 @@ class KnownValues(unittest.TestCase):
             assert abs(ek_ewald - ref).max() < 5e-8
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_ek_ip1_kpts(self):
+    def test_ek_ip1_kpts_high_cost(self):
         cell = pgto.M(
             atom = '''
             O   0.000    0.    0.1174
@@ -562,6 +562,20 @@ class KnownValues(unittest.TestCase):
             basis=[[0, [.25, 1]], [1, [.3, 1]]],
         )
         kpts = cell.make_kpts([3,2,1])
+        self._check_ek_ip1_kpts(cell, kpts)
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_ek_ip1_kpts(self):
+        # Retain s/p shells and non-Gamma sampling with fewer atoms and k-points.
+        cell = pgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]], verbose=0,
+        )
+        kpts = cell.make_kpts([2,1,1])
+        self._check_ek_ip1_kpts(cell, kpts)
+
+    def _check_ek_ip1_kpts(self, cell, kpts):
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         myaft = aft.AFTDF(cell)
         grad_sigma = aft_jk.get_ek_derivatives(myaft, dm, kpts=kpts)

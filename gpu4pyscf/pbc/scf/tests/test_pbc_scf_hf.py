@@ -203,7 +203,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(ref.e_tot, -0.3740002917376214, 8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
-    def test_rsjk(self):
+    def test_rsjk_high_cost(self):
         L = 4.
         cell = pbcgto.Cell()
         cell.a = np.eye(3)*L
