@@ -170,7 +170,11 @@ def cholesky_decomposed_metric(j2c):
     # Cupy cholesky does not check positive-definite, seems returning nan in the
     # resultant CD matrix silently.
     j2c = cp.asarray(j2c, order='C')
-    j2c = cp.linalg.cholesky(j2c)
+    try:
+        j2c = cp.linalg.cholesky(j2c)
+    except ValueError:
+        # dpnp raises LinAlgError (a ValueError) on non-PD input
+        raise LinearDepencyError('j2c is not positive definite') from None
     if cp.isnan(j2c[-1,-1]):
         raise LinearDepencyError('j2c is not positive definite')
     return j2c, j2c_negative, j2ctag

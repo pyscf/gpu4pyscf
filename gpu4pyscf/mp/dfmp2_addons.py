@@ -404,8 +404,13 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=
     # cupy does not raise error, but will give nan
     if alg.lower().startswith('cd'):
         log.debug('j2c decomposition by Cholesky decomposition')
-        j2c_l = cp.linalg.cholesky(j2c)
-        if not cp.isnan(j2c_l).any():
+        try:
+            j2c_l = cp.linalg.cholesky(j2c)
+            cholesky_ok = not cp.isnan(j2c_l).any()
+        except ValueError:
+            # dpnp raises LinAlgError (a ValueError) on non-PD input
+            cholesky_ok = False
+        if cholesky_ok:
             log.timer('get_j2c_decomp by cd', *t0)
             return {
                 'j2c_l': j2c_l,

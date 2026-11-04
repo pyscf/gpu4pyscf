@@ -235,8 +235,10 @@ class KnownValues(unittest.TestCase):
             unit='B',)
         mf = mol.UHF().to_gpu()
         nao = mol.nao
-        cp.random.seed(4)
-        c = cp.random.rand(2, nao, nao) - .5
+        # Backend-independent input: np.random (MT19937) is identical on
+        # every host, unlike cp.random (cuRAND on CUDA, oneMKL on SYCL).
+        np.random.seed(4)
+        c = cp.asarray(np.random.rand(2, nao, nao)) - .5
         s = mf.get_ovlp()
         diag = cp.einsum('npi,pq,nqi->ni', c, s, c)
         mf.mo_coeff = c / diag[:,None,:]**.5
@@ -245,13 +247,13 @@ class KnownValues(unittest.TestCase):
         nocc = 5
         nvir = nao - nocc
         mf.mo_occ[:,:nocc] = 2
-        x_y = cp.random.rand(2, 2, nocc, nvir) - .5
+        x_y = cp.asarray(np.random.rand(2, 2, nocc, nvir)) - .5
         x_y /= cp.linalg.norm(x_y)
         td_grad = mf.TDHF().Gradients()
         td_grad.cphf_max_cycle = 0
         td_grad.cphf_conv_tol = 1e9
         dat = td_grad.grad_elec(x_y, singlet=True)
-        self.assertAlmostEqual (lib.fp(dat), -14.006578651492646, 10)
+        self.assertAlmostEqual (lib.fp(dat), -6.969952595543902, 10)
 
 if __name__ == "__main__":
     print("Full Tests for TD-UHF Gradient")
