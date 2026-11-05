@@ -240,10 +240,10 @@ extern "C" {
 int int2c2e_deriv(double *grad, double *sigma, double *dm, PBCIntEnvVars *envs,
                   double omega, double lr_factor, double sr_factor, int shm_size,
                   int nbatches_shl_pair, int *shl_pair_offsets,
-                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int2c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int2c2e_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int2c2e_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             grad, sigma, dm, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();

@@ -1167,10 +1167,10 @@ extern "C" {
 int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                   int nbatches_shl_pair, int *bas_ij_idx,
                   int *shl_pair_offsets, int *gout_stride_lookup,
-                  int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_ovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_ovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1184,10 +1184,10 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *bas_ij_idx,
                  int *shl_pair_offsets, int *gout_stride_lookup,
-                 int naoi, int naoj, size_t ij_offset)
+                 int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_kin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_kin_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_kin_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1201,10 +1201,10 @@ int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                     int nbatches_shl_pair, int *bas_ij_idx,
                     int *shl_pair_offsets, int *gout_stride_lookup,
-                    int naoi, int naoj, size_t ij_offset)
+                    int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ipovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_ipovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_ipovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1218,10 +1218,10 @@ int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
                    int nbatches_shl_pair, int *bas_ij_idx,
                    int *shl_pair_offsets, int *gout_stride_lookup,
-                   int naoi, int naoj, size_t ij_offset)
+                   int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ipkin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_ipkin_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_ipkin_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1234,10 +1234,10 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
 
 int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
                         PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
+                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ovlp_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    ovlp_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    ovlp_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1249,10 +1249,10 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
 
 int PBCkin_derivatives(double *grad, double *sigma, double *dm,
                        PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                       int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
+                       int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(kin_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    kin_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    kin_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1264,7 +1264,7 @@ int PBCkin_derivatives(double *grad, double *sigma, double *dm,
 
 void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
                              PBCIntEnvVars *envs, int hermi, float log_cutoff,
-                             double *bvkmesh_Ls, int *shls_slice)
+                             double *bvkmesh_Ls, int *shls_slice, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -1275,7 +1275,7 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
     size_t njsh = jsh1 - jsh0;
     size_t npairs = nish * ncells * njsh;
     int nbatches = (npairs + 255) / 256;
-    ovlp_mask_estimation_kernel<<<nbatches, 256>>>(
+    ovlp_mask_estimation_kernel<<<nbatches, 256, 0, stream>>>(
             ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff, bvkmesh_Ls,
             ish0, ish1, jsh0, jsh1);
 }

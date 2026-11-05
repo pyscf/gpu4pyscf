@@ -26492,7 +26492,7 @@ while (1) {
 int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        uint32_t *pool, double *dd_pool, int *head, int workers)
+                        uint32_t *pool, double *dd_pool, int *head, int workers, cudaStream_t stream)
 {
     int li = bounds->li;
     int lj = bounds->lj;

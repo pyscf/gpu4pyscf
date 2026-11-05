@@ -39,7 +39,7 @@
     __shared__ int expj;
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
+    KERNEL<<<workers, threads, buflen*sizeof(double), stream>>>(\
     *envs, *kmat, *bounds, \
     pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
     nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \

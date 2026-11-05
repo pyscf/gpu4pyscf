@@ -106,7 +106,8 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
         ctypes.c_int(ngrids),
         ctypes.c_int(bvk_ncells*nao), ctypes.c_int(bvkcell.nbas),
         ctypes.c_int(deriv), ctypes.c_int(cell.cart),
-        ctypes.cast(opt.bas_rcut.data.ptr, ctypes.c_void_p))
+        ctypes.cast(opt.bas_rcut.data.ptr, ctypes.c_void_p),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('PBCeval_gto_deriv failed')
 

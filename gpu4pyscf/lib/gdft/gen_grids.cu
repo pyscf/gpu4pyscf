@@ -830,7 +830,7 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
 extern "C"{
 __host__
 int GDFTbecke_partition_weights(double *weights, const double *coords, const double *atm_coords,
-                                const double *a_factor, const int *atm_idx, const int ngrids, const int natm, const int scheme_id)
+                                const double *a_factor, const int *atm_idx, const int ngrids, const int natm, const int scheme_id, cudaStream_t stream)
 {
     const dim3 threads(TILE, TILE);
     const int blocks = (ngrids+TILE*TILE-1)/(TILE*TILE);
@@ -840,18 +840,18 @@ int GDFTbecke_partition_weights(double *weights, const double *coords, const dou
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            GDFTgrid_weight_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+            GDFTgrid_weight_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         } else {
-            GDFTgrid_weight_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+            GDFTgrid_weight_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            GDFTgrid_weight_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+            GDFTgrid_weight_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         } else {
-            GDFTgrid_weight_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+            GDFTgrid_weight_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         }
     } else {
-        cudaMemset(weights, 0xFF, ngrids * sizeof(double)); // Fill with NAN
+        cudaMemsetAsync(weights, 0xFF, ngrids * sizeof(double), stream); // Fill with NAN
         fprintf(stderr, "Incorrect scheme_id = %d in GDFTgrid_weight\n", scheme_id);
         return 1;
     }
@@ -867,7 +867,7 @@ int GDFTbecke_partition_weights(double *weights, const double *coords, const dou
 __host__
 int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coords, const double *grid_quadrature_weights,
                                           const double *atm_coords, const double *a_factor, const double *inv_atom_distance, const int *atm_idx, const double *Ar_distance,
-                                          const double* PB, const double* invsumPB, const int ngrids, const int natm, const int scheme_id)
+                                          const double* PB, const double* invsumPB, const int ngrids, const int natm, const int scheme_id, cudaStream_t stream)
 {
     const int n_thread_per_grid = 128;
     const dim3 threads(n_thread_per_grid, 1);
@@ -878,26 +878,26 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+            GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(
                 dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         } else {
-            GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+            GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(
                 dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+            GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(
                 dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         } else {
-            GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+            GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(
                 dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         }
     } else {
-        cudaMemset(dwdG, 0xFF, ngrids * natm * 3 * sizeof(double)); // Fill with NAN
+        cudaMemsetAsync(dwdG, 0xFF, ngrids * natm * 3 * sizeof(double), stream); // Fill with NAN
         fprintf(stderr, "Incorrect scheme_id = %d in GDFTgrid_weight_derivative\n", scheme_id);
         return 1;
     }
@@ -913,7 +913,7 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
 __host__
 int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const double *grid_coords, const double *grid_quadrature_weights,
                                                  const double *atm_coords, const double *a_factor, const double *inv_atom_distance, const int *atm_idx, const double *Ar_distance,
-                                                 const double *PB, const double *invsumPB, const int ngrids, const int natm, const int scheme_id)
+                                                 const double *PB, const double *invsumPB, const int ngrids, const int natm, const int scheme_id, cudaStream_t stream)
 {
     const bool if_radii_adjust = a_factor != NULL;
     const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
@@ -927,26 +927,26 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
                           (natm   + n_atom_per_block - 1) / n_atom_per_block);
         if (scheme == GridPartitionScheme::original_becke) {
             if (if_radii_adjust) {
-                GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
-                GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         } else if (scheme == GridPartitionScheme::stratmann) {
             if (if_radii_adjust) {
-                GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
-                GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         } else {
-            cudaMemset(d2w_dG1dG2, 0xFF, ngrids * natm * natm * 9 * sizeof(double)); // Fill with NAN
+            cudaMemsetAsync(d2w_dG1dG2, 0xFF, ngrids * natm * natm * 9 * sizeof(double), stream); // Fill with NAN
             fprintf(stderr, "Incorrect scheme_id = %d in GDFTgrid_weight_second_derivative\n", scheme_id);
             return 1;
         }
@@ -959,26 +959,26 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
                           (natm   + n_atom_per_block - 1) / n_atom_per_block);
         if (scheme == GridPartitionScheme::original_becke) {
             if (if_radii_adjust) {
-                GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
-                GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         } else if (scheme == GridPartitionScheme::stratmann) {
             if (if_radii_adjust) {
-                GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
-                GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+                GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(
                     d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         } else {
-            cudaMemset(d2w_dG1dG2, 0xFF, ngrids * natm * natm * 9 * sizeof(double)); // Fill with NAN
+            cudaMemsetAsync(d2w_dG1dG2, 0xFF, ngrids * natm * natm * 9 * sizeof(double), stream); // Fill with NAN
             fprintf(stderr, "Incorrect scheme_id = %d in GDFTgrid_weight_second_derivative\n", scheme_id);
             return 1;
         }
@@ -995,7 +995,7 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
 __host__
 int GDFTbecke_eval_PB(double *PB,
                       const double *a_factor, const double *inv_atom_distance, const double *Ar_distance,
-                      const int ngrids, const int natm, const int scheme_id)
+                      const int ngrids, const int natm, const int scheme_id, cudaStream_t stream)
 {
     constexpr int n_grid_per_block = 64;
     constexpr int n_atom_per_block = 4;
@@ -1008,18 +1008,18 @@ int GDFTbecke_eval_PB(double *PB,
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         } else {
-            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads, 0, stream>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         } else {
-            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads, 0, stream>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         }
     } else {
-        cudaMemset(PB, 0xFF, ngrids * natm * sizeof(double)); // Fill with NAN
+        cudaMemsetAsync(PB, 0xFF, ngrids * natm * sizeof(double), stream); // Fill with NAN
         fprintf(stderr, "Incorrect scheme_id = %d in GDFTbecke_eval_PB\n", scheme_id);
         return 1;
     }
@@ -1033,8 +1033,8 @@ int GDFTbecke_eval_PB(double *PB,
 }
 
 __host__
-int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coords, const double* coords,
-    int natm, int ngrids){
+int GDFTgroup_grids(int* group_ids, const double* atom_coords, const double* coords,
+    int natm, int ngrids, cudaStream_t stream){
     if (ngrids % NATOM_PER_BLOCK != 0) {
         fprintf(stderr, "CUDA Error of gen grids: grids alignment must be %d.", NATOM_PER_BLOCK);
         return 1;

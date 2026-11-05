@@ -72,7 +72,8 @@ def dfmp2_kernel_one_gpu(
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
     j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c, alg=j2c_decomp_alg)
-    cupy.cuda.get_current_stream().synchronize()
+    stream = cupy.cuda.get_current_stream()
+    stream.synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
     # cderi_ovl_gpu
@@ -80,7 +81,7 @@ def dfmp2_kernel_one_gpu(
     cderi_ovl_gpu = cp.empty([nocc, nvir, naux_alloc], dtype=dtype_cderi)
     cderi_ovl_gpu = get_j3c_ovl(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu], log=log)[0]
     cderi_ovl_gpu = dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])[0]
-    cupy.cuda.get_current_stream().synchronize()
+    stream.synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
     # computation of MP2 correlation energy pair
@@ -140,7 +141,8 @@ def dfump2_kernel_one_gpu(
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
     j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c, alg=j2c_decomp_alg)
-    cupy.cuda.get_current_stream().synchronize()
+    stream = cupy.cuda.get_current_stream()
+    stream.synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
     # cderi_ovl_gpu
@@ -148,7 +150,7 @@ def dfump2_kernel_one_gpu(
     cderi_ovl_gpu = [cp.empty([nocc[s], nvir[s], naux_alloc], dtype=dtype_cderi) for s in spins]
     cderi_ovl_gpu = get_j3c_ovl(mol, intopt, occ_coeff, vir_coeff, cderi_ovl_gpu, log=log)
     cderi_ovl_gpu = dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, cderi_ovl_gpu)
-    cupy.cuda.get_current_stream().synchronize()
+    stream.synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
     # computation of MP2 correlation energy pair

@@ -672,14 +672,14 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                        int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                        uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                        int *gout_stride_lookup, double *grids, int ngrids,
-                       int compressing)
+                       int compressing, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    ft_aopair_kernel<<<workers, THREADS, shm_size>>>(
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
+    ft_aopair_kernel<<<workers, THREADS, shm_size, stream>>>(
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
@@ -694,14 +694,14 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                       int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                       uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                       int *gout_stride_lookup, double *grids, int ngrids,
-                      int compressing)
+                      int compressing, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    ft_pdotp_kernel<<<workers, THREADS, shm_size>>>(
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
+    ft_pdotp_kernel<<<workers, THREADS, shm_size, stream>>>(
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();

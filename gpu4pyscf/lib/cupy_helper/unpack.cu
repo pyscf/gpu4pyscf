@@ -234,7 +234,7 @@ void scatter_add_kernel(double *a, double *b, int *idx, double alpha, int ncol)
 }
 
 extern "C" {
-int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi, int dtype)
+int fill_triu(double *a, int n, int counts, int hermi, int dtype, cudaStream_t stream)
 {
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
@@ -253,7 +253,7 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi, int 
     return 0;
 }
 
-int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
+int pack_tril(double *a_tril, double *a, int n, int counts, cudaStream_t stream)
 {
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
@@ -268,8 +268,8 @@ int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
     return 0;
 }
 
-int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
-                int nao, int counts, int hermi)
+int unpack_tril(double *eri_tril, double *eri,
+                int nao, int counts, int hermi, cudaStream_t stream)
 {
     dim3 threads(THREADS, THREADS);
     int nx = (nao + threads.x - 1) / threads.x;
@@ -284,9 +284,9 @@ int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
     return 0;
 }
 
-int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
+int decompress_and_fill(double *out, int out_stride,
                         double *cderi, int *pair_idx, int npairs, int nao,
-                        int naux, int aux0, int aux1)
+                        int naux, int aux0, int aux1, cudaStream_t stream)
 {
     dim3 blocks((npairs+RBLKSIZE-1)/RBLKSIZE);
     decompress_kernel<<<blocks, 512, 0, stream>>>(
@@ -299,9 +299,9 @@ int decompress_and_fill(cudaStream_t stream, double *out, int out_stride,
     return 0;
 }
 
-int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
+int decompress_and_transpose(double *out, int out_stride,
                              double *cderi, int *pair_idx, int npairs, int nao,
-                             int aux0, int aux1, int fill_triu, int on_host)
+                             int aux0, int aux1, int fill_triu, int on_host, cudaStream_t stream)
 {
     double *eri_gpu = cderi;
     if (on_host) {
@@ -323,9 +323,9 @@ int decompress_and_transpose(cudaStream_t stream, double *out, int out_stride,
     return 0;
 }
 
-int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride,
+int z_decompress_and_transpose(double2 *out, int out_stride,
                                double2 *cderi, int *pair_idx, int npairs, int nao,
-                               int aux0, int aux1, int fill_triu, int on_host)
+                               int aux0, int aux1, int fill_triu, int on_host, cudaStream_t stream)
 {
     double2 *eri_gpu = cderi;
     if (on_host) {
@@ -347,8 +347,8 @@ int z_decompress_and_transpose(cudaStream_t stream, double2 *out, int out_stride
     return 0;
 }
 
-int copy_symmetric(cudaStream_t stream, double *a, int *i_addr, int *j_addr,
-                   int npairs, int N1, int N2)
+int copy_symmetric(double *a, int *i_addr, int *j_addr,
+                   int npairs, int N1, int N2, cudaStream_t stream)
 {
     copy_symmetric_kernel<<<npairs, 1024, 0, stream>>>(a, i_addr, j_addr, N1, N2);
     cudaError_t err = cudaGetLastError();
@@ -359,8 +359,8 @@ int copy_symmetric(cudaStream_t stream, double *a, int *i_addr, int *j_addr,
     return 0;
 }
 
-int scatter_add(cudaStream_t stream, double *a, double *b, int *idx,
-                double alpha, int nrow, int ncol)
+int scatter_add(double *a, double *b, int *idx,
+                double alpha, int nrow, int ncol, cudaStream_t stream)
 {
     scatter_add_kernel<<<nrow, 1024, 0, stream>>>(a, b, idx, alpha, ncol);
     cudaError_t err = cudaGetLastError();

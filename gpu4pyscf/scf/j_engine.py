@@ -222,7 +222,8 @@ class _VHFOpt(jk._VHFOpt):
                     ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
+                    mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes,
+                    ctypes.c_void_p(stream.ptr))
 
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
@@ -409,7 +410,8 @@ def _dm_to_Rt(mol, dm, shl_pair_idx, pair_loc, envs=None, out=None):
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(shl_pair_idx)),
-            ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
+            ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('dm_to_Rt kernel failed')
 
@@ -453,7 +455,8 @@ def _Rt_to_dm(mol, dm_xyz, shl_pair_idx, pair_loc, envs=None, out=None):
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(shl_pair_idx)),
-            ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p))
+            ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('Rt_to_dm kernel failed')
 
