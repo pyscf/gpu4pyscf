@@ -19,7 +19,7 @@ from pyscf.lib.parameters import BOHR
 from pyscf.pbc import gto, dft as cpu_dft
 from pyscf.pbc.scf import addons as cpu_addons
 from gpu4pyscf.pbc import dft
-from gpu4pyscf.pbc.scf.addons import slab_dipole_correction
+from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
 
 cpu_correction = getattr(cpu_addons, 'slab_dipole_correction', None)
 

@@ -19,7 +19,7 @@ Ref: 10.1103/PhysRevB.59.12301
 
 import numpy as np
 import cupy as cp
-from gpu4pyscf.pbc.scf.addons import _dipole_grids, _sawtooth, _slab_length
+from gpu4pyscf.pbc.scf.slabdipole import _dipole_grids, _sawtooth, _slab_length
 from gpu4pyscf.pbc.dft import numint, gen_grid
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
 from gpu4pyscf.pbc.gto.int1e import ovlp_derivatives
@@ -37,7 +37,7 @@ def dipole_grad(grad, dm, kpts=None):
     '''
     mf = grad.base
     cell = mf.cell
-    length = _slab_length(cell, mf.dipole_dir)
+    length = _slab_length(cell)
     if kpts is None:
         kpts = mf.kpts if mf.istype('KSCF') else mf.kpt
     kpts = np.asarray(kpts).reshape(-1, 3)
@@ -62,7 +62,7 @@ def dipole_grad(grad, dm, kpts=None):
     for ao_kpts, weight, coords in ni.block_loop(cell, grids, deriv=1, kpts=kpts):
         if vmat is None:
             vmat = cp.zeros((nkpts, 3, cell.nao, cell.nao), dtype=ao_kpts.dtype)
-        z = _sawtooth(coords[:, mf.dipole_dir], cut, length)
+        z = _sawtooth(coords[:, 2], cut, length)
         zw = z * weight
         rho = ni.eval_rho(cell, ao_kpts[:, 0], dm, xctype='LDA', hermi=1)
         p_elec += cp.dot(rho, zw)
@@ -72,10 +72,10 @@ def dipole_grad(grad, dm, kpts=None):
                 vmat[k, x] += ao[x + 1].conj().T @ aow
 
     p_ion = np.dot(cell.atom_charges(),
-                   _sawtooth(cell.atom_coords()[:, mf.dipole_dir], cut, length))
+                   _sawtooth(cell.atom_coords()[:, 2], cut, length))
     field = 4 * np.pi * (p_ion - float(p_elec)) / cell.vol
     dp = contract_h1e_dm(cell, vmat, dm, hermi=1) / nkpts
-    dp[:, mf.dipole_dir] += cell.atom_charges()
+    dp[:, 2] += cell.atom_charges()
     de = field * dp
 
     # Add the potential gauge shift.

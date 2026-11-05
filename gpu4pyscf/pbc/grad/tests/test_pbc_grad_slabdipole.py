@@ -24,25 +24,22 @@ from gpu4pyscf.pbc.grad.slabdipole import dipole_grad
 DISP = 1e-4 # finite difference step
 
 
-def make_cell(dir_idx=2, boundary=False):
+def make_cell(boundary=False):
     a = np.diag([7., 8., 22.])
     coords = np.array([[2.1, 2.8, 10.], [2.8, 3.3, 11.7]])
     if boundary:
         coords[:, 2] = (coords[:, 2] - 10.8) % a[2, 2]
-    order = [0, 1, 2]
-    order[dir_idx], order[2] = order[2], order[dir_idx]
     return gto.M(
-        a=a[np.ix_(order, order)],
-        atom=list(zip(['F', 'H'], coords[:, order])), unit='Bohr',
-        basis='gth-szv', pseudo='gth-pade', mesh=np.array([31, 33, 91])[order],
+        a=a,
+        atom=list(zip(['F', 'H'], coords)), unit='Bohr',
+        basis='gth-szv', pseudo='gth-pade', mesh=[31, 33, 91],
         precision=1e-10, verbose=0)
 
 
-def make_mf(cell, name='RKS', dir_idx=2, cut=None, z0=None, becke=False,
+def make_mf(cell, name='RKS', cut=None, z0=None, becke=False,
             multigrid=False):
     if name.startswith('K'):
-        kmesh = [2, 2, 2]
-        kmesh[dir_idx] = 1
+        kmesh = [2, 2, 1]
         mf = getattr(dft, name)(cell, cell.make_kpts(kmesh), xc='lda,vwn')
     else:
         mf = getattr(dft, name)(cell, xc='lda,vwn')
@@ -51,8 +48,8 @@ def make_mf(cell, name='RKS', dir_idx=2, cut=None, z0=None, becke=False,
     if multigrid:
         mf = mf.multigrid_numint(mesh=np.asarray(cell.mesh) + 2)
     if cut is None:
-        cut = .95 * cell.lattice_vectors()[dir_idx, dir_idx]
-    mf = slab_dipole_correction(mf, dir_idx=dir_idx, cut=cut, z0=z0)
+        cut = .95 * cell.lattice_vectors()[2, 2]
+    mf = slab_dipole_correction(mf, cut=cut, z0=z0)
     mf.conv_tol = 1e-11
     mf.conv_tol_grad = 1e-7
     mf.chkfile = None
@@ -79,15 +76,15 @@ def finite_difference(cell, energy):
 
 
 class KnownValues(unittest.TestCase):
-    def check_explicit(self, name='RKS', dir_idx=2, boundary=False,
+    def check_explicit(self, name='RKS', boundary=False,
                        becke=False, multigrid=False):
-        cell = make_cell(dir_idx, boundary)
-        length = cell.lattice_vectors()[dir_idx, dir_idx]
+        cell = make_cell(boundary)
+        length = cell.lattice_vectors()[2, 2]
         cut = .5 * length if boundary else .95 * length
 
         z0 = (cut + length/2) % length
         def build(c):
-            return make_mf(c, name, dir_idx, cut, z0, becke, multigrid)
+            return make_mf(c, name, cut, z0, becke, multigrid)
         mf = build(cell)
         dm = mf.get_init_guess()
 
@@ -113,10 +110,8 @@ class KnownValues(unittest.TestCase):
             with self.subTest(name=name):
                 self.check_explicit(name)
 
-    def test_other_normals_and_periodic_branch(self):
-        for dir_idx in (0, 1):
-            with self.subTest(dir_idx=dir_idx):
-                self.check_explicit('KRKS', dir_idx=dir_idx, boundary=True)
+    def test_periodic_branch(self):
+        self.check_explicit('KRKS', boundary=True)
 
     def test_multigrid_explicit_finite_difference(self):
         self.check_explicit('KUKS', multigrid=True)

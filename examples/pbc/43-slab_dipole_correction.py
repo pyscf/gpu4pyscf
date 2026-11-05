@@ -15,7 +15,7 @@
 import numpy as np
 from pyscf.pbc import gto
 from gpu4pyscf.pbc import dft
-from gpu4pyscf.pbc.scf.addons import slab_dipole_correction
+from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
 
 '''
 Self-consistent dipole correction for a neutral polar slab.
