@@ -414,15 +414,12 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
 
         _, is_single_kpt = _normalize_kpts(kpts)
         if is_single_kpt:
-            is_rhf = dm_kpts.ndim == 2
+            shape = dm_kpts.shape[:-2]
         else:
             assert dm_kpts.ndim >= 3
-            is_rhf = dm_kpts.ndim == 3
-        if is_rhf:
-            v_kpts = v_kpts.reshape(nkpts_band, nao, nao)
-        else:  # KUHF dms
-            v_kpts = v_kpts.reshape(2, nkpts_band, nao, nao)
-        return v_kpts
+            shape = dm_kpts.shape[:-3]
+        return v_kpts.reshape(shape + (nkpts_band, nao, nao))
+
 
 def _factorize_dm(dm_kpts, kpts=None):
     from gpu4pyscf.df.df_jk import factorize_dm

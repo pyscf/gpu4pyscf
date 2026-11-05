@@ -1580,7 +1580,7 @@ def _search_diffuse_pairs(cell, mesh):
     pair_max = cp.zeros((nao, nao))
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
         Gpq = ft_kern(Gv[p0:p1])
-        _pair_max = cp.abs(Gpq[0]).max(axis=0)
+        _pair_max = cp.abs(Gpq).max(axis=0)
         pair_max = cp.maximum(pair_max, _pair_max)
     pair_max = condense('max', pair_max, cell.ao_loc)
 

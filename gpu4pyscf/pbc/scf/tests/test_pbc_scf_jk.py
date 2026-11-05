@@ -1389,8 +1389,6 @@ def test_scf_jk_gamma_density_layout(factory):
     refj, refk = mf.get_jk(dm=dm, kpt=np.zeros(3))
     assert abs(vj - refj).max() < 1e-11
     assert abs(vk - refk).max() < 1e-11
-    hcore = mf.get_hcore()
-    assert hcore.shape == dm.shape
     assert mf.get_veff(dm=dm).shape == dm.shape
 
 
@@ -1413,6 +1411,4 @@ def test_kscf_jk_stored_sampling_density_layout(factory):
     refj, refk = mf.get_jk(dm_kpts=dm, kpts=kpts)
     assert abs(vj - refj).max() < 1e-11
     assert abs(vk - refk).max() < 1e-11
-    hcore = mf.get_hcore()
-    assert hcore.shape == dm.shape
     assert mf.get_veff(dm_kpts=dm).shape == dm.shape

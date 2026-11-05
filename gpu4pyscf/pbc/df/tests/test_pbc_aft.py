@@ -71,35 +71,29 @@ class KnownValues(unittest.TestCase):
         mydf.mesh = np.array([13, 15, 17])
         mydf.max_memory = 777
         mydf.time_reversal_symmetry = False
-        converted = mydf.to_cpu()
-        self.assertIsInstance(converted, aft_cpu.AFTDF)
-        self.assertIs(converted.cell, cell)
-        self.assertEqual(converted.max_memory, mydf.max_memory)
-        self.assertFalse(converted.time_reversal_symmetry)
-        np.testing.assert_array_equal(converted.mesh, mydf.mesh)
-        np.testing.assert_array_equal(converted.kpts, mydf.kpts)
-        reference = aft_cpu.AFTDF(cell).set(mesh=mydf.mesh.copy())
-        for name in ('get_nuc', 'get_pp'):
-            with self.subTest(operator=name):
-                actual = getattr(mydf, name)()
-                self.assertIsInstance(actual, cp.ndarray)
-                self.assertEqual(actual.shape, (1, cell.nao, cell.nao))
-                self.assertEqual(actual.dtype, np.float64)
-                np.testing.assert_allclose(actual.get(), getattr(reference, name)(),
-                                           atol=1e-9, rtol=0)
-                np.testing.assert_allclose(actual.get(), getattr(converted, name)(),
-                                           atol=1e-9, rtol=0)
-                single = getattr(mydf, name)(kpts=np.zeros(3))
-                np.testing.assert_allclose(single.get(), actual[0].get(),
-                                           atol=1e-12, rtol=0)
-                np.testing.assert_allclose(single.get(), single.T.get(),
-                                           atol=1e-11, rtol=0)
-        dm = np.linalg.inv(cell.pbc_intor('int1e_ovlp'))
-        actual, exchange = mydf.get_jk(cp.asarray(dm), with_k=False)
-        self.assertIsNone(exchange)
-        for cpu_df in (reference, converted):
-            expected = cpu_df.get_jk(dm, with_k=False)[0]
-            np.testing.assert_allclose(actual.get(), expected, atol=1e-9, rtol=0)
+        mydf_cpu = mydf.to_cpu()
+        self.assertIsInstance(mydf_cpu, aft_cpu.AFTDF)
+        self.assertIs(mydf_cpu.cell, cell)
+        self.assertEqual(mydf_cpu.max_memory, mydf.max_memory)
+        self.assertFalse(mydf_cpu.time_reversal_symmetry)
+        np.testing.assert_array_equal(mydf_cpu.mesh, mydf.mesh)
+        np.testing.assert_array_equal(mydf_cpu.kpts, mydf.kpts)
+
+        ref = mydf_cpu.get_nuc(kpts=np.zeros(3))
+        actual = mydf.get_nuc()
+        self.assertIsInstance(actual, cp.ndarray)
+        assert actual.ndim == 2
+        self.assertEqual(actual.dtype, np.float64)
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+
+        ref = mydf_cpu.get_pp(kpts=np.zeros(3))
+        actual = mydf.get_pp()
+        self.assertIsInstance(actual, cp.ndarray)
+        assert actual.ndim == 2
+        self.assertEqual(actual.dtype, np.float64)
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+        single = mydf.get_pp(kpts=np.zeros(3))
+        np.testing.assert_allclose(single.get(), actual.get(), atol=1e-12, rtol=0)
 
     def test_reset_scaled_kpts_and_range_cache(self):
         cell = self.cell

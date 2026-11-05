@@ -75,10 +75,6 @@ def _sorted_fake_cell_vnl(cell, type='scalar'):
     return fakecell, hl_blocks, pattern, splits
 
 def get_pp_nl(cell, kpts=None):
-    """Nonlocal pseudopotential in the PySCF kpts convention.
-
-    See gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
-    """
     kpts, is_single_kpt = _normalize_kpts(kpts)
     nkpts = len(kpts)
 
@@ -90,7 +86,10 @@ def get_pp_nl(cell, kpts=None):
     nao = cell.nao
     ppnl = cp.zeros((nkpts, nao, nao), dtype=dtype)
     if not hl_blocks:
-        return ppnl[0] if is_single_kpt else ppnl
+        if is_single_kpt:
+            ppnl = ppnl[0]
+        return ppnl
+
     ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts)
 
     hl_offset = [0] * 3
