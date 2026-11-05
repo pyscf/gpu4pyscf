@@ -841,7 +841,7 @@ void ''' + fn_name + '''(
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     '''
-    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
     assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
@@ -857,7 +857,7 @@ def get_pp(ni, kpts=None):
     vpp = _get_j_pass2(ni, vpplocG[None,:], kpts=kpts)[0]
     t1 = log.timer_debug1('vpploc', *t0)
 
-    vppnl = get_pp_nl_gpu(cell, kpts)
+    vppnl = get_pp_nl(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl[k].real)

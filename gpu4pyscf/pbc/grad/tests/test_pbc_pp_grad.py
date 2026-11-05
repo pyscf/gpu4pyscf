@@ -142,7 +142,8 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     from gpu4pyscf.lib.cupy_helper import contract
     from gpu4pyscf.lib import logger
     from gpu4pyscf.gto.mole import groupby
-    from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu, _sorted_fake_cell_vnl
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import _sorted_fake_cell_vnl
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl as _int_vnl_gpu
     if kpts is None:
         kpts_lst = np.zeros((1, 3))
     else:
@@ -289,7 +290,7 @@ class TestCrossBasisIntegrals(unittest.TestCase):
     """Test GPU _int_vnl_gpu against CPU _int_vnl for each element."""
 
     def _compare_integrals(self, cell, intors=None, comp=1, places=6):
-        from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu
+        from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl as _int_vnl_gpu
         kpts = np.zeros((1, 3))
         fakecell, hl_blocks = fake_cell_vnl(cell)
 
@@ -631,9 +632,9 @@ class TestFiniteDifference(unittest.TestCase):
         disp = 1e-4
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=disp)
-            v = pp_int.get_pp_nl_gpu(cell1, cell1.make_kpts(kmesh))
+            v = pp_int.get_pp_nl(cell1, cell1.make_kpts(kmesh))
             e1 = cp.einsum('kpq,kqp->', dm, v).real / nkpts
-            v = pp_int.get_pp_nl_gpu(cell2, cell2.make_kpts(kmesh))
+            v = pp_int.get_pp_nl(cell2, cell2.make_kpts(kmesh))
             e2 = cp.einsum('kpq,kqp->', dm, v).real / nkpts
             assert abs(sigma[i, j] - (e1-e2)/2/disp) < 2e-7
 
