@@ -325,8 +325,7 @@ void build_jk_1c2e_kernel(
 
 
 extern "C" {
-    int launch_build_jk_2c2e(
-        const double* w_1d,
+    int launch_build_jk_2c2e(const double* w_1d,
         const double* P,
         double* J,
         double* K,
@@ -338,7 +337,7 @@ extern "C" {
         const int* loc_row,
         const int* loc_col,
         int npairs,
-        int nao)
+        int nao, cudaStream_t stream)
     {
         if (npairs <= 0) return 0;
 
@@ -347,7 +346,7 @@ extern "C" {
         int blocks = npairs;
         int threads = 256;
         
-        build_jk_2c2e_kernel<<<blocks, threads>>>(
+        build_jk_2c2e_kernel<<<blocks, threads, 0, stream>>>(
             w_1d, P, J, K, 
             pair_i, pair_j, kr_offsets, 
             aoslice, natorb, loc_row, loc_col, 
@@ -362,8 +361,7 @@ extern "C" {
         return 0;
     }
 
-    int launch_build_jk_1c2e(
-        const double* P,
+    int launch_build_jk_1c2e(const double* P,
         double* J,
         double* K,
         const double* gss,
@@ -381,7 +379,7 @@ extern "C" {
         const int* loc_col,
         int natm,
         int nao,
-        int num_d_pairs)
+        int num_d_pairs, cudaStream_t stream)
     {
         if (natm <= 0) return 0;
 
@@ -390,7 +388,7 @@ extern "C" {
         // 64 threads per block is sufficient since max d-orbital combinations is 243
         int threads = 64; 
         
-        build_jk_1c2e_kernel<<<blocks, threads>>>(
+        build_jk_1c2e_kernel<<<blocks, threads, 0, stream>>>(
             P, J, K, 
             gss, gsp, hsp, gpp, gp2, repd, 
             intij, intkl, intrep,

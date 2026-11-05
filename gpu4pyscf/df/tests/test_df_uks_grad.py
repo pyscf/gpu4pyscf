@@ -90,11 +90,12 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
 
 # FIXME: Why is the difference between CPU and GPU so large?
 # tol=1e-5 is not acceptable
-def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
+def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5,
+            grid_level=grids_level, nlcgrid_level=nlcgrids_level):
     mf = mol.UKS(xc=xc).to_gpu().density_fit(auxbasis=auxbasis0)
     mf.disp = disp
-    mf.grids.level = grids_level
-    mf.nlcgrids.level = nlcgrids_level
+    mf.grids.level = grid_level
+    mf.nlcgrids.level = nlcgrid_level
     mf.verbose = 1
     mf.kernel()
 
@@ -139,6 +140,13 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mol_sph, xc='wb97', disp=None)
 
     def test_grad_nlc(self):
+        small_mol = pyscf.M(atom=atom, basis='sto3g', charge=1, spin=1, verbose=0)
+        for grid_response in (False, True):
+            with self.subTest(grid_response=grid_response):
+                _vs_cpu(small_mol, xc='HYB_MGGA_XC_WB97M_V', disp=None,
+                        grid_response=grid_response, grid_level=0, nlcgrid_level=0)
+
+    def test_grad_nlc_high_cost(self):
         print('--------nlc testing-------------')
         _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None)
         _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, grid_response=True)

@@ -232,7 +232,7 @@ extern "C" {
 int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeholder,
                      PBCIntEnvVars *envs, int64_t *bas_ij_idx,
                      double *G_bases, double *L_bases, int *mesh_cum,
-                     int *nimgs_cum, int *mesh, int npair)
+                     int *nimgs_cum, int *mesh, int npair, cudaStream_t stream)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -242,7 +242,7 @@ int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeh
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-    orth_lda_mat_kernel<<<ntile_batch*npair, THREADS>>>(
+    orth_lda_mat_kernel<<<ntile_batch*npair, THREADS, 0, stream>>>(
         out, vxcG, *envs, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
     cudaError_t err = cudaGetLastError();

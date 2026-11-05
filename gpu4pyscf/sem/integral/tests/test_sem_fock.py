@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
             -61.45212453952014])
         assert np.abs(np.array(hcore_data) - ref_fp).max() < 1.0E-12
 
-    def test_jk(self):
+    def test_jk_high_cost(self):
         for i in range(9,19):
             for j in range(i,19):
                 spin = (i + j) % 2

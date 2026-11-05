@@ -76,14 +76,15 @@ static int GINTrun_tasks_int3c2e_pass1_j(JKMatrix *jk, BasisProdOffsets *offsets
 
 
 extern "C" { __host__
-int GINTbuild_j_int3c2e_pass1(cudaStream_t stream, BasisProdCache *bpcache,
+int GINTbuild_j_int3c2e_pass1(BasisProdCache *bpcache,
                  double *dm, double *rhoj,
                  int nao, int naux, int n_dm,
                  int *bins_locs_ij, int *bins_locs_kl,
-                 int ncp_ij, int ncp_kl)
+                 int ncp_ij, int ncp_kl, cudaStream_t stream)
 {
     // move bpcache to constant memory
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
+    cudaStreamSynchronize(stream);
     int ng[4] = {0,0,0,0};
 
     JKMatrix jk;

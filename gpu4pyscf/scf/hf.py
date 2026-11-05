@@ -811,6 +811,7 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
         # Its pointers refer to the previous _env and can cause invalid integral
         # reads. Clear it here until the fix is available in supported PySCF versions.
         mol_atom._ecpbas = np.zeros((0, gto.BAS_SLOTS), dtype=np.int32)
+        mol_atom.magmom = []
         mol_atom.build(False, False)
 
         mf_atom = mf_template.copy()
@@ -1244,7 +1245,6 @@ class SCF(pyscf_lib.StreamObject):
     density_fit              = NotImplemented
     newton                   = NotImplemented
     x2c = x2c1e = sfx2c1e    = NotImplemented
-    stability                = NotImplemented
     update_                  = NotImplemented
     istype                   = hf_cpu.SCF.istype
 
@@ -1477,6 +1477,10 @@ class SCF(pyscf_lib.StreamObject):
                 **kwargs):
         return self.to_cpu().analyze(
             verbose=verbose, with_meta_lowdin=with_meta_lowdin, **kwargs)
+
+    def stability(self, internal=True, external=False, verbose=None, return_status=False, **kwargs):
+        from gpu4pyscf.scf.stability import rhf_stability
+        return rhf_stability(self, internal, external, verbose, return_status, **kwargs)
 
     def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
         '''Mulliken population analysis

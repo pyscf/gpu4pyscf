@@ -1248,8 +1248,7 @@ __global__ void global_transform_kernel(
 
 extern "C" {
 // this function only used for debug!
-int launch_multipole_eval_kernel_c(
-    const int n_pairs,
+int launch_multipole_eval_kernel_c(const int n_pairs,
     const double* r_vec,
     const int* l1_vec,
     const int* l2_vec,
@@ -1257,11 +1256,11 @@ int launch_multipole_eval_kernel_c(
     const double* da_vec,
     const double* db_vec,
     const double* add_vec,
-    double* out_vec
+    double* out_vec, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    multipole_eval_kernel<<<blocks_per_grid, threads_per_block>>>(
+    multipole_eval_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec
     );
 
@@ -1272,18 +1271,17 @@ int launch_multipole_eval_kernel_c(
     return 0;
 }
 
-int launch_solve_poij_kernel_c(
-    const int n_atoms,
+int launch_solve_poij_kernel_c(const int n_atoms,
     const int* l_vec,
     const double* d_vec,
     const double* fg_vec,
     double* rho_vec,
-    const double hartree2ev
+    const double hartree2ev, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_atoms + threads_per_block - 1) / threads_per_block;
 
-    solve_poij_kernel<<<blocks_per_grid, threads_per_block>>>(
+    solve_poij_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev
     );
 
@@ -1294,8 +1292,7 @@ int launch_solve_poij_kernel_c(
     return 0;
 }
 
-int launch_test_rijkl_kernel_c(
-    int n_tasks, int n_atom,
+int launch_test_rijkl_kernel_c(int n_tasks, int n_atom,
     const int* ni_vec, const int* nj_vec,
     const int* ij_vec, const int* kl_vec,
     const int* li_vec, const int* lj_vec,
@@ -1303,12 +1300,12 @@ int launch_test_rijkl_kernel_c(
     const int* ic_vec, const double* r_vec,
     const double* po_tensor, const double* ddp_tensor,
     const double* core_rho, const double* ch,
-    double* out_val
+    double* out_val, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
     
-    test_rijkl_kernel<<<blocks, threads>>>(
+    test_rijkl_kernel<<<blocks, threads, 0, stream>>>(
         n_tasks, n_atom,
         ni_vec, nj_vec, ij_vec, kl_vec,
         li_vec, lj_vec, lk_vec, ll_vec,
@@ -1324,8 +1321,7 @@ int launch_test_rijkl_kernel_c(
     return 0;
 }
 
-int launch_calc_local_rep_core_kernel_c(
-    int n_pairs,
+int launch_calc_local_rep_core_kernel_c(int n_pairs,
     const int* pair_i_vec, const int* pair_j_vec, const int* ele_id, const double* r_vec,
     int n_atom,
     const double* am, const double* ad, const double* aq, 
@@ -1337,12 +1333,12 @@ int launch_calc_local_rep_core_kernel_c(
     const int* task_li, const int* task_lj,
     const int* task_lk, const int* task_ll,
     const double HATREE2EV,
-    double* rep_out, double* core_out, double* gab_out
+    double* rep_out, double* core_out, double* gab_out, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = n_pairs; 
     
-    calc_local_rep_core_kernel<<<blocks, threads>>>(
+    calc_local_rep_core_kernel<<<blocks, threads, 0, stream>>>(
         n_pairs, pair_i_vec, pair_j_vec, ele_id, r_vec, n_atom,
         am, ad, aq, dd, qq,
         po_tensor, ddp_tensor, core_rho, ch,
@@ -1360,20 +1356,19 @@ int launch_calc_local_rep_core_kernel_c(
     return 0;
 }
 
-int launch_global_transform_kernel_c(
-    int n_pairs,
+int launch_global_transform_kernel_c(int n_pairs,
     const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
     const double* coords, const double* rep_in, const double* core_in, const double* gab_in,
     const int* ind2_arr, const int* natorb, const int* kr_offsets,
     const double* tore, const double* xfac, const double* alpb, 
     const double* guess1, const double* guess2, const double* guess3, 
     const double* v_par6, const double BOHR,
-    double* w_out, double* e1b_out, double* e2a_out, double* enuc_out
+    double* w_out, double* e1b_out, double* e2a_out, double* enuc_out, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = n_pairs; 
     
-    global_transform_kernel<<<blocks, threads>>>(
+    global_transform_kernel<<<blocks, threads, 0, stream>>>(
         n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
         rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
         tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,

@@ -231,8 +231,7 @@ def _hess_nuc_without_ecp(mol, dm0):
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor),
-        ctypes.byref(int3c2e_envs), ctypes.c_double(0.),
-        ctypes.c_double(1.), ctypes.c_double(1.),
+        ctypes.byref(int3c2e_envs),
         ctypes.c_int(shm_size_max),
         ctypes.c_int(len(shl_pair_offsets) - 1),
         ctypes.c_int(len(ksh_offsets_gpu) - 1),
@@ -242,7 +241,8 @@ def _hess_nuc_without_ecp(mol, dm0):
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
         ctypes.c_int(0),
-        ctypes.c_int(natm))
+        ctypes.c_int(natm),
+        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('ejk_int3c2e_ip2 failed')
     de = de + de.transpose(1,0,3,2)
@@ -317,6 +317,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
+        stream = cupy.cuda.get_current_stream()
         for i, j, k, l in tasks:
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
@@ -354,7 +355,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
+                    ctypes.c_void_p(stream.ptr))
 
                 err2 = kern2(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
@@ -380,7 +382,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1.,
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
+                    ctypes.c_void_p(stream.ptr))
 
                 if err1 != 0 or err2 != 0:
                     raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
@@ -582,7 +585,8 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None,
                 ctypes.c_float(log_cutoff),
                 ctypes.c_float(dm_penalty),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                mol._bas.ctypes, mol._env.ctypes)
+                mol._bas.ctypes, mol._env.ctypes,
+                ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
             kern_counts += 1

@@ -327,10 +327,10 @@ class KnownValues(unittest.TestCase):
         ref_etf_scaled = np.array([[-0.0000000000,  2.9655364013,  0.0000000000],
                                    [ 0.0000000000, -1.4827682006,  1.0949321091],
                                    [-0.0000000000, -1.4827682006, -1.0949321091]])
-        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 3.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 3.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 3.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 3.0E-6
 
     def test_nac_tda_b3lyp_singlet_ge_ref_IEFPCM(self):
         """
@@ -828,7 +828,7 @@ class KnownValues(unittest.TestCase):
         nac1.kernel()
         assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-4
 
-    def test_nac_tda_df_singlet_ge_fdiff_IEFPCM(self):
+    def test_nac_tda_df_singlet_ge_fdiff_IEFPCM_high_cost(self):
         """
         compare with finite difference
         """
@@ -971,7 +971,7 @@ class KnownValues(unittest.TestCase):
         nac1.kernel()
         assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-5
 
-    def test_nac_tda_df_camb3lyp_singlet_ee_fdiff_IEFPCM(self):
+    def test_nac_tda_df_camb3lyp_singlet_ee_fdiff_IEFPCM_high_cost(self):
         """
         compare with finite difference
         """

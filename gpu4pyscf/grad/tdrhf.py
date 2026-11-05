@@ -130,7 +130,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         veff = vj[1] * 2 - vk[1]
     else:
         veff = -vk[1]
-    if with_solvent:
+    if with_solvent and singlet:
+        # A triplet's transition density carries no charge, so it has no
+        # LR-PCM term (see WithSolventTDSCF.gen_response)
         veff += td_grad.solvent_response(dmxpy + dmxpy.T)
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
@@ -448,7 +450,8 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                 ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(dd_cache_maxsize),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
             kern_counts += 1

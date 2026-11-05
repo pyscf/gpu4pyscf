@@ -539,7 +539,7 @@ int PBC_jk_derivatives(double *ejk, double j_factor, double k_factor,
                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                        float *diffuse_exps, float *dm_cond, float cutoff,
                        int64_t *pool, double *dd_pool, int nbas_cell0,
-                       int *bas, double omega)
+                       int *bas, double omega, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -583,7 +583,7 @@ int PBC_jk_derivatives(double *ejk, double j_factor, double k_factor,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     if (1){//!rys_ejk_strain_deriv_unrolled(envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
@@ -602,7 +602,7 @@ int PBC_jk_derivatives(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        rys_ejk_deriv_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_deriv_kernel<<<workers, threads, buflen, stream>>>(
                 *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,

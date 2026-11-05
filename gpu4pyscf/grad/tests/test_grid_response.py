@@ -126,7 +126,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_gradient - ref_gradient).max() < 3e-6
 
-    def test_grid_response_omega_override(self):
+    def test_grid_response_omega_override_high_cost(self):
         mol = pyscf.M(atom='O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587',
                       basis='def2-svp', output='/dev/null', verbose=0)
         for method in (rks.RKS, uks.UKS):

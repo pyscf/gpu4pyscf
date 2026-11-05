@@ -28,10 +28,12 @@ from pyscf.soscf import ciah
 from pyscf.soscf.newton_ah import _CIAH_SOSCF as _SOSCF_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, rohf, uhf, _response_functions
-from gpu4pyscf.lib.cupy_helper import transpose_sum, contract
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.df.df_jk import _make_factorized_dm
 from gpu4pyscf.lib import utils
 
-def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
+def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None, with_nlc=False):
+    '''Orbital gradient and Hessian action; NLC is optional for SOSCF.'''
     assert mo_coeff.dtype == np.float64
     occidx = cp.nonzero(mo_occ==2)[0]
     viridx = cp.nonzero(mo_occ==0)[0]
@@ -42,7 +44,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 
     if fock_ao is None:
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        fock_ao = mf.get_fock(h1e, dm=dm0)
+        fock_ao = mf.get_fock(h1e, None, None, dm0)
     fock = mo_coeff.conj().T.dot(fock_ao).dot(mo_coeff)
     foo = fock[occidx[:,None],occidx]
     fvv = fock[viridx[:,None],viridx]
@@ -51,7 +53,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
     h_diag = (fvv.diagonal().real[:,None] - foo.diagonal().real) * 2
 
     vind = mf.gen_response(mo_coeff, mo_occ, singlet=None, hermi=1,
-                           with_nlc=False)
+                           with_nlc=with_nlc)
 
     def h_op(x):
         x = x.reshape(nvir,nocc)
@@ -59,8 +61,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
         x2-= contract('ps,rp->rs', foo, x)
 
         # *2 for double occupancy
-        dm1 = orbv.dot(x*2).dot(orbo.conj().T)
-        dm1 = transpose_sum(dm1)
+        dm1 = _make_factorized_dm(orbv.dot(x*2), orbo.conj())
         v1 = vind(dm1)
         x2 += orbv.conj().T.dot(v1).dot(orbo)
         return x2.ravel() * 2
@@ -70,7 +71,7 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 def gen_g_hop_rohf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
     if getattr(fock_ao, 'focka', None) is None:
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        fock_ao = mf.get_fock(h1e, dm=dm0)
+        fock_ao = mf.get_fock(h1e, None, None, dm0)
     fock_ao = fock_ao.focka, fock_ao.fockb
     mo_occa = occidxa = mo_occ > 0
     mo_occb = occidxb = mo_occ ==2
@@ -103,7 +104,8 @@ def gen_g_hop_rohf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 
     return g, h_op, h_diag
 
-def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
+def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None, with_nlc=False):
+    '''Orbital gradient and Hessian action; NLC is optional for SOSCF.'''
     assert mo_coeff[0].dtype == np.float64
     occidxa = cp.nonzero(mo_occ[0] >  0)[0]
     occidxb = cp.nonzero(mo_occ[1] >  0)[0]
@@ -120,7 +122,7 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
 
     if fock_ao is None:
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        fock_ao = mf.get_fock(h1e, dm=dm0)
+        fock_ao = mf.get_fock(h1e, None, None, dm0)
     focka = mo_coeff[0].conj().T.dot(fock_ao[0]).dot(mo_coeff[0])
     fockb = mo_coeff[1].conj().T.dot(fock_ao[1]).dot(mo_coeff[1])
     fooa = focka[occidxa[:,None],occidxa]
@@ -134,7 +136,13 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
     h_diagb = fvvb.diagonal().real[:,None] - foob.diagonal().real
     h_diag = cp.hstack((h_diaga.reshape(-1), h_diagb.reshape(-1)))
 
-    vind = mf.gen_response(mo_coeff, mo_occ, hermi=1, with_nlc=False)
+    vind = mf.gen_response(mo_coeff, mo_occ, hermi=1, with_nlc=with_nlc)
+    # Pad the two spin factors to retain their tags in a single UHF density.
+    nao = mo_coeff[0].shape[0]
+    nocc = max(nocca, noccb)
+    orbo = cp.zeros((2, nao, nocc), dtype=mo_coeff[0].dtype)
+    orbo[0, :, :nocca] = orboa.conj()
+    orbo[1, :, :noccb] = orbob.conj()
 
     def h_op(x):
         x1a = x[:nvira*nocca].reshape(nvira,nocca)
@@ -144,10 +152,10 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
         x2b = contract('pr,rq->pq', fvvb, x1b)
         x2b-= contract('sq,ps->pq', foob, x1b)
 
-        d1a = orbva.dot(x1a).dot(orboa.conj().T)
-        d1b = orbvb.dot(x1b).dot(orbob.conj().T)
-        dm1 = cp.array([transpose_sum(d1a),
-                        transpose_sum(d1b)])
+        dm_factor = cp.zeros_like(orbo)
+        dm_factor[0, :, :nocca] = orbva.dot(x1a)
+        dm_factor[1, :, :noccb] = orbvb.dot(x1b)
+        dm1 = _make_factorized_dm(dm_factor, orbo)
         v1 = vind(dm1)
         x2a += orbva.conj().T.dot(v1[0]).dot(orboa)
         x2b += orbvb.conj().T.dot(v1[1]).dot(orbob)

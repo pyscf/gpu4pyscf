@@ -71,8 +71,8 @@ void add_columns_kernel(double *out, const double *inp, const int *columns,
 }
 
 extern "C" {
-int add_col_segment(cudaStream_t stream, double *out_cpu, const double *inp,
-                    const int *columns, int nrow, int ncol, int nin, int stride)
+int add_col_segment(double *out_cpu, const double *inp,
+                    const int *columns, int nrow, int ncol, int nin, int stride, cudaStream_t stream)
 {
     if (nrow == 0 || nin == 0) {
         return 0;
@@ -96,7 +96,7 @@ int add_col_segment(cudaStream_t stream, double *out_cpu, const double *inp,
     return 0;
 }
 
-int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0, int col1)
+int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0, int col1, cudaStream_t stream)
 {
     double *out_gpu;
     cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out_cpu, 0);
@@ -104,7 +104,7 @@ int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0
         fprintf(stderr, "store_col_segment address mapping error %s\n", cudaGetErrorString(err));
         return 1;
     }
-    write_kernel<<<nrow, 512>>>(out_gpu, inp, ncol, col0, col1);
+    write_kernel<<<nrow, 512, 0, stream>>>(out_gpu, inp, ncol, col0, col1);
     err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "store_col_segment error %s\n", cudaGetErrorString(err));
@@ -113,8 +113,8 @@ int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0
     return 0;
 }
 
-int transpose_write(cudaStream_t stream, double *out_cpu, double *inp,
-                    int nrow, int ncol, int col0, int col1)
+int transpose_write(double *out_cpu, double *inp,
+                    int nrow, int ncol, int col0, int col1, cudaStream_t stream)
 {
     double *out_gpu;
     cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out_cpu, 0);

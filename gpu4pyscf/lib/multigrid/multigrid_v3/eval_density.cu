@@ -307,7 +307,7 @@ for (int tile_id = tile_id0; tile_id < min(tile_id0+tiles_per_block, ntiles); ti
 extern "C" {
 #define eval_density_kernel_case(li, lj, slice_i, slice_j, non_orth) \
     case (li * LMAX1 + lj): \
-        eval_density_kernel<li,lj,slice_i,slice_j,non_orth><<<block_grid, THREADS>>>( \
+        eval_density_kernel<li,lj,slice_i,slice_j,non_orth><<<block_grid, THREADS, 0, stream>>>(\
             density, dm, *envs, supmol_img_coords, factor, \
             shl_pair_offsets, dressed_bas_ij_idx, \
             grid_tile_index, n_contributing_tiles, tiles_per_block, \
@@ -321,7 +321,7 @@ int evaluate_density(double *density, double *placeholder,
                      int i_angular, int j_angular, int tiles_per_block,
                      int *shl_pair_offsets, int64_t *dressed_bas_ij_idx,
                      int *grid_tile_index, int n_contributing_tiles, int *mesh,
-                     double factor, double negligible)
+                     double factor, double negligible, cudaStream_t stream)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

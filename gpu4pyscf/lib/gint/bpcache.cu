@@ -66,7 +66,7 @@ void GINTdel_basis_prod(BasisProdCache **pbp)
 
 void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
                          int *bas_pair2shls, int *bas_pairs_locs, int ncptype,
-                         int *atm, int natm, int *bas, int nbas, double *env)
+                         int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     BasisProdCache *bpcache = (BasisProdCache *)malloc(sizeof(BasisProdCache));
     memset(bpcache, 0, sizeof(BasisProdCache));
@@ -94,8 +94,6 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     DEVICE_INIT(int, d_bas_atm, bas_atm, nbas);
     bpcache->bas_coords = d_bas_coords;
     bpcache->bas_atm = d_bas_atm;
-    free(bas_coords);
-    free(bas_atm);
 
     // initialize pair data on GPU memory
     DEVICE_INIT(double, d_aexyz, aexyz, n_primitive_pairs * 7);
@@ -109,6 +107,9 @@ void GINTinit_basis_prod(BasisProdCache **pbp, double diag_fac, int *ao_loc,
     bpcache->a2  = d_aexyz + n_primitive_pairs * 6;
     bpcache->bas_pair2bra = d_bas_pair2shls;
     bpcache->bas_pair2ket = d_bas_pair2shls + n_bas_pairs;
+    checkCudaErrors(cudaStreamSynchronize(stream));
+    free(bas_coords);
+    free(bas_atm);
 }
 }
 

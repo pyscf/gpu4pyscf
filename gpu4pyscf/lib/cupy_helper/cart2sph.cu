@@ -273,7 +273,7 @@ static void _cart2sph_ang7(double *cart, double *sph, int stride, int count){
 
 extern "C" {
 __host__
-int cart2sph(cudaStream_t stream, double *cart_gto, double *sph_gto, int stride, int count, int ang)
+int cart2sph(double *cart_gto, double *sph_gto, int stride, int count, int ang, cudaStream_t stream)
 {
     dim3 threads(THREADS);
     dim3 blocks((count + THREADS - 1)/THREADS);

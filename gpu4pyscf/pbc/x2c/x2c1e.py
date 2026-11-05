@@ -352,6 +352,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
 
     nao = cell.nao
     wj = cp.zeros((nao, bvk_ncells, nao))
+    stream = cp.cuda.get_current_stream()
     err = kern(
         ctypes.cast(wj.data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
@@ -371,7 +372,8 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-        ctypes.c_float(log_cutoff))
+        ctypes.c_float(log_cutoff),
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('contract_int3c2e_auxvec failed')
     pool = task_pool = head = None
@@ -435,7 +437,8 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
-            ctypes.c_int(compressing))
+            ctypes.c_int(compressing),
+            ctypes.c_void_p(stream.ptr))
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 

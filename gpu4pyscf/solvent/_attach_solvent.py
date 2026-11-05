@@ -174,8 +174,13 @@ class SCFWithSolvent(_Solvation):
     def gen_response(self, *args, **kwargs):
         vind = self.undo_solvent().gen_response(*args, **kwargs)
         is_uhf = isinstance(self, scf.uhf.UHF)
+        hermi = kwargs.get("hermi", 0)
+        singlet = kwargs.get("singlet", None)
+        with_j = kwargs.get("with_j", True)
         def vind_with_solvent(dm1):
             v = vind(dm1)
+            if (hermi == 2) or (singlet is False) or (not with_j): # Antisymmetric dm or RHF triplet response or UHF s response
+                return v
             if (self.with_solvent.equilibrium_solvation
                     and not self.with_solvent.frozen):
                 if is_uhf:

@@ -462,11 +462,11 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
                  int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
-                 int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
+                 int ao_pair_offset, int aux_offset, int nao_pairs, int naux, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
+    int3c2e_ip1_kernel<<<blocks, THREADS, shm_size, stream>>>(
             out, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
@@ -484,11 +484,11 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
                  int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
-                 int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
+                 int ao_pair_offset, int aux_offset, int nao_pairs, int naux, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    int3c2e_ipaux_kernel<<<blocks, THREADS, shm_size>>>(
+    int3c2e_ipaux_kernel<<<blocks, THREADS, shm_size, stream>>>(
             out, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,

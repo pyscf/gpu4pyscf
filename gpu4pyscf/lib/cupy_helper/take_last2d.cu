@@ -58,8 +58,8 @@ static void _takebak(double *out, double *a, int *indices,
 }
 
 extern "C" {
-int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices,
-                int blk_size, int na, int nb)
+int take_last2d(double *a, const double *b, int *indices,
+                int blk_size, int na, int nb, cudaStream_t stream)
 {
     // reorder j and k in a[i,j,k] with indicies
     int ntile = (na + THREADS - 1) / THREADS;
@@ -73,8 +73,8 @@ int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices,
     return 0;
 }
 
-int takebak(cudaStream_t stream, double *out, double *a_h, int *indices,
-            int count, int n_o, int n_a)
+int takebak(double *out, double *a_h, int *indices,
+            int count, int n_o, int n_a, cudaStream_t stream)
 {
     double *a_d;
     cudaError_t err;

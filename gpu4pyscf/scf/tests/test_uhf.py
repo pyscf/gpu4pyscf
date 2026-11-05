@@ -292,7 +292,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - e_ref) < 1e-5
 
     @unittest.skipIf(dftd4 is None, "dftd4 not available")
-    def test_uhf_d4(self):
+    def test_uhf_d4_high_cost(self):
         mf = scf.UHF(mol)
         mf.disp = 'd4'
         mf.kernel()
@@ -350,7 +350,6 @@ class KnownValues(unittest.TestCase):
     #test mulliken_spin_pop
     #test mulliken_meta
     #test mulliken_meta_spin
-    #test stability
     #test newton
     #test x2c
     #test dipole

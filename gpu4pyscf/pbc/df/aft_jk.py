@@ -486,7 +486,8 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(int(ft_opt.permutation_symmetry)))
+            ctypes.c_int(int(ft_opt.permutation_symmetry)),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
     if not ft_opt.permutation_symmetry:
@@ -667,7 +668,8 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(int(ft_opt.permutation_symmetry)))
+                ctypes.c_int(int(ft_opt.permutation_symmetry)),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             pqG = pqG_conj = dm_k = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')

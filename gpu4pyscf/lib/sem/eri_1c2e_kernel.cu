@@ -110,8 +110,7 @@ __global__ void rsc_kernel(
 
 extern "C" {
 
-int launch_rsc_kernel_c(
-    const int n_tasks,
+int launch_rsc_kernel_c(const int n_tasks,
     const double hartree2ev,
     const int* k_vec,
     const int* na, const double* ea,
@@ -120,12 +119,12 @@ int launch_rsc_kernel_c(
     const int* nd, const double* ed,
     const double* fx_table,
     const double* b_table,
-    double* out_val
+    double* out_val, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
 
-    rsc_kernel<<<blocks, threads>>>(
+    rsc_kernel<<<blocks, threads, 0, stream>>>(
         n_tasks, hartree2ev, k_vec,
         na, ea, nb, eb, nc, ec, nd, ed,
         fx_table, b_table, out_val

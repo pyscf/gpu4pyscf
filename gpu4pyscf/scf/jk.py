@@ -265,7 +265,6 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
     out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
     for i_dm in range(counts):
         libgint.cart2sph_C_mat_CT_with_padding(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
             ctypes.cast(spherical_matrix[i_dm].data.ptr, ctypes.c_void_p),
             ctypes.c_int(n_cartesian),
@@ -276,6 +275,7 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
             l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
             ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_bool(mol.cart),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
     if output_complex:
@@ -322,7 +322,6 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     out = cp.empty((counts, n_spherical, n_spherical), order = "C")
     for i_dm in range(counts):
         libgint.cart2sph_CT_mat_C_with_padding(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(cartesian_matrix[i_dm].data.ptr, ctypes.c_void_p),
             ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
             ctypes.c_int(n_cartesian),
@@ -333,6 +332,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
             l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
             ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_bool(mol.cart),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
     if output_complex:
@@ -376,7 +376,6 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
     out = cp.zeros((counts, n_cartesian, n_second), order = "C")
     for i in range(counts):
         libgint.cart2sph_C_mat_with_padding(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(out[i].data.ptr, ctypes.c_void_p),
             ctypes.cast(right_matrix[i].data.ptr, ctypes.c_void_p),
             ctypes.c_int(n_second),
@@ -386,6 +385,7 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
             l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
             ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_bool(mol.cart),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
 
     if output_complex:
@@ -578,7 +578,8 @@ class _VHFOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    mol._bas.ctypes, mol._env.ctypes)
+                    mol._bas.ctypes, mol._env.ctypes,
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
                 kern_counts += 1
@@ -701,7 +702,7 @@ class _VHFOpt:
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
 
-            err = libvhf_rys.RYS_init_rysj_constant()
+            err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('CUDA kernel initialization')
 
@@ -743,7 +744,8 @@ class _VHFOpt:
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     mol._bas.ctypes, mol._env.ctypes,
-                    ctypes.c_int(nao_pairs))
+                    ctypes.c_int(nao_pairs),
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
                 kern_counts += 1
@@ -880,7 +882,8 @@ class _VHFOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    mol._bas.ctypes)
+                    mol._bas.ctypes,
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
                 kern_counts += 1
@@ -1046,6 +1049,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
     bas_ij_cache = {} # The effective shell pair = ish*nbas+jsh
     shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
     sp0 = sp1 = 0
+    stream = cp.cuda.get_current_stream()
     for i, j in pair_keys:
         li = uniq_l[i]
         lj = uniq_l[j]
@@ -1061,7 +1065,8 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
             ctypes.cast(ish.data.ptr, ctypes.c_void_p),
             ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nish), ctypes.c_int(njsh),
-            ctypes.c_int(nbas), ctypes.c_int(tile))
+            ctypes.c_int(nbas), ctypes.c_int(tile),
+            ctypes.c_void_p(stream.ptr))
         pair_ij = pair_ij[ovlp_mask[pair_ij]]
         bas_ij_cache[i,j] = cp.asarray(pair_ij, dtype=np.uint32)
         nshl_pair = len(pair_ij)
@@ -1093,7 +1098,8 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
-        ctypes.c_double(sr_factor))
+        ctypes.c_double(sr_factor),
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('int2e_qcond_estimator kernel failed')
 
@@ -1110,7 +1116,8 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(bas_ij_idx)),
-            ctypes.c_double(omega))
+            ctypes.c_double(omega),
+            ctypes.c_void_p(stream.ptr))
         if err != 0:
             raise RuntimeError('fill_s_estimator kernel failed')
 

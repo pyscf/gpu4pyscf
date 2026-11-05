@@ -179,7 +179,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
 
-    def test_mcol_cam(self):
+    def test_mcol_cam_high_cost(self):
         mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().run()
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
