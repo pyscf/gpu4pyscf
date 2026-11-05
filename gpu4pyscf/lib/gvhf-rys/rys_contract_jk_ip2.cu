@@ -1194,11 +1194,11 @@ while (1) {
 extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        uint32_t *pool, double *dd_pool, int *head, int workers);
+                        uint32_t *pool, double *dd_pool, int *head, int workers, cudaStream_t stream);
 extern int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                         float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                        uint32_t *pool, double *dd_pool, int *head, int workers);
+                        uint32_t *pool, double *dd_pool, int *head, int workers, cudaStream_t stream);
 
 extern "C" {
 int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
@@ -1210,7 +1210,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
                         float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                         float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1254,10 +1254,10 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                                     s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers)) {
+                                     s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers, stream)) {
         int nf = nfi * nfj * nfk * nfl;
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
@@ -1275,7 +1275,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
             }
         }
 
-        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_ip2_type12_kernel<<<workers, threads, buflen, stream>>>(
                 envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
@@ -1301,7 +1301,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
                         float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                         float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1345,10 +1345,10 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                                    s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers)) {
+                                    s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers, stream)) {
         int nf = nfi * nfj * nfk * nfl;
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
@@ -1367,7 +1367,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
             }
         }
 
-        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_ip2_type3_kernel<<<workers, threads, buflen, stream>>>(
                 envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }

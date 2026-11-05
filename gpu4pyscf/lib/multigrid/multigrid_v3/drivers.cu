@@ -81,24 +81,24 @@ void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
 
 extern "C" {
 void update_lattice_vectors(double *lattice_vectors,
-                            double *reciprocal_lattice_vectors)
+                            double *reciprocal_lattice_vectors, cudaStream_t stream)
 {
-    cudaMemcpyToSymbol(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    cudaMemcpyToSymbol(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
+    cudaMemcpyToSymbolAsync(c_lattice_vectors, lattice_vectors, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
+    cudaMemcpyToSymbolAsync(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
 }
 
-void update_dxyz_dabc(double *dxyz_dabc) {
-    cudaMemcpyToSymbol(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
+void update_dxyz_dabc(double *dxyz_dabc, cudaStream_t stream) {
+    cudaMemcpyToSymbolAsync(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
 }
 
-int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts)
+int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts, cudaStream_t stream)
 {
     int mx = out_shape[0];
     int my = out_shape[1];
     int mz = out_shape[2];
     dim3 threads(32, 16);
     dim3 grids(mx, (my+15)/16);
-    fft_take_kernel<<<grids, threads>>>(
+    fft_take_kernel<<<grids, threads, 0, stream>>>(
         out, in, mx, my, mz, in_shape[0], in_shape[1], in_shape[2], counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -108,14 +108,14 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     return 0;
 }
 
-int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts)
+int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts, cudaStream_t stream)
 {
     int mx = in_shape[0];
     int my = in_shape[1];
     int mz = in_shape[2];
     dim3 threads(32, 16);
     dim3 grids(mx, (my+15)/16);
-    fft_takebak_kernel<<<grids, threads>>>(
+    fft_takebak_kernel<<<grids, threads, 0, stream>>>(
         out, in, mx, my, mz, out_shape[0], out_shape[1], out_shape[2], counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

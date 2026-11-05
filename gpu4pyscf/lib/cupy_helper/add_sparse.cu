@@ -36,7 +36,7 @@ void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
 
 extern "C" {
 __host__
-int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, int m, int count){
+int add_sparse(double *a, double *b, int *indices, int n, int m, int count, cudaStream_t stream){
     int ntile = (m + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile);

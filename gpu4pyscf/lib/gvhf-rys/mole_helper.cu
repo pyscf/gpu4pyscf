@@ -1733,11 +1733,11 @@ extern "C" {
 int bra_from_sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
                     int *c_ao_loc, int *p_ao_loc,
-                    int nbas, int npbas, int ncol, int counts, int cart)
+                    int nbas, int npbas, int ncol, int counts, int cart, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     dim3 blocks(nbatch_col, nbas, counts);
-    bra_from_sorted_kernel<<<blocks, THREADS>>>(
+    bra_from_sorted_kernel<<<blocks, THREADS, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol, cart);
     cudaError_t err = cudaGetLastError();
@@ -1750,21 +1750,20 @@ int bra_from_sorted(double *out, double *input, double *recontract_coef,
 
 int bra_sorted2cart(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
-    return bra_from_sorted(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1);
+    return bra_from_sorted(out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
+            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1, stream);
 }
 
 int bra_to_sorted(double *out, double *input, double *recontract_coef,
                   int *recontract_bas, int *pbas_idx_recontraction,
                   int *c_ao_loc, int *p_ao_loc,
-                  int nbas, int npbas, int ncol, int counts, int cart)
+                  int nbas, int npbas, int ncol, int counts, int cart, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     dim3 blocks(nbatch_col, nbas, counts);
-    bra_to_sorted_kernel<<<blocks, THREADS>>>(
+    bra_to_sorted_kernel<<<blocks, THREADS, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol, cart);
     cudaError_t err = cudaGetLastError();
@@ -1777,20 +1776,19 @@ int bra_to_sorted(double *out, double *input, double *recontract_coef,
 
 int bra_cart2sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
-    return bra_to_sorted(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1);
+    return bra_to_sorted(out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
+            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1, stream);
 }
 
 int bra_sorted2sph(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     dim3 blocks(nbatch_col, nbas, counts);
-    bra_sorted2sph_kernel<<<blocks, THREADS>>>(
+    bra_sorted2sph_kernel<<<blocks, THREADS, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
     cudaError_t err = cudaGetLastError();
@@ -1803,11 +1801,11 @@ int bra_sorted2sph(double *out, double *input, double *recontract_coef,
 
 int bra_sph2sorted(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     dim3 blocks(nbatch_col, nbas, counts);
-    bra_sph2sorted_kernel<<<blocks, THREADS>>>(
+    bra_sph2sorted_kernel<<<blocks, THREADS, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
     cudaError_t err = cudaGetLastError();
@@ -1820,11 +1818,11 @@ int bra_sph2sorted(double *out, double *input, double *recontract_coef,
 
 int ket_from_sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart, cudaStream_t stream)
 {
     dim3 threads(TILE_X, TILE_Y);
     dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_from_sorted_kernel<<<blocks, threads>>>(
+    ket_from_sorted_kernel<<<blocks, threads, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow, cart);
     cudaError_t err = cudaGetLastError();
@@ -1837,20 +1835,19 @@ int ket_from_sorted(double *out, double *input, double *recontract_coef,
 
 int ket_sorted2cart(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
-    return ket_from_sorted(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1);
+    return ket_from_sorted(out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
+            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1, stream);
 }
 
 int ket_to_sorted(double *out, double *input, double *recontract_coef,
                   int *recontract_bas, int *pbas_idx_recontraction,
-                  int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart)
+                  int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart, cudaStream_t stream)
 {
     dim3 threads(TILE_X, TILE_Y);
     dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_to_sorted_kernel<<<blocks, threads>>>(
+    ket_to_sorted_kernel<<<blocks, threads, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow, cart);
     cudaError_t err = cudaGetLastError();
@@ -1863,20 +1860,19 @@ int ket_to_sorted(double *out, double *input, double *recontract_coef,
 
 int ket_cart2sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
-    return ket_to_sorted(
-            out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1);
+    return ket_to_sorted(out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
+            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1, stream);
 }
 
 int ket_sorted2sph(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
     dim3 threads(TILE_X, TILE_Y);
     dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_sorted2sph_kernel<<<blocks, threads>>>(
+    ket_sorted2sph_kernel<<<blocks, threads, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
     cudaError_t err = cudaGetLastError();
@@ -1889,11 +1885,11 @@ int ket_sorted2sph(double *out, double *input, double *recontract_coef,
 
 int ket_sph2sorted(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
     dim3 threads(TILE_X, TILE_Y);
     dim3 blocks((nrow+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas+TILE_X-1)/TILE_X);
-    ket_sph2sorted_kernel<<<blocks, threads>>>(
+    ket_sph2sorted_kernel<<<blocks, threads, 0, stream>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
     cudaError_t err = cudaGetLastError();

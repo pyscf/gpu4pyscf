@@ -36,7 +36,7 @@
     __shared__ int expj;
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
+    KERNEL<<<workers, threads, buflen*sizeof(double), stream>>>(\
     *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head)
 
 #define JKENERGY_KERNEL_ARGS \
@@ -57,5 +57,5 @@
     __shared__ int expi, expj;
 
 #define LAUNCH_JKENERGY_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double)>>>( \
+    KERNEL<<<workers, threads, buflen*sizeof(double), stream>>>(\
     *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head)

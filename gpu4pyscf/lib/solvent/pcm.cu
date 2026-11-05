@@ -762,10 +762,10 @@ static void _pcm_d2F_to_d2Sii(const double* __restrict__ F, const double* __rest
 }
 
 extern "C" {
-int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
+int pcm_d_s(double *matrix_d, double *matrix_s,
                     const double *coords, const double *norm_vec, const double *r_vdw,
                     const double *charge_exp, const double *switch_fun,
-                    int n)
+                    int n, cudaStream_t stream)
 {
     int ntilex = (n + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
@@ -779,9 +779,9 @@ int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
     return 0;
 }
 
-int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double *right_vector,
+int pcm_left_multiply_s(double *output, const double *right_vector,
                         const double *coords, const double *charge_exp, const double *S_diag,
-                        const int n)
+                        const int n, const cudaStream_t stream)
 {
     {
         const int ntiley = (n + THREADS - 1) / THREADS;
@@ -806,9 +806,9 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
     return 0;
 }
 
-int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double *right_vector,
+int pcm_left_multiply_d(double *output, const double *right_vector,
                         const double *coords, const double *norm_vec, const double *r_vdw, const double *charge_exp,
-                        const int n, const bool transpose)
+                        const int n, const bool transpose, const cudaStream_t stream)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const dim3 threads(THREADS, THREADS);
@@ -824,10 +824,10 @@ int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double 
     return 0;
 }
 
-int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
+int pcm_dd_ds(double *matrix_dD, double *matrix_dS,
               const double *coords, const double *norm_vec,
               const double *charge_exp,
-              int n)
+              int n, cudaStream_t stream)
 {
     int ntilex = (n + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
@@ -841,9 +841,9 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
     return 0;
 }
 
-int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double *right_vector,
+int pcm_left_multiply_ds(double *output, const double *right_vector,
                          const double *coords, const double *charge_exp,
-                         const int n, const bool transpose)
+                         const int n, const cudaStream_t stream)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const dim3 threads(THREADS, THREADS);
@@ -856,9 +856,9 @@ int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double
     return 0;
 }
 
-int pcm_left_multiply_ds_one_atom(const cudaStream_t stream, double *output, const double *right_vector,
+int pcm_left_multiply_ds_one_atom(double *output, const double *right_vector,
                                   const double *coords, const double *charge_exp,
-                                  const int n, const int g0, const int g1)
+                                  const int n, const int g0, const int g1, const cudaStream_t stream)
 {
     if (g0 > g1) {
         return 1;
@@ -874,9 +874,9 @@ int pcm_left_multiply_ds_one_atom(const cudaStream_t stream, double *output, con
     return 0;
 }
 
-int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double *right_vector,
+int pcm_left_multiply_dd(double *output, const double *right_vector,
                          const double *coords, const double *charge_exp, const double* norm_vec,
-                         const int n, const bool transpose)
+                         const int n, const bool transpose, const cudaStream_t stream)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const dim3 threads(THREADS, THREADS);
@@ -892,10 +892,10 @@ int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double
     return 0;
 }
 
-int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
+int pcm_d2d_d2s(double *matrix_d2D, double *matrix_d2S,
                 const double *coords, const double *norm_vec,
                 const double *charge_exp,
-                int n)
+                int n, cudaStream_t stream)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const int ntiley = (n + THREADS - 1) / THREADS;
@@ -909,10 +909,10 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
     return 0;
 }
 
-int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
+int pcm_contract_d2s_offdiagonal(double *output,
                                  const double *left_vector, const double *right_vector, const int *gridslice,
                                  const double *coords, const double *charge_exp,
-                                 const int ngrids, const int natm)
+                                 const int ngrids, const int natm, const cudaStream_t stream)
 {
     constexpr int n_thread_per_block = 16; // 32 will cause "too many resources requested for launch", out of register
     const dim3 threads(n_thread_per_block, n_thread_per_block);
@@ -928,8 +928,8 @@ int pcm_contract_d2s_offdiagonal(const cudaStream_t stream, double *output,
     return 0;
 }
 
-int pcm_d2f_to_d2sii(cudaStream_t stream, const double* F, const double* dF, const double* d2F, const double* charge_exp,
-                     double* d2Sii, const int n_atom, const int n_grid)
+int pcm_d2f_to_d2sii(const double* F, const double* dF, const double* d2F, const double* charge_exp,
+                     double* d2Sii, const int n_atom, const int n_grid, cudaStream_t stream)
 {
     const int ntilex = (n_grid + THREADS - 1) / THREADS;
     const int ntiley = (n_atom * n_atom + THREADS - 1) / THREADS;

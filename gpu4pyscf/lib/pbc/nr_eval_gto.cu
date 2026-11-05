@@ -1792,7 +1792,7 @@ static void _deriv1_strain_tensor_kernel(
 extern "C" {
 int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
                       double *grids, int ngrids, int nao, int nbas,
-                      int deriv, int cart, double *rcut)
+                      int deriv, int cart, double *rcut, cudaStream_t stream)
 {
     constexpr int ngrids_per_block = THREADS;
     int threads = ngrids_per_block;
@@ -1800,25 +1800,25 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
     switch (deriv) {
     case 0:
         if (cart) {
-            _cart_deriv0_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _cart_deriv0_kernel<<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         } else {
-            _sph_deriv0_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _sph_deriv0_kernel<<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     case 1:
         if (cart) {
-            _cart_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _cart_deriv1_kernel<<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         } else {
-            _sph_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _sph_deriv1_kernel<<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     case 2:
         if (cart) {
-            _cart_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
-            _cart_ip2_kernel<<<blocks, threads>>>(out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
+            _cart_deriv1_kernel<<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
+            _cart_ip2_kernel<<<blocks, threads, 0, stream>>>(out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
         } else {
-            _sph_deriv1_kernel<<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
-            _sph_ip2_kernel<<<blocks, threads>>>(out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
+            _sph_deriv1_kernel<<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
+            _sph_ip2_kernel<<<blocks, threads, 0, stream>>>(out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
         }
         break;
     default:
@@ -1835,7 +1835,7 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
 
 int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
                       double *grids, int ngrids, int nao, int nbas,
-                      int deriv, int cart, double *rcut)
+                      int deriv, int cart, double *rcut, cudaStream_t stream)
 {
     constexpr int ngrids_per_block = THREADS;
     int threads = ngrids_per_block;
@@ -1843,16 +1843,16 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
     switch (deriv) {
     case 0:
         if (cart) {
-            _deriv0_strain_tensor_kernel<true>  <<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _deriv0_strain_tensor_kernel<true>  <<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         } else {
-            _deriv0_strain_tensor_kernel<false> <<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _deriv0_strain_tensor_kernel<false> <<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     case 1:
         if (cart) {
-            _deriv1_strain_tensor_kernel<true>  <<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _deriv1_strain_tensor_kernel<true>  <<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         } else {
-            _deriv1_strain_tensor_kernel<false> <<<blocks, threads>>>(out, *envs, grids, ngrids, nao, rcut);
+            _deriv1_strain_tensor_kernel<false> <<<blocks, threads, 0, stream>>>(out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     default:

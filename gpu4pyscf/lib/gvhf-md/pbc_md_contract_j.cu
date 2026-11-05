@@ -319,7 +319,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float *qd_ij_max, float *qd_kl_max,
                 float *q_cond_ij, float *q_cond_kl, float cutoff,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -380,7 +380,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
         if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
-            pbc_md_j_kernel<<<blocks, threads, buflen>>>(
+            pbc_md_j_kernel<<<blocks, threads, buflen, stream>>>(
                 *envs, jmat, bounds, q_cond_ij, q_cond_kl,
                 threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
         }

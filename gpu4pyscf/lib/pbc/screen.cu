@@ -84,10 +84,10 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
 
 extern "C" {
 int estimate_aft_Ecut1(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
-                      float *exps, float *coef, int npairs, float log_cutoff)
+                      float *exps, float *coef, int npairs, float log_cutoff, cudaStream_t stream)
 {
     int blocks = (npairs + THREADS-1)/THREADS;
-    estimate_aft_Ecut_kernel<<<blocks, THREADS>>>(
+    estimate_aft_Ecut_kernel<<<blocks, THREADS, 0, stream>>>(
         Ecut, bas_ij_idx, *envs, exps, coef, npairs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -910,13 +910,13 @@ template<int RADIAL>
 static int ppnl_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0) return 0;
     cudaError_t err = cudaFuncSetAttribute(
         ppnl_derivatives_kernel<RADIAL>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     if (err == cudaSuccess) {
-        ppnl_derivatives_kernel<RADIAL><<<nbatches_shl_pair, THREADS, shm_size>>>(
+        ppnl_derivatives_kernel<RADIAL><<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx,
             gout_stride_lookup, naoi, naoj);
         err = cudaGetLastError();
@@ -933,10 +933,10 @@ extern "C" {
 int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r2_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r2_origi_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_r2_origi_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -950,10 +950,10 @@ int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r4_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r4_origi_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_r4_origi_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -967,10 +967,10 @@ int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
-                          int naoi, int naoj, size_t ij_offset)
+                          int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r2_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r2_origi_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_r2_origi_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -984,10 +984,10 @@ int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
-                          int naoi, int naoj, size_t ij_offset)
+                          int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r4_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_r4_origi_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int1e_r4_origi_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
@@ -1001,31 +1001,31 @@ int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCovlp_cross_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     return ppnl_derivatives<0>(grad, sigma, dm, envs, shm_size,
                                  nbatches_shl_pair, shl_pair_offsets, bas_ij_idx,
-                                 gout_stride_lookup, naoi, naoj);
+                                 gout_stride_lookup, naoi, naoj, stream);
 }
 
 int PBCint1e_r2_origi_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     return ppnl_derivatives<2>(grad, sigma, dm, envs, shm_size,
                                  nbatches_shl_pair, shl_pair_offsets, bas_ij_idx,
-                                 gout_stride_lookup, naoi, naoj);
+                                 gout_stride_lookup, naoi, naoj, stream);
 }
 
 int PBCint1e_r4_origi_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     return ppnl_derivatives<4>(grad, sigma, dm, envs, shm_size,
                                  nbatches_shl_pair, shl_pair_offsets, bas_ij_idx,
-                                 gout_stride_lookup, naoi, naoj);
+                                 gout_stride_lookup, naoi, naoj, stream);
 }
 
 }

@@ -441,7 +441,7 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
                             uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                             int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
-                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
         return 0;
@@ -450,8 +450,8 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
-    ejk_int3c2e_deriv_kernel<<<workers, THREADS, shm_size>>>(
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
+    ejk_int3c2e_deriv_kernel<<<workers, THREADS, shm_size, stream>>>(
             ejk, sigma, dm, dm_auxvec, omega, *envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, nauxbas, naux,

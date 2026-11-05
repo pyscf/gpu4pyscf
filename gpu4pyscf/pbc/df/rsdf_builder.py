@@ -919,9 +919,9 @@ def _symmetrize_cderi(out, ki_idx=None):
     naux *= out.dtype.itemsize // 8
     stream = cp.cuda.get_current_stream()
     err = libpbc.symmetrize_cderi(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p), mapping_ptr,
-        ctypes.c_int(nkpts), ctypes.c_int(nao), ctypes.c_int(naux))
+        ctypes.c_int(nkpts), ctypes.c_int(nao), ctypes.c_int(naux),
+        ctypes.cast(stream.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('symmetrize_cderi kernel failed')
     return out
@@ -987,14 +987,14 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             j3c_ptr = ctypes.cast(cderi_compressed.data.ptr, ctypes.c_void_p)
         stream = cp.cuda.get_current_stream()
         err = kern(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(cderi.data.ptr, ctypes.c_void_p), ctypes.c_int(naux),
             j3c_ptr,
             ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nao_pairs),
             ctypes.c_int(nL*nao),
             ctypes.c_int(0), ctypes.c_int(naux),
-            ctypes.c_int(0), ctypes.c_int(on_host))
+            ctypes.c_int(0), ctypes.c_int(on_host),
+            ctypes.cast(stream.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('decompress_and_transpose kernel failed')
     else:
