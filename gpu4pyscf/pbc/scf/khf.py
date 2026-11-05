@@ -294,6 +294,21 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
             grids = UniformGrids(mf.cell)
     return ni.get_rho(mf.cell, dm, grids, kpts)
 
+def kpt_pair_reverse_map(nkpts, k_pairs):
+    '''
+    Generate a 1d array conj_k_idx of length nkpts.
+    If the conj_k_idx[k] < 0, then the corresponding k point value (of Fock, for example) must be computed independently.
+    If the conj_k_idx[k] >= 0, then the corresponding k point value can be obtained by time reversal symmetry, and
+    conj_k_idx[k] stores the k index of -k. And it is guaranteed that conj_k_idx[k] < k, so
+    if k is looped from 0 to nkpts, conj_k_idx[k] must have been already computed.
+    '''
+    conj_k_idx = np.zeros(nkpts, dtype=int) - 1
+    for k, k_conj in k_pairs:
+        if k == k_conj or k_conj is None:
+            continue
+        k, k_conj = min(k, k_conj), max(k, k_conj)
+        conj_k_idx[k_conj] = k
+    return conj_k_idx
 
 class KSCF(pbchf.SCF):
     '''SCF base class with k-point sampling.
