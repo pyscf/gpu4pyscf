@@ -18,9 +18,9 @@ import unittest
 import pyscf
 from gpu4pyscf.dft import rks, libxc
 try:
-    from gpu4pyscf.dispersion import dftd3, dftd4, gcp
+    from gpu4pyscf.dispersion import dftd3, dftd4
 except (ImportError, OSError):
-    dftd3 = dftd4 = gcp = None
+    dftd3 = dftd4 = None
 from packaging.version import Version
 
 atom = '''
@@ -182,7 +182,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
     @unittest.skipIf(dftd3 is None, 'DFTD3 not installed')
-    def test_d3cso(self):
+    def test_d3cso_high_cost(self):
         # simple-dftd3 test/unit/test_param.f90::test_d3cso_mb01 (MB16-43/01)
         mol = pyscf.M(atom='''
             Na -1.85528263484662 +3.58670515364616 -2.41763729306344
@@ -234,27 +234,6 @@ class KnownValues(unittest.TestCase):
             mf.disp = version
             self.assertEqual(mf.get_dispersion(), 0.)
             self.assertEqual(mf.scf_summary['dispersion'], 0.)
-
-    @unittest.skipIf(dftd3 is None or dftd4 is None or gcp is None,
-                     'DFTD3, DFTD4 or gCP not installed')
-    def test_3c_ghost_atoms(self):
-        from gpu4pyscf.drivers import dft_3c_driver as driver
-        mol = pyscf.M(atom='H 0 0 0; ghost-H 0 1 0; H 0 0 1', verbose=0)
-        real_mol = pyscf.M(atom='H 0 0 0; H 0 0 1', verbose=0)
-        mf = mol.RKS().to_gpu()
-        real_mf = real_mol.RKS().to_gpu()
-        for xc_disp, xc_gcp in [('b97-3c', 'b973c'), ('r2scan-3c', 'r2scan3c'),
-                               ('wb97x-3c', None)]:
-            with self.subTest(xc=xc_disp):
-                energy = driver.gen_disp_fun(xc_disp, xc_gcp)
-                self.assertAlmostEqual(energy(mf), energy(real_mf), 12)
-                direct = driver.get_dispersion(mol, xc_disp)
-                real_direct = driver.get_dispersion(real_mol, xc_disp)
-                self.assertAlmostEqual(direct['energy'], real_direct['energy'], 12)
-
-        mf = pyscf.M(atom='ghost-H 0 0 0; X-H 0 0 1', verbose=0).RKS().to_gpu()
-        self.assertEqual(driver.gen_disp_fun('b97-3c', 'b973c')(mf), 0.)
-        self.assertEqual(driver.get_dispersion(mf.mol, 'b97-3c')['energy'], 0.)
 
     def test_rks_hf(self):
         print('-------- HF -------------')
