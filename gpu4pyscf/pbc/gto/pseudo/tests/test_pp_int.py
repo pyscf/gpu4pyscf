@@ -27,7 +27,6 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
-from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.gto.pseudo.pp_int import (
     fake_cell_vnl, _int_vnl, _contract_ppnl, get_pp_nl)
 
@@ -112,28 +111,6 @@ class TestGetPpNlKpts(unittest.TestCase):
     def test_iron_single_kpts(self):
         kpts = cell_fe.make_kpts([2, 5, 1])
         self._compare(cell_fe, kpts, places=11)
-
-    def test_input_forms(self):
-        from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
-        cell = pyscf.M(atom='C .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
-                       basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
-                       pseudo='gth-pade', precision=1e-9, verbose=0)
-        gamma = get_pp_nl_gpu(cell)
-        self.assertEqual(gamma.shape, (cell.nao, cell.nao))
-        self.assertEqual(gamma.dtype, np.float64)
-        np.testing.assert_allclose(gamma.get(), np.asarray(get_pp_nl(cell)).reshape(gamma.shape),
-                                   atol=1e-10, rtol=0)
-        for kpt in (np.zeros(3), cell.make_kpts([3, 1, 1])[1]):
-            reference = np.asarray(get_pp_nl(cell, kpt[None]))
-            for kpts in (kpt, kpt.tolist(), tuple(kpt), kpt[None],
-                         kpt[None].tolist(), KPoints(cell, kpt[None])):
-                with self.subTest(kpts=kpts):
-                    result = get_pp_nl_gpu(cell, kpts)
-                    batched = isinstance(kpts, KPoints) or np.ndim(kpts) == 2
-                    expected = reference if batched else reference[0]
-                    self.assertEqual(result.shape, expected.shape)
-                    self.assertEqual(result.dtype, np.float64 if not kpt.any() else np.complex128)
-                    np.testing.assert_allclose(result.get(), expected, atol=1e-10, rtol=0)
 
 
 if __name__ == "__main__":

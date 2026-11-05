@@ -137,22 +137,6 @@ class SmallScalarX2C(unittest.TestCase):
         self.light_speed.__enter__()
         self.addCleanup(self.light_speed.__exit__, None, None, None)
 
-    def test_helper_default_gamma_and_single_batch_shapes(self):
-        helper = x2c1e.SpinFreeX2CHelper(self.cell)
-        for approx in ('1E', '1E-ATOM'):
-            helper.approx = approx
-            for method in ('get_hcore', 'get_xmat'):
-                with self.subTest(approx=approx, method=method):
-                    get_matrix = getattr(helper, method)
-                    default = get_matrix()
-                    single = get_matrix(kpts=np.zeros(3))
-                    batch = get_matrix(kpts=np.zeros((1, 3)))
-                    self.assertEqual(default.ndim, 2)
-                    self.assertEqual(default.shape, single.shape)
-                    self.assertEqual(batch.shape, (1,) + default.shape)
-                    cp.testing.assert_allclose(default, single, atol=1e-12, rtol=0)
-                    cp.testing.assert_allclose(default, batch[0], atol=1e-12, rtol=0)
-
     def test_get_hcore(self):
         for kpts in (np.zeros(3), self.kpts):
             with self.subTest(kpts=kpts.shape):

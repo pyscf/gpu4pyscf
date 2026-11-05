@@ -26,6 +26,8 @@ if hasattr(multigrid_cpu, 'MultiGridNumInt'):
 else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v3 as multigrid
+from gpu4pyscf.pbc.df import aft, fft as fft_df
+from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.tools import ifft, fft
 from gpu4pyscf.pbc.dft import numint, UniformGrids
 from gpu4pyscf.pbc.dft import KRKS as KRKS_gpu
@@ -1416,6 +1418,30 @@ class AdditionalModes(unittest.TestCase):
             reference[selection] += expected
         np.testing.assert_array_equal(target.get(), reference)
         np.testing.assert_array_equal(source.get(), spectrum)
+
+    def test_pp_gamma_shapes(self):
+        cell = gto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                     mesh=[31]*3, precision=1e-8, verbose=0)
+        ref = aft.AFTDF(cell).get_pp()
+        for factory in (fft_df.FFTDF, GDF, multigrid.MultiGridNumInt):
+            obj = factory(cell)
+            default = obj.get_pp()
+            assert default.shape == (cell.nao, cell.nao)
+            assert default.dtype == np.float64
+            assert abs(default - ref).max() < 1e-8
+
+    def test_pp_gamma_batch_shapes(self):
+        cell = gto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                     mesh=[31]*3, precision=1e-8, verbose=0)
+        kpts = np.zeros((1, 3))
+        ref = aft.AFTDF(cell).get_pp(kpts)
+        for factory in (fft_df.FFTDF, GDF, multigrid.MultiGridNumInt):
+            result = factory(cell).get_pp(kpts)
+            assert result.shape == (1, cell.nao, cell.nao)
+            assert result.dtype in (np.float64, np.complex128)
+            assert abs(result - ref).max() < 1e-8
 
 
 if __name__ == '__main__':

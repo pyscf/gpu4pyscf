@@ -54,7 +54,7 @@ def tearDownModule():
     global cell, cell1, kpts
     del cell, cell1, kpts
 
-class AFTProtocols(unittest.TestCase):
+class KnownValues(unittest.TestCase):
     def setUp(self):
         self.cell = pgto.M(
             atom='C .2 .3 .4; H 1.4 1.2 1.6', unit='Bohr', spin=1,
@@ -198,9 +198,62 @@ class AFTProtocols(unittest.TestCase):
     def test_long_range_mesh_and_weighted_kernels_nonzero_kpoint(self):
         self._check_long_range_mesh_and_weighted_kernels(np.array([.13, -.07, .09]))
 
+    def test_aft_gamma_derivative_with_kpts(self):
+        cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                       basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                       mesh=[15]*3, precision=1e-8, verbose=0)
+        dm = cp.eye(cell.nao)
+        obj = aft.AFTDF(cell)
 
+        # Coulomb energy derivatives with default Gamma sampling.
+        refj = obj.get_ej_derivatives(dm)
+        assert refj.shape == (cell.natm+3, 3)
+        assert refj.dtype == np.float64
 
-class KnownValues(unittest.TestCase):
+        # An explicit single Gamma point gives the same derivatives.
+        result = obj.get_ej_derivatives(dm, kpts=np.zeros(3))
+        assert result.shape == refj.shape
+        assert result.dtype == np.float64
+        assert abs(result - refj).max() < 1e-10
+
+        # A one-point Gamma batch preserves the energy-derivative layout.
+        result = obj.get_ej_derivatives(dm, kpts=np.zeros((1, 3)))
+        assert result.shape == refj.shape
+        assert result.dtype == np.float64
+        assert abs(result - refj).max() < 1e-10
+
+        # Exchange energy derivatives with default Gamma sampling.
+        refk = obj.get_ek_derivatives(dm)
+        assert refk.shape == (cell.natm+3, 3)
+        assert refk.dtype == np.float64
+
+        # An explicit single Gamma point gives the same derivatives.
+        result = obj.get_ek_derivatives(dm, kpts=np.zeros(3))
+        assert result.shape == refk.shape
+        assert result.dtype == np.float64
+        assert abs(result - refk).max() < 1e-10
+
+        # A one-point Gamma batch preserves the energy-derivative layout.
+        result = obj.get_ek_derivatives(dm, kpts=np.zeros((1, 3)))
+        assert result.shape == refk.shape
+        assert result.dtype == np.float64
+        assert abs(result - refk).max() < 1e-10
+
+    def test_get_jk_preserves_density_shape(self):
+        cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                        basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                        mesh=[15]*3, precision=1e-8, verbose=0)
+        obj = aft.AFTDF(cell)
+        dm = cp.eye(cell.nao)
+        spin_dm = cp.stack([dm*.6, dm*.4])
+        for density in (dm, dm[None], spin_dm, spin_dm[:, None]):
+            vj, vk = obj.get_jk(density)
+            assert vj.shape == vk.shape == density.shape
+            assert vj.dtype == vk.dtype == np.float64
+            refj, refk = obj.get_jk(density, kpts=np.zeros((1, 3)))
+            assert abs(vj - refj).max() < 1e-10
+            assert abs(vk - refk).max() < 1e-10
+
     def test_aft_get_pp(self):
         ref = aft_cpu.AFTDF(cell).get_pp(kpts=kpts[0])
         v1 = aft.AFTDF(cell).get_pp(kpts=kpts[0]).get()
