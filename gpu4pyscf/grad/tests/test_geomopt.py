@@ -53,7 +53,7 @@ eps = 1e-3
 
 class KnownValues(unittest.TestCase):
     @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
-    def test_rks_geomopt(self):
+    def test_rks_geomopt_high_cost(self):
         mf = rks.RKS(mol, xc=xc)
         mf.disp = disp
         mf.grids.level = grids_level

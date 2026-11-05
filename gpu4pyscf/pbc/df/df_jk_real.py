@@ -73,7 +73,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             nocc = max(x.shape[1] for x in occ_coeff)
 
         blksize = mydf.get_blksize(extra=nao*nocc)
-        aux_iter = lib.prange(0, naux, blksize)
+        aux_iter = iter(list(lib.prange(0, naux, blksize)))
 
         def proc():
             vj_packed = vk = None
@@ -103,7 +103,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             return vj_packed, vk
     else:
         blksize = mydf.get_blksize(extra=nao*nao)
-        aux_iter = lib.prange(0, naux, blksize)
+        aux_iter = iter(list(lib.prange(0, naux, blksize)))
 
         def proc():
             vj_packed = vk = None

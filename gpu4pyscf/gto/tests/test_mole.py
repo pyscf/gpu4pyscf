@@ -12,9 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+import numpy as np
+import pytest
 import cupy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import lib
+from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.gto import mole as mole_gpu
 
 def test_basis_seg_contraction():
@@ -267,8 +272,80 @@ C S
     0.46  0.40  1.00
     0.08  0.20  0.00'''), diffuse_cutoff=0.1)
     assert mol.nbas == 2
-test_basis_seg_contraction()
-test_general_contraction()
-test_apply_C_dot()
-test_basis_recontraction()
-print('d')
+
+@pytest.mark.parametrize('spin', [0, 1])
+@pytest.mark.parametrize('name', ['KHF', 'KKS'])
+@pytest.mark.skipif(Version(pyscf.__version__) < Version('2.9'),
+                     reason='PySCF 2.8: missing _MoleLazyCallAdapter')
+def test_kpoint_scf_factory(spin, name):
+    atom = 'H 0 0 0' if spin else 'He 0 0 0'
+    cpu = pbcgto.M(atom=atom, basis='sto-3g', spin=spin, verbose=0,
+                   a=np.eye(3)*4, mesh=[5, 5, 5])
+    cell = mole_gpu.Cell.from_cpu(cpu)
+    kpts = cpu.make_kpts([2, 1, 1])
+    kwargs = {'kpts': kpts, 'exxdiv': None, 'conv_tol': 3e-10}
+    if name == 'KKS':
+        kwargs['xc'] = 'pbe'
+    mf = getattr(cell, name)(**kwargs)
+    reference = getattr(cpu, name)(**kwargs).to_gpu()
+    assert type(mf) is type(reference)
+    np.testing.assert_allclose(cp.asnumpy(mf.kpts), kpts, atol=0, rtol=0)
+    assert mf.exxdiv is None
+    assert mf.conv_tol == 3e-10
+    if name == 'KKS':
+        assert mf.xc == 'pbe'
+
+@pytest.mark.parametrize('method', ['CT_dot_mat', 'C_dot_mat'])
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_sort_complex_ao_left_multiply(method, ndim):
+    molecule = pyscf.M(atom='H 0 0 0; F 0 0 1', basis='ccpvdz', verbose=0)
+    sorted_mol = mole_gpu.SortedGTO.from_mol(molecule)
+    c = sorted_mol.ctr_coeff.get()
+    transform = c.T if method == 'CT_dot_mat' else c
+    nin = transform.shape[1]
+    if ndim == 1:
+        shape = (nin,)
+    elif ndim == 2:
+        shape = (nin, 3)
+    else:
+        shape = (2, nin, 3)
+    cp.random.seed(547)
+    mat = cp.random.rand(*shape) + 1j*cp.random.rand(*shape)
+    host = mat.get()
+    expected = transform @ host
+    # Vector interfaces are equivalent to the corresponding matrix product.
+    out = cp.empty(expected.shape, dtype=np.complex128) if ndim != 2 else None
+    actual = getattr(sorted_mol, method)(mat, out=out)
+    assert actual.shape == expected.shape and actual.dtype == np.complex128
+    if out is not None:
+        assert actual.data.ptr == out.data.ptr
+    np.testing.assert_allclose(actual.get(), expected, atol=2e-12, rtol=2e-12)
+    np.testing.assert_array_equal(cp.asnumpy(mat), host)
+
+
+@pytest.mark.parametrize('method', ['mat_dot_C', 'mat_dot_CT'])
+@pytest.mark.parametrize('ndim', [1, 2, 3])
+def test_sort_complex_ao_right_multiply(method, ndim):
+    molecule = pyscf.M(atom='H 0 0 0; F 0 0 1', basis='ccpvdz', verbose=0)
+    sorted_mol = mole_gpu.SortedGTO.from_mol(molecule)
+    c = sorted_mol.ctr_coeff.get()
+    transform = c.T if method == 'mat_dot_CT' else c
+    nin = transform.shape[0]
+    if ndim == 1:
+        shape = (nin,)
+    elif ndim == 2:
+        shape = (3, nin)
+    else:
+        shape = (2, 3, nin)
+    cp.random.seed(547)
+    mat = cp.random.rand(*shape) + 1j*cp.random.rand(*shape)
+    host = mat.get()
+    expected = host @ transform
+    # Vector interfaces are equivalent to the corresponding matrix product.
+    out = cp.empty(expected.shape, dtype=np.complex128) if ndim != 2 else None
+    actual = getattr(sorted_mol, method)(mat, out=out)
+    assert actual.shape == expected.shape and actual.dtype == np.complex128
+    if out is not None:
+        assert actual.data.ptr == out.data.ptr
+    np.testing.assert_allclose(actual.get(), expected, atol=2e-12, rtol=2e-12)
+    np.testing.assert_array_equal(cp.asnumpy(mat), host)

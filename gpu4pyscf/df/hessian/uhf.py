@@ -579,7 +579,9 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     dm_3c = j3c_00
     j3c_00 = tmp = work = metric_v = metric_w = None
 
-    dm_oo = contract('rniq,nqj->rnij', dm_3c, orbo)
+    dm_oo = cp.empty((naux, 2, nocc, nocc))
+    for r0, r1 in lib.prange(0, naux, batch_size):
+        contract('rniq,nqj->rnij', dm_3c[r0:r1], orbo, out=dm_oo[r0:r1])
     if j_factor != 0:
         auxvec = cp.einsum('rnii->r', dm_oo)
         auxvec_by_atm = auxvec[aux_idx]

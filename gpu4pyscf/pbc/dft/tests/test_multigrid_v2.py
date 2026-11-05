@@ -284,7 +284,7 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    def test_get_vxc_mgga(self):
+    def test_get_vxc_mgga_high_cost(self):
         nao = cell_orth.nao
         np.random.seed(2)
         xc = 'r2scan'
@@ -311,7 +311,7 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-7
         assert abs(ref-vxc.get()).max() < 1e-7
 
-    def test_get_vxc_mgga_kpts(self):
+    def test_get_vxc_mgga_kpts_high_cost(self):
         nao = cell_orth.nao
         np.random.seed(3)
         xc = 'r2scan'

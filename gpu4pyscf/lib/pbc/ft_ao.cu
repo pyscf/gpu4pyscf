@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "ft_ao.cuh"
@@ -64,7 +63,7 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double *gyI = gxR + gx_len*3;
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
-    int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
 
     double goutR[AUXNF];
     double goutI[AUXNF];
@@ -198,6 +197,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     __shared__ int Gv_block_id, sp_block_id;
     double *c2s_pool = pool + blockIdx.x * POOL_SIZE;
 while (1) {
+    __syncthreads();
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
         Gv_block_id = batch_id / nbatches_shl_pair;

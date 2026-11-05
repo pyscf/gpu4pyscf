@@ -25,7 +25,7 @@ from gpu4pyscf.__config__ import shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import fill_symmetric, contract
-from gpu4pyscf.scf.jk import libvhf_rys, _VHFOpt, QUEUE_DEPTH, LMAX
+from gpu4pyscf.scf.jk import libvhf_rys, _VHFOpt, _check_rsh_factors, QUEUE_DEPTH, LMAX
 from gpu4pyscf.gto.mole import SortedMole
 
 def get_int4c2e(mol, vhfopt=None, direct_scf_tol=1e-13, aosym=True, omega=None):
@@ -54,8 +54,7 @@ def _ao2mo_general(vhfopt, mo_coeffs, omega=None):
     log = logger.new_logger(mol)
     t0 = log.init_timer()
 
-    if omega is None:
-        omega = mol.omega
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
 
     ao_loc = mol.ao_loc_nr()
     nao = int(ao_loc[-1])
@@ -120,7 +119,8 @@ def _ao2mo_general(vhfopt, mo_coeffs, omega=None):
         if npairs_kl == 0:
             continue
         kl0, kl1 = kl1, kl1 + npairs_kl * nf[k] * nf[l]
-        eri = cp.empty((nao_pairs, kl1-kl0))
+        # Screened quartets are not written by RYS_fill_int4c2e.
+        eri = cp.zeros((nao_pairs, kl1-kl0))
         ij0 = ij1 = 0
         for ij_id, (i, j) in enumerate(bas_pair_cache):
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
@@ -133,6 +133,8 @@ def _ao2mo_general(vhfopt, mo_coeffs, omega=None):
                 ctypes.cast(eri[ij0:ij1].data.ptr, ctypes.c_void_p),
                 ctypes.c_int(kl1 - kl0),
                 ctypes.c_double(omega),
+                ctypes.c_double(lr_factor),
+                ctypes.c_double(sr_factor),
                 ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                 ctypes.c_int(shm_size),
                 ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),

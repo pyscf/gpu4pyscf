@@ -17,12 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuComplex.h>
+#include "constant_objects.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "constant_objects.cuh"
 #include "utils.cuh"
 #include "aft_recursion.cuh"
 

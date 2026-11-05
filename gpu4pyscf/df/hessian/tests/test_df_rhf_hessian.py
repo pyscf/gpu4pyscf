@@ -209,6 +209,8 @@ class KnownValues(unittest.TestCase):
 
         with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: nao**2*auxmol.nao*60)):
             ref = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1e-20)
+
+        with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: pmol.nao**2*1300)):
             ej = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=0)
             assert abs(ej-ref).max().get() < 5e-8
 

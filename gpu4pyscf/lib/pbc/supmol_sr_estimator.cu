@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
@@ -214,8 +212,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     float *gx = shared_memory + nsp_per_block * (nroots * 2 + 6) + sp_id;
     // gz can be reused for gbuf; gbuf size = (li+1)*(lj+1)*(lij+1)
     float *gbuf = gx + g_size * nsp_per_block * 2;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     for (uint32_t task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
@@ -308,7 +306,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                 }
                 for (int irys = nroots-1; irys >= 0; --irys) {
                     __syncthreads();
-                    if (lij > 0 && gout_id == 0) {
+                    if (gout_id == 0) {
+                    if (lij > 0) {
                         float rt = rw[irys*2*nsp_per_block];
                         float rt_aa = rt / (aij + akl);
                         float rt_aij = rt_aa * akl;
@@ -399,6 +398,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                         gx[0] = fac;
                         gx[g_size*nsp_per_block] = 1;
                         gx[g_size*nsp_per_block*2] = rw[(irys*2+1)*nsp_per_block];
+                    }
                     }
 
                     __syncthreads();

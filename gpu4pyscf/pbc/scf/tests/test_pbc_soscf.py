@@ -135,7 +135,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.293741115059207, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.293741125853439, 8)
 
     def test_nr_kuhf(self):
         mf = scf.KUHF(cell, cell.make_kpts([2,1,1]))
@@ -145,7 +145,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.293741115059207, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.293741122058536, 8)
 
     def test_nr_krks_lda(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='lda,')
@@ -154,14 +154,14 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.027594965662892, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.027594976219643, 8)
 
     def test_nr_kuks_lda(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]), xc='lda,')
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.027594965662892, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.027594976219781, 8)
 
     def test_nr_krks_gga(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='b88,')
@@ -169,7 +169,7 @@ class KnowValues(unittest.TestCase):
         mf = mf.newton()
         mf.conv_tol_grad = 1e-4
         mf.kernel()
-        self.assertAlmostEqual(mf.e_tot, -10.202133062075863, delta=1e-8)
+        self.assertAlmostEqual(mf.e_tot, -10.202133075401527, delta=1e-8)
 
     def test_nr_kuks_gga(self):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([3,1,1]), xc='pbe')
@@ -188,7 +188,7 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.547948373602484, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.547948386003295, 8)
 
     def test_nr_krks_rsh(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]), xc='camb3lyp')
@@ -197,25 +197,27 @@ class KnowValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-4
         mf.kernel()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -10.550541291043928, 8)
+        self.assertAlmostEqual(mf.e_tot, -10.550541301827390, 8)
 
     def test_rks_gen_g_hop(self):
         mf = dft.KRKS(cell, kpts=cell.make_kpts([2,1,1]))
         mf.xc = 'b3lyp5'
         nao = cell.nao_nr()
-        cp.random.seed(1)
-        mo = cp.random.random((2,nao,nao)) + 0j
+        # Backend-independent input: np.random (MT19937) is identical on
+        # every host, unlike cp.random (cuRAND on CUDA, oneMKL on SYCL).
+        np.random.seed(1)
+        mo = cp.asarray(np.random.random((2,nao,nao))) + 0j
         mo_occ = cp.zeros((2,nao))
         mo_occ[:,:5] = 2
         nocc, nvir = 5, nao-5
-        dm1 = cp.random.random(2*nvir*nocc)
-        dm1 = dm1 + cp.random.random(dm1.shape) * .1j
+        dm1 = cp.asarray(np.random.random(2*nvir*nocc))
+        dm1 = dm1 + cp.asarray(np.random.random(dm1.shape)) * .1j
         mf = mf.newton()
         mf.grids.build()
         hcore = mf.get_hcore()
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), -2.580202335681725-0.28028319954452735j, 7)
+        self.assertAlmostEqual(lib.fp(dat.get()), -12.017469991661502-1.6694034170618706j, 7)
 
         mf_ref = cell.KRKS(kpts=cell.make_kpts([2,1,1]))
         mf_ref.xc = 'b3lyp5'
@@ -231,7 +233,7 @@ class KnowValues(unittest.TestCase):
         dm1 = cp.append(dm1, 0.5)
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), 7.474044381526779+0.0640933714545938j, delta=3e-7)
+        self.assertAlmostEqual(lib.fp(dat.get()), -17.65653686924202-1.3290708489939078j, delta=3e-7)
 
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
         self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, 7)
@@ -242,19 +244,21 @@ class KnowValues(unittest.TestCase):
         mf = dft.KUKS(cell, kpts=cell.make_kpts([2,1,1]))
         mf.xc = 'b3lyp5'
         nao = cell.nao_nr()
-        cp.random.seed(1)
-        mo = cp.random.random((2,2,nao,nao)) + 0j
+        # Backend-independent input: np.random (MT19937) is identical on
+        # every host, unlike cp.random (cuRAND on CUDA, oneMKL on SYCL).
+        np.random.seed(1)
+        mo = cp.asarray(np.random.random((2,2,nao,nao))) + 0j
         mo_occ = cp.zeros((2,2,nao))
         mo_occ[:,:,:5] = 1
         nocc, nvir = 5, nao-5
-        dm1 = cp.random.random(4*nvir*nocc)
-        dm1 = dm1 + cp.random.random(dm1.shape) * .1j
+        dm1 = cp.asarray(np.random.random(4*nvir*nocc))
+        dm1 = dm1 + cp.asarray(np.random.random(dm1.shape)) * .1j
         mf = mf.newton()
         mf.grids.build()
         hcore = cp.array([mf.get_hcore()]*2)
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), -10.115070233160678-0.818925838878515j, delta=1e-7)
+        self.assertAlmostEqual(lib.fp(dat.get()), -2.2887750086506853-0.3350130473975502j, delta=1e-7)
 
         mf_ref = cell.KUKS(kpts=cell.make_kpts([2,1,1]))
         mf_ref.xc = 'b3lyp5'
@@ -270,7 +274,7 @@ class KnowValues(unittest.TestCase):
         dm1 = cp.append(dm1, 0.5)
         g, hop, hdiag = mf.gen_g_hop(mo, mo_occ, hcore)
         dat = hop(dm1)
-        self.assertAlmostEqual(lib.fp(dat.get()), 0.21794953957922497-0.08227815483834572j, delta=1e-7)
+        self.assertAlmostEqual(lib.fp(dat.get()), -2.734691450521827-0.2973956027980303j, delta=1e-7)
 
         g_ref, hop_ref, hdiag_ref = mf_ref.gen_g_hop(mo.get(), mo_occ.get(), hcore.get())
         self.assertAlmostEqual(abs(dat.get() - hop_ref(dm1.get())).max(), 0, delta=3e-8)

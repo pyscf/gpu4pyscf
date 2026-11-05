@@ -20,7 +20,7 @@ from pyscf.scf import hf as hf_cpu
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array, asarray
-from gpu4pyscf.scf.hf import eigh, damping, level_shift
+from gpu4pyscf.scf.hf import eigh, damping, level_shift, process_sap_basis, make_sap
 from gpu4pyscf.scf import hf
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf import __config__
@@ -182,9 +182,11 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
 
 def _cast_rhf_init_guess(fn):
     @functools.wraps(fn)
-    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None):
+    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None, **kwargs):
         if mol is None: mol = mf.mol
-        dm = fn(mf, mol)
+        dm = fn(mf, mol, **kwargs)
+        if dm.ndim == 3:
+            return dm
         assert dm.ndim == 2
 
         neleca, nelecb = mf.nelec
@@ -331,7 +333,6 @@ class UHF(hf.SCF):
     _finalize                = uhf_cpu.UHF._finalize
 
     # TODO: Enable followings after testing
-    stability               = NotImplemented
     mulliken_spin_pop       = NotImplemented
     mulliken_meta_spin      = NotImplemented
     det_ovlp                = NotImplemented
@@ -340,8 +341,8 @@ class UHF(hf.SCF):
     x2c = x2c1e = sfx2c1e   = hf.RHF.sfx2c1e
     newton                  = hf.RHF.newton
 
-    init_guess_by_minao      = _cast_rhf_init_guess(hf.RHF.init_guess_by_minao)
-    init_guess_by_atom       = _cast_rhf_init_guess(hf.RHF.init_guess_by_atom)
+    init_guess_by_minao      = _cast_rhf_init_guess(hf.SCF.init_guess_by_minao)
+    init_guess_by_atom       = _cast_rhf_init_guess(hf.SCF.init_guess_by_atom)
     init_guess_by_chkfile    = hf.return_cupy_array(uhf_cpu.UHF.init_guess_by_chkfile)
 
     def init_guess_by_1e(self, mol=None, breaksym=None):
@@ -370,10 +371,41 @@ class UHF(hf.SCF):
         if mol is None: mol = self.mol
         return hf_cpu.init_guess_by_mod_huckel(mol)
 
+    def init_guess_by_sap(self, mol=None, breaksym=None):
+        if mol is None: mol = self.mol
+        assert breaksym is None
+        sap_basis = process_sap_basis(self, mol, self.sap_basis)
+
+        Vsap = make_sap(mol, sap_basis=sap_basis)
+        Vsap = cupy.asarray([Vsap, Vsap])
+        Hcore = self.get_hcore(mol)
+        S = self.get_ovlp(mol)
+        Hsap = Hcore + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
+
+    def init_guess_by_vsap(self, mol=None):
+        if mol is None: mol = self.mol
+
+        Vsap = self.get_vsap()
+        Vsap = cupy.asarray([Vsap, Vsap])
+        from gpu4pyscf.pbc.gto.int1e import int1e_kin
+        T = int1e_kin(mol)
+        S = self.get_ovlp(mol)
+        Hsap = T + Vsap
+        mo_energy, mo_coeff = self.eig(Hsap, S)
+
+        mo_occ = self.get_occ(mo_energy, mo_coeff)
+        return self.make_rdm1(mo_coeff, mo_occ)
+
     def get_init_guess(self, mol=None, key='minao', **kwargs):
+        if not isinstance(key, str):
+            return key
         dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
         if self.verbose >= logger.DEBUG1:
-            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp(mol)).real
             logger.debug1(self, 'Nelec from initial guess = %s', nelec)
         return dm
 
@@ -438,3 +470,7 @@ class UHF(hf.SCF):
         '''
         from gpu4pyscf import dft
         return self._transfer_attrs_(dft.UKS(self.mol, xc=xc))
+
+    def stability(self, internal=True, external=False, verbose=None, return_status=False, **kwargs):
+        from gpu4pyscf.scf.stability import uhf_stability
+        return uhf_stability(self, internal, external, verbose, return_status, **kwargs)

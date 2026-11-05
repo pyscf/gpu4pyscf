@@ -16,6 +16,7 @@
 import builtins
 from concurrent.futures import ThreadPoolExecutor
 import functools
+from threading import Lock
 import cupy as cp
 import numpy as np
 from pyscf.lib import prange
@@ -33,7 +34,7 @@ def run(func, args=(), kwargs={}, non_blocking=False):
         non_blocking: If `True`, functions are executed in parallel using multi-threads.
     '''
     if num_devices == 1:
-        return [func(*args, *kwargs)]
+        return [func(*args, **kwargs)]
 
     synchronize()
 
@@ -57,21 +58,30 @@ def map(func, tasks, args=(), kwargs={}, schedule='dynamic') -> list:
             If 'dynamic', tasks are scheduled dynamically, with better load balance.
     '''
     if num_devices == 1:
-        return [func(t, *args, *kwargs) for t in tasks]
+        return [func(t, *args, **kwargs) for t in tasks]
 
     tasks = enumerate(tasks)
+    if schedule == 'dynamic':
+        task_lock = Lock()
+    else:
+        tasks = list(tasks)
     result = {}
 
     def consumer():
         if schedule == 'dynamic':
             stream = cp.cuda.stream.get_current_stream()
-            for key, t in tasks:
+            while True:
+                # The input may be a generator; serialize advancement only.
+                with task_lock:
+                    try:
+                        key, t = next(tasks)
+                    except StopIteration:
+                        break
                 result[key] = func(t, *args, **kwargs)
                 stream.synchronize()
         else:
-            _tasks = list(tasks)
             device_id = cp.cuda.device.get_device_id()
-            for key, t in _tasks[device_id::num_devices]:
+            for key, t in tasks[device_id::num_devices]:
                 result[key] = func(t, *args, **kwargs)
 
     run(consumer, non_blocking=True)
@@ -96,9 +106,10 @@ def reduce(func, tasks, args=(), kwargs={}, schedule='dynamic'):
         else:
             groups[device_id] += r
 
-    for i in num_devices:
+    for i in range(num_devices):
         if groups[i] is None:
-            groups[i] = cp.zeros(result[0].shape, dtype=dtype)
+            with cp.cuda.Device(i):
+                groups[i] = cp.zeros(result[0].shape, dtype=dtype)
     return array_reduce(groups, inplace=True)
 
 def array_broadcast(a):

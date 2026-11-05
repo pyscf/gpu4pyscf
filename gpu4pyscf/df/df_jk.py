@@ -217,13 +217,23 @@ class _DFHF:
                                          lr_factor=lr_factor, sr_factor=sr_factor)[1]
                 return vj, vk
 
-            return ghf._get_jk(self, mol, dm, hermi, with_j, with_k,
-                               jkbuild=get_jk_spin_free, omega=omega)
+            vj, vk = ghf._get_jk(self, mol, dm, hermi, with_j, with_k,
+                                 jkbuild=get_jk_spin_free, omega=omega,
+                                 lr_factor=lr_factor, sr_factor=sr_factor)
+            symmetrize = getattr(dm, 'symmetrize', 0)
+            if with_k and not self.only_dfj and symmetrize:
+                # Hermitian conjugation also swaps the alpha-beta blocks.
+                # Symmetrize the assembled spinor K, not each AO block.
+                shape = vk.shape
+                vk = transpose_sum(vk.reshape(-1, shape[-1], shape[-1]),
+                                   hermi=symmetrize).reshape(shape)
+            return vj, vk
 
         vj = vk = None
         if self.only_dfj:
             if with_j:
-                vj = self.with_df.get_jk(mol, dm, hermi, with_k=False)[0]
+                vj = self.with_df.get_jk(dm, hermi, with_k=False, omega=omega,
+                                         lr_factor=lr_factor, sr_factor=sr_factor)[0]
             if with_k:
                 vk = hf.SCF.get_k(self, mol, dm, hermi, omega=omega,
                                   lr_factor=lr_factor, sr_factor=sr_factor)
@@ -295,14 +305,7 @@ class _DFHF:
         log = logger.new_logger(self)
 
         if isinstance(self, rohf.ROHF):
-            if getattr(dm, 'mo_coeff', None) is not None:
-                mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
-                mo_occ = cupy.stack([dm.mo_occ>0, dm.mo_occ==2]).astype(numpy.double)
-                if dm.ndim == 2:  # RHF DM
-                    dm = cupy.repeat(dm[None]*.5, 2, axis=0)
-                dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-            elif dm.ndim == 2:  # RHF DM
-                dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+            dm = rohf._to_uhf_dm(dm)
 
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
@@ -459,7 +462,7 @@ class _DFHF:
                             raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
                     vxc += vj - vk
                     exc -= cupy.einsum('ij,ji->', dm, vk).real * .5
-                    ecoul = cupy.einsum('ij,ji->', dm, vj).real * .5
+                ecoul = cupy.einsum('ij,ji->', dm, vj).real * .5
             else:
                 raise NotImplementedError("DF only supports R/U/RO KS.")
             t0 = log.timer('veff', *t0)
@@ -542,10 +545,11 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True,
         dm_sparse[:,diags] *= .5
 
     def proc():
-        factor_l = cp.asarray(dm_factor_l).reshape(nspin,-1,nao,nocc)
+        # Cross-device copies require C- or F-contiguous factors.
+        factor_l = cp.asarray(dm_factor_l, order='A').reshape(nspin,-1,nao,nocc)
         factor_r = dm_factor_r
         if factor_r is not None:
-            factor_r = cp.asarray(factor_r).reshape(nspin,-1,nao,nocc)
+            factor_r = cp.asarray(factor_r, order='A').reshape(nspin,-1,nao,nocc)
 
         vj = vk = None
         if with_j:
@@ -596,7 +600,7 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True,
                         for i0, i1 in lib.prange(0, n_dm, dm_batch_size):
                             rhok1 = ndarray((i1-i0,nao,nocc,nL), buffer=buf)
                             contract('Lij,njk->nikL', cderi, factor_r[s,i0:i1], out=rhok1)
-                            contract('nikL,jkL->nij', rhok, rhok1, beta=1, out=vk[s,i0:i1])
+                            contract('ikL,njkL->nij', rhok, rhok1, beta=1, out=vk[s,i0:i1])
                     else:
                         rhok1 = ndarray((nao,nocc,nL), buffer=buf1)
                         contract('Lij,jk->ikL', cderi, factor_r[s,0], out=rhok1)
@@ -636,8 +640,11 @@ def get_j(dfobj, dm, hermi=1):
         j2c = int2c2e(dfobj.auxmol)
         try:
             dfobj._cd_j2c = cholesky(j2c), 'cd'
-        except RuntimeError:
-            dfobj._cd_j2c = j2c, None
+        except RuntimeError:  # cusolver.LinAlgError and any backend equivalent both subclass RuntimeError
+            from gpu4pyscf.df.df import LINEAR_DEP_THR
+            w, v = cp.linalg.eigh(j2c)
+            keep = cp.where(w > LINEAR_DEP_THR)[0]
+            dfobj._cd_j2c = v[:, keep] / cp.sqrt(w[keep]), 'eig'
 
     dm_shape = dm.shape
     intopt = dfobj.intopt
@@ -654,10 +661,15 @@ def get_j(dfobj, dm, hermi=1):
 
     j2c, tag = dfobj._cd_j2c
     if tag == 'cd':
-        rhoj = solve_triangular(j2c, rhoj.T, lower=True)
-        rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
+        if rhoj.ndim == 1:
+            # 1-d: .T is a no-op, but dpnp deprecates .T on non-2D arrays
+            rhoj = solve_triangular(j2c, rhoj, lower=True)
+            rhoj = solve_triangular(j2c.T, rhoj, lower=False)
+        else:
+            rhoj = solve_triangular(j2c, rhoj.T, lower=True)
+            rhoj = solve_triangular(j2c.T, rhoj, lower=False).T
     else:
-        rhoj = cp.linalg.solve(j2c, rhoj.T).T
+        rhoj = rhoj.dot(j2c).dot(j2c.T)
 
     rhoj = auxmol.apply_C_dot(rhoj, axis=-1)
     vj = intopt.contract_auxvec(rhoj)
@@ -743,6 +755,11 @@ def decompose_rdm1_svd(dm, hermi=0):
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
+    '''Build A = factor_l @ factor_r.T and retain its factors for DF exchange.
+
+    symmetrize=1 returns A + A.conj().T, 2 returns A - A.conj().T,
+    and 0 returns A. Conjugation of factor_r must be supplied by the caller.
+    '''
     if factor_l.ndim == 4 and factor_r.ndim == 3:
         dm = contract('snpi,sqi->snpq', factor_l, factor_r)
     else:

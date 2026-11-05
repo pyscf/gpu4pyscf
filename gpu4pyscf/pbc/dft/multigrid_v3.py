@@ -580,7 +580,7 @@ def _estimate_Ecut_and_grid_ranges(ni, bas_ij_idx, precision, xctype):
     '''Estimate the FFT energy cutoff and the spread of each orbital pair
     in real space'''
     cell = ni.sorted_cell
-    Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision),
+    Ecut_by_shell = _estimate_fft_Ecut_per_shell(cell, precision)
     Ecut_by_shell = cp.asarray(Ecut_by_shell, dtype=np.float32)
 
     npairs = len(bas_ij_idx)
@@ -640,7 +640,7 @@ def _partition_ke_for_aft(ni, pair_idx, pair_ke, init_ke, ke_max, xctype, log):
     nimgs = np.asarray(bvkcell.nimgs, dtype=np.int32)
 
     ke_upper = float(pair_ke.max().get())
-    ke_upper = min(ke_upper, ke_max)
+    ke_upper = min(ke_upper, float(ke_max))
     mesh = mesh_max = np.minimum(ke_to_mesh(a, ke_upper), ni.mesh)
     ke_lower = ke_upper * 0.6
 
@@ -764,6 +764,9 @@ def _partition_ke_for_fft(ni, pair_idx, init_ke, ke_max, precision, xctype, log)
 
                 atom_range = cp.ceil(atom_grid_ranges * cp.array(mesh[:,None,None]))
                 atom_mesh = atom_range[:,:,1] - atom_range[:,:,0]
+                # Cover the float32 tau bounds as well as the float64 density bounds.
+                atom_range_f = cp.ceil(atom_grid_ranges * cp.asarray(mesh[:,None,None], dtype=np.float32))
+                atom_mesh = cp.maximum(atom_mesh, atom_range_f[:,:,1] - atom_range_f[:,:,0])
                 atom_mesh = atom_mesh.max(axis=1).get().astype(np.int32)
                 log.debug2('atom_mesh %s', atom_mesh)
                 atom_mesh_max.append(atom_mesh)
@@ -1196,6 +1199,7 @@ int nx, int ny, int nz)
                 sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
             }
         }
+        __syncthreads();
         if (tid == 0) atomicAdd(out+n, sigma[n]);
     }
 }'''
@@ -2247,7 +2251,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             rhoG += rhoGb
             tauG = tauGb = None # release memory
             if dm_sc.nbytes * 10 > mem:
-                dm_sc = None
+                # Keep one optional output buffer per spin after releasing the DM.
+                dm_sc = [None, None]
 
             wv = cp.einsum('axg,axbyg->byg', rho1, fxc).reshape(2, nvar, *mesh)
             rho1 = None

@@ -442,16 +442,18 @@ class Mole(lib.StreamObject):
 
         Kwargs:
             deep : bool
-                When False (default), a shallow copy is returned. Because
-                :meth:`build` reassigns (rather than mutates in place) all of
-                the derived arrays, a shallow copy is sufficient to obtain an
-                independent geometry without duplicating the GPU arrays.
+                When False (default), arrays are shared until a rebuild replaces
+                them. The mutable integral container is copied separately so
+                geometry updates cannot replace the original object's integrals.
+                Both modes retain the output stream without reopening its file.
         """
         import copy as _copy
         if deep:
             newmol = _copy.deepcopy(self)
         else:
             newmol = _copy.copy(self)
+            newmol.two_center_integrals = _copy.copy(self.two_center_integrals)
+        newmol.stdout = self.stdout
         return newmol
 
     def set_geom_(self, atoms_or_coords, unit=None, inplace=True):
@@ -790,9 +792,11 @@ class Mole(lib.StreamObject):
         
             self.stdout.write('[INPUT] Symbol           X                Y                Z      unit'
                              '          X                Y                Z       unit\n')
+
+        coords = self.atom_coords()
         for ia,atom in enumerate(self._atom):
-            coorda = tuple([x * self.BOHR for x in atom[1]])
-            coordb = tuple(atom[1])
+            coorda = tuple(coords[ia] * self.BOHR)
+            coordb = tuple(coords[ia])
             self.stdout.write('[INPUT]%3d %-4s %16.12f %16.12f %16.12f AA  '
                               '%16.12f %16.12f %16.12f Bohr\n'
                               % ((ia+1, elements._symbol(atom[0])) + coorda + coordb))
@@ -834,9 +838,8 @@ class Mole(lib.StreamObject):
             logger.info(self, 'number of basis = %d', self.nao)
             logger.info(self, 'basis = Slater basis')
         if self.verbose >= logger.DEBUG2:
-            for i in range(len(self._bas)):
-                exps = self.bas_exp(i)
-                logger.debug1(self, 'bas %d, expnt(s) = %s', i, str(exps))
+            # PM6 has Slater orbital counts, not Gaussian _bas/bas_exp data.
+            logger.debug1(self, 'PM6 orbital counts per atom: %s', self.natorb_per_atom)
 
         logger.info(self, 'CPU time: %12.2f', logger.process_clock())
         return self

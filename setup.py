@@ -111,8 +111,8 @@ try:
 except ImportError:
     pass
 
+package_name = NAME
 if 'sdist' in sys.argv:
-    package_name = NAME
     CUDA_VERSION = '12x'
 else:
     CUDA_VERSION = get_cuda_version()
@@ -143,7 +143,7 @@ setup(
         'pyscf>=2.8.0',
         f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
         'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}==0.8.1',
+        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}>=0.8.1',
         'packaging',
     ]
 )

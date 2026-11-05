@@ -2,6 +2,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// CUDA headers for every C++ TU that includes vhf.cuh; the plain C files that
+// include it only need the structs.
+#ifdef __cplusplus
+#include <cuda.h>
+#include <cuda_runtime.h>
+#endif
+
 #define PTR_RANGE_OMEGA 8
 // slots of atm
 #define CHARGE_OF       0

@@ -108,11 +108,11 @@ libcusolver.cusolverDnZhegvd.argtypes = [
 ]
 
 def eigh(h, s, overwrite=False):
-    '''
-    solve generalized eigenvalue problem
+    '''Solve the generalized Hermitian eigenproblem with positive-definite s.
     '''
     assert h.dtype == s.dtype
     assert h.dtype in (np.float64, np.complex128)
+    assert h.flags.c_contiguous and s.flags.c_contiguous
     n = h.shape[0]
     if h.dtype == np.complex128 and h.flags.c_contiguous:
         # zhegvd requires the matrices in F-order. For hermitian matrices,
@@ -180,6 +180,15 @@ def eigh(h, s, overwrite=False):
 
     if status != 0:
         raise LinAlgError("failed in eigh kernel")
+    # API success only confirms execution; devInfo reports numerical failure.
+    info = int(devInfo.get()[0])
+    if info < 0:
+        raise LinAlgError(f'eigh failed: cuSOLVER argument {-info} is invalid (devInfo={info})')
+    if info > n:
+        raise LinAlgError('eigh failed: overlap matrix is not positive definite '
+                          f'(leading minor {info-n}, devInfo={info})')
+    if info != 0:
+        raise LinAlgError(f'eigh failed to converge (devInfo={info})')
     return w, A.T
 
 def cholesky(A):

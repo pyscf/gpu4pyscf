@@ -146,7 +146,7 @@ class Int3c2eOpt:
     @property
     def int3c2e_envs(self):
         _int3c2e_envs = self._int3c2e_envs
-        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device:
+        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device.id:
             return self._int3c2e_envs
         return _int3c2e_envs.copy()
 
@@ -248,7 +248,8 @@ class Int3c2eOpt:
             else:
                 nf = cp.asarray(ls * 2 + 1)
             ao_pair_counts = nf[ish] * nf[jsh]
-            ao_pair_loc = cp.asarray(cp.append(np.int32(0), ao_pair_counts.cumsum()), dtype=np.int32)
+            ao_pair_loc = cp.asarray(cp.concatenate(
+                (cp.zeros(1, dtype=ao_pair_counts.dtype), ao_pair_counts.cumsum())), dtype=np.int32)
             ao_pair_offsets = ao_pair_loc[shl_pair_offsets[pair_splits]].get()
 
             aux_loc = auxmol.ao_loc

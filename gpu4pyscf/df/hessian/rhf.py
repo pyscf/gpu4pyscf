@@ -666,7 +666,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
     batch_size = min(naux, int(word_avail*0.75) // (3*nao_pair*2))
-    blksize = min(naux, int(word_avail*0.15) // (nao**2*8) * 8)
+    blksize = min(batch_size, int(word_avail*0.15) // (3*nao**2*8) * 8)
     assert batch_size > 0 and blksize > 0
     log.debug1('mem_avail=%.3f MB, batch_size=%d, blksize=%d',
                mem_avail*1e-6, batch_size, blksize)
@@ -1236,10 +1236,10 @@ def _int2c2e_ip2_per_atom(mol, dm, omega=None, lr_factor=None, sr_factor=None):
     err = libvhf_rys.e_int2c2e_ip2(
         ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs),
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor),
-        ctypes.byref(rys_envs),
         ctypes.c_int(shm_size_max),
         ctypes.c_int(nbatches_shl_pair),
         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),

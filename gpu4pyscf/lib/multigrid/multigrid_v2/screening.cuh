@@ -363,9 +363,9 @@ __global__ void count_pairs_on_blocks_kernel(
     const int *bas, const double *env) {
   const int block_index =
       blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-  const int a_start = blockIdx.x * BLOCK_DIM_XYZ;
+  const int a_start = blockIdx.z * BLOCK_DIM_XYZ;
   const int b_start = blockIdx.y * BLOCK_DIM_XYZ;
-  const int c_start = blockIdx.z * BLOCK_DIM_XYZ;
+  const int c_start = blockIdx.x * BLOCK_DIM_XYZ;
 
   const double da_squared =
       distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
@@ -633,6 +633,8 @@ __global__ void put_pairs_on_blocks_kernel(
       }
     }
     n_filtered_pairs_on_shared_memory += aggregated_block;
+    // The next iteration's BlockScan reuses the same temporary storage.
+    __syncthreads();
   }
   if (n_filtered_pairs_on_shared_memory > 0) {
     __syncthreads();

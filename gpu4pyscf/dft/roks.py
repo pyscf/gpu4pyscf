@@ -12,12 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import numpy as np
-import cupy as cp
 from pyscf.dft import roks as roks_cpu
-from gpu4pyscf.scf.rohf import ROHF
+from gpu4pyscf.scf.rohf import ROHF, _to_uhf_dm
 from gpu4pyscf.dft import rks, uks
-from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.lib import utils
 
 class ROKS(rks.KohnShamDFT, ROHF):
@@ -29,15 +26,7 @@ class ROKS(rks.KohnShamDFT, ROHF):
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if dm is None:
             dm = self.make_rdm1()
-        elif getattr(dm, 'mo_coeff', None) is not None:
-            mo_coeff = cp.repeat(dm.mo_coeff[None], 2, axis=0)
-            mo_occ = cp.asarray([dm.mo_occ>0, dm.mo_occ==2],
-                                dtype=np.double)
-            if dm.ndim == 2:  # RHF DM
-                dm = cp.repeat(dm[None]*.5, 2, axis=0)
-            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        elif dm.ndim == 2:  # RHF DM
-            dm = cp.repeat(dm[None]*.5, 2, axis=0)
+        dm = _to_uhf_dm(dm)
         return uks.UKS.get_veff(self, mol, dm, dm_last, vhf_last, hermi)
 
     energy_elec = uks.UKS.energy_elec

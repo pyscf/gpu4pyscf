@@ -285,6 +285,7 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         if (m < nf2*L1) {
             dm_xyz[m*WARP_SIZE] = r3[n];
         }
+        __syncthreads();
 //    } else if (L == 7) {
 //        double r2[64];
 //        double r1[8];

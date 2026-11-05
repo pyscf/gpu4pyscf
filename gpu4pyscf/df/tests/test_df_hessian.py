@@ -290,7 +290,7 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
-    def test_hessian_uks_cart(self):
+    def test_hessian_uks_cart_high_cost(self):
         print('-----testing DF Hessian (cartesian)----')
         mf = _make_uks(mol_cart, 'b3lyp')
         mf.conv_tol_cpscf = 1e-7
@@ -300,7 +300,7 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
 
-    def test_hessian_qz(self):
+    def test_hessian_qz_high_cost(self):
         mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0,
                       output='/dev/null', verbose=1)
 

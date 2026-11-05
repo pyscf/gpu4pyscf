@@ -1209,18 +1209,25 @@ class SpinFlipTDA(TDBase):
                 float or ndarray
                 Oscillator strength(s) between the reference and target state(s).
         '''
+        assert 1 <= ref <= len(self.xy)
+        if np.isscalar(state) and state == ref:
+            raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
             states = np.atleast_1d(state)
         states = states[states != ref]
 
+        if states.size == 0:
+            return np.empty(0)
         trans_dip = self.transition_dipole(ref, states)
 
         ref -= 1
         states -= 1
         es = self.e[states] - self.e[ref]
-        f = (2./3.) * lib.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        f = (2./3.) * cp.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        f = f.get()  # cp.einsum always returns a device array (cupy uploads host
+        # operands); return host observables, as the CPU version does
         if isinstance(state, int):
             return f[0]
         else:
@@ -1231,11 +1238,16 @@ class SpinFlipTDA(TDBase):
         Transition dipole moments between excited states for Spin-flip TDDFT/TDA.
         Only applicable to length gauge.
         '''
+        assert 1 <= ref <= len(self.xy)
+        if np.isscalar(state) and state == ref:
+            raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
             states = np.atleast_1d(state)
         states = states[states != ref]
+        if states.size == 0:
+            return np.empty((0, 3))
         ref -= 1
         states -= 1
 
@@ -1302,6 +1314,9 @@ class SpinFlipTDA(TDBase):
     def spin_square(self, state=None):
         r'''
         <S^2> of excited states for Spin-flip TDDFT/TDA.
+
+        state uses zero-based indices (unlike transition observables).
+        None selects all states.
         Ref: J. Chem. Phys. 2011, 134, 134101.
         '''
         mf = self._scf
@@ -1414,8 +1429,8 @@ class SpinFlipTDA(TDBase):
         '''
         log = logger.new_logger(self, verbose)
         mo_occ = (self._scf.mo_occ[0], self._scf.mo_occ[1])
-        nocc_a = np.count_nonzero(mo_occ[0] == 1)
-        nocc_b = np.count_nonzero(mo_occ[1] == 1)
+        nocc_a = int(cp.count_nonzero(mo_occ[0] == 1))
+        nocc_b = int(cp.count_nonzero(mo_occ[1] == 1))
 
         S2s = self.spin_square()
         for i in range(self.nstates):
@@ -1424,11 +1439,12 @@ class SpinFlipTDA(TDBase):
             e_ev = np.asarray(self.e[i]) * nist.HARTREE2EV
             log.note('Excited State %3d: %12.5f eV   <S^2>: %6.4f', i + 1, e_ev, S2)
             if log.verbose >= logger.INFO:
+                xw = abs(x).get() if isinstance(x, cp.ndarray) else abs(x)  # logging-only host copy
                 if self.extype == 0:
-                    for o, v in zip(*np.where(abs(x) > 0.1)):
+                    for o, v in zip(*np.where(xw > 0.1)):
                         log.info('    %4db -> %4da %12.5f', o + 1, v + 1 + nocc_a, x[o, v])
                 elif self.extype == 1:
-                    for o, v in zip(*np.where(abs(x) > 0.1)):
+                    for o, v in zip(*np.where(xw > 0.1)):
                         log.info('    %4da -> %4db %12.5f', o + 1, v + 1 + nocc_b, x[o, v])
 
 
@@ -1771,7 +1787,7 @@ class SpinFlipTDHF(TDBase):
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
             x0 = [(x.ravel(), y.ravel()) for x, y in x0]
-            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
+            x0 = cp.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         real_system = mf.mo_coeff[0].dtype == np.float64 or mf.mo_coeff[0].dtype == cp.float64
         pickeig = self.gen_pickeig(extype=self.extype, real=real_system)

@@ -240,7 +240,7 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel()[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
-    def test_tda_m06l(self):
+    def test_tda_m06l_high_cost(self):
         mf_m06l = self.mf_m06l
         td = mf_m06l.TDA()
         assert td.device == 'gpu'
@@ -626,6 +626,22 @@ class KnownValues(unittest.TestCase):
         td_scan.max_cycle = 1
         td_scan(mol)
         self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
+
+class SmallSystem(unittest.TestCase):
+    def test_tda_m06l(self):
+        mol = gto.M(atom='O 0 0 0; H 0 -.757 .587; H 0 .757 .587',
+                    basis='sto3g', spin=2, verbose=0)
+        mf = mol.UKS(xc='m06l').to_gpu().density_fit()
+        mf.grids.level = 0
+        mf.cphf_grids = mf.grids
+        mf.run(conv_tol=1e-12)
+        assert mf.converged
+        td = mf.TDA()
+        assert td.device == 'gpu'
+        es = td.kernel(nstates=2)[0]
+        ref = td.to_cpu().kernel(nstates=2)[0]
+        self.assertAlmostEqual(abs(es - ref).max(), 0, 9)
+
 
 if __name__ == "__main__":
     print("Full Tests for TD-UKS")

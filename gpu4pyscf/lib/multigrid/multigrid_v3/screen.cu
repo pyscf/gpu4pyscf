@@ -18,10 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cmath>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
 
@@ -165,7 +163,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
     // When cutoff radius is 0, the contribution of this orbital pair is small.
     // By setting its pair_ke to 0, this orbital pair will be discarded when
     // filtering orbitals in _partition_ke_for_fft function.
-    if (radius < 1e-3) {
+    if (radius < 1e-3f) {
         pair_ke[pair_id] = -1.f;
     } else {
         float ke_two_centers = max(ish_ke, jsh_ke);
@@ -251,24 +249,24 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
     int tile_size_y = min(TILE, mesh_y);
     int tile_size_z = min(TILE, mesh_z);
 
-    int img_x_lower = floor(xfrac_lower);
-    int img_y_lower = floor(yfrac_lower);
-    int img_z_lower = floor(zfrac_lower);
-    int img_x_upper = floor(xfrac_upper);
-    int img_y_upper = floor(yfrac_upper);
-    int img_z_upper = floor(zfrac_upper);
+    int img_x_lower = floorf(xfrac_lower);
+    int img_y_lower = floorf(yfrac_lower);
+    int img_z_lower = floorf(zfrac_lower);
+    int img_x_upper = floorf(xfrac_upper);
+    int img_y_upper = floorf(yfrac_upper);
+    int img_z_upper = floorf(zfrac_upper);
     img_x_lower = max(img_x_lower, -nimgs_x);
     img_y_lower = max(img_y_lower, -nimgs_y);
     img_z_lower = max(img_z_lower, -nimgs_z);
     img_x_upper = min(img_x_upper,  nimgs_x);
     img_y_upper = min(img_y_upper,  nimgs_y);
     img_z_upper = min(img_z_upper,  nimgs_z);
-    int rem_x_lower = floor(max(xfrac_lower - img_x_lower, 0.f) * mesh_x / tile_size_x);
-    int rem_y_lower = floor(max(yfrac_lower - img_y_lower, 0.f) * mesh_y / tile_size_y);
-    int rem_z_lower = floor(max(zfrac_lower - img_z_lower, 0.f) * mesh_z / tile_size_z);
-    int rem_x_upper = ceil (min(xfrac_upper - img_x_upper, 1.f) * mesh_x / tile_size_x);
-    int rem_y_upper = ceil (min(yfrac_upper - img_y_upper, 1.f) * mesh_y / tile_size_y);
-    int rem_z_upper = ceil (min(zfrac_upper - img_z_upper, 1.f) * mesh_z / tile_size_z);
+    int rem_x_lower = floorf(max(xfrac_lower - img_x_lower, 0.f) * mesh_x / tile_size_x);
+    int rem_y_lower = floorf(max(yfrac_lower - img_y_lower, 0.f) * mesh_y / tile_size_y);
+    int rem_z_lower = floorf(max(zfrac_lower - img_z_lower, 0.f) * mesh_z / tile_size_z);
+    int rem_x_upper = ceilf(min(xfrac_upper - img_x_upper, 1.f) * mesh_x / tile_size_x);
+    int rem_y_upper = ceilf(min(yfrac_upper - img_y_upper, 1.f) * mesh_y / tile_size_y);
+    int rem_z_upper = ceilf(min(zfrac_upper - img_z_upper, 1.f) * mesh_z / tile_size_z);
     int count_x = rem_x_upper - rem_x_lower + (img_x_upper - img_x_lower) * tiles_x;
     int count_y = rem_y_upper - rem_y_lower + (img_y_upper - img_y_lower) * tiles_y;
     int count_z = rem_z_upper - rem_z_lower + (img_z_upper - img_z_lower) * tiles_z;
@@ -362,8 +360,9 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
     float rr_raw = log_fac / theta;
     float Ecut_raw = log_fac * (2*aij);
     float Ecut_2a = Ecut_raw / (2*aij*aij);
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw + Ecut_2a);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
+    // dri = |Rp-Ri| ~ fj*|Rij|, dj = |Rp-Rj| = fi*|Rij|
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw + Ecut_2a);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
     float rr_cutoff = log_fac / theta;
@@ -418,8 +417,9 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
     float rr_raw = log_fac / theta;
     float Ecut_raw = log_fac * (2*aij);
     float Ecut_2a = Ecut_raw / (2*aij*aij);
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw + Ecut_2a);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw + Ecut_2a);
+    // dri = |Rp-Ri| ~ fj*|Rij|, dj = |Rp-Rj| = fi*|Rij|
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw + Ecut_2a);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw + Ecut_2a);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
 
@@ -497,8 +497,9 @@ void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx
     float log_fac = log_cicj + 1.717f - 1.5f * logf(aij) - log_cutoff;
     log_fac = max(log_fac, 1e-9f);
     float rr_raw = log_fac / theta;
-    float dri_fac = .5f * logf(.5f*li/aij + fi*fi*rr_raw);
-    float drj_fac = .5f * logf(.5f*lj/aij + fj*fj*rr_raw);
+    // dri = |Rp-Ri| ~ fj*|Rij|, dj = |Rp-Rj| = fi*|Rij|
+    float dri_fac = .5f * logf(.5f*li/aij + fj*fj*rr_raw);
+    float drj_fac = .5f * logf(.5f*lj/aij + fi*fi*rr_raw);
     // An approximate penalty for the polynomial part of the gaussian product
     log_fac += li * dri_fac + lj * drj_fac;
     log_fac = max(log_fac, 0.f);

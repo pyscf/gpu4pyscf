@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "pbc.cuh"
@@ -106,8 +104,8 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
     double *rjri = shared_memory + gx_len * 6 + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -441,7 +439,7 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
     double *gyI = gxR + gx_len*3;
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
-    int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     double s0xR, s1xR, s2xR;
     double s0xI, s1xI, s2xI;
     double s0yR, s1yR, s2yR;

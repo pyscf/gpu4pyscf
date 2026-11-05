@@ -87,11 +87,12 @@ def gen_disp_fun(xc_disp, xc_gcp):
         if xc_disp is not None:
             res = get_dispersion(mol, xc_disp, grad=False)
             energy += res.get('energy')
-            mf.scf_summary['dispersion'] = energy
         if xc_gcp is not None:
             gcp_model = gcp.GCP(mol, method=xc_gcp)
             res = gcp_model.get_counterpoise()
             energy += res['energy']
+        if xc_disp is not None:
+            mf.scf_summary['dispersion'] = energy
         return energy
     return get_disp
 
@@ -188,7 +189,6 @@ def run_dft(mol_name, config, charge=None, spin=0):
     logfile = f'{mol_name[:-4]}_pyscf.log'
     shutil.copyfile(f'{input_dir}/{mol_name}', local_dir+mol_name)
     cupy.get_default_memory_pool().free_all_blocks()
-    lib.num_threads(8)
     start_time = time.time()
     mol = pyscf.M(
         atom=local_dir+mol_name,
@@ -230,7 +230,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
         if solvent['method'].endswith(('PCM', 'pcm')):
             mf = mf.PCM()
             mf.with_solvent.lebedev_order = 29
-            mf.with_solvent.method = solvent['method'].replace('PCM','-PCM')
+            mf.with_solvent.method = solvent['method']
             mf.with_solvent.eps = solvent['eps']
         elif solvent['method'].endswith(('smd', 'SMD')):
             mf = mf.SMD()
@@ -243,6 +243,8 @@ def run_dft(mol_name, config, charge=None, spin=0):
     mf.direct_scf_tol = direct_scf_tol
     mf.chkfile = None
     mf.conv_tol = scf_conv_tol
+    if 'scf_conv_tol_grad' in config:
+        mf.conv_tol_grad = config['scf_conv_tol_grad']
     e_tot = mf.kernel()
     if not mf.converged:
         logger.warn(mf, 'SCF failed to converge')
@@ -265,6 +267,9 @@ def run_dft(mol_name, config, charge=None, spin=0):
         h5f.create_dataset('e_xc',      data=e_xc)
         h5f.create_dataset('e_disp',    data=e_disp)
         h5f.create_dataset('e_solvent', data=e_solvent)
+        if 'e_cds' in mf.scf_summary:
+            # SMD adds a separate cavitation/dispersion/solvent-structure term.
+            h5f.create_dataset('e_cds', data=mf.scf_summary['e_cds'])
         h5f.create_dataset('scf_time',  data=scf_time)
     
         dm = mf.make_rdm1()
@@ -332,6 +337,7 @@ def run_dft(mol_name, config, charge=None, spin=0):
     #################### Hessian Calculation ###############################
     h = None
     if with_hess:
+        thermo_dat = None
         try:
             natm = mol.natm
             start_time = time.time()
@@ -367,7 +373,9 @@ def run_dft(mol_name, config, charge=None, spin=0):
             h5f.create_dataset('hess', data=h_dft)
             h5f.create_dataset('hess_time', data=hess_time)
 
-            if with_thermo: 
+            # Failed Hessian/thermo calculations must not export partial data
+            # or prevent the already computed SCF artifact from being copied.
+            if thermo_dat is not None:
                 h5f.create_dataset('freq_au',         data=normal_mode['freq_au'])
                 h5f.create_dataset('freq_wavenumber', data=normal_mode['freq_wavenumber'])
                 h5f.create_dataset('E_tot',           data=thermo_dat['E_tot'][0])

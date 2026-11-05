@@ -19,6 +19,7 @@ import cupy as cp
 import pyscf
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import hf as rhf
+from gpu4pyscf.properties.polarizability import eval_polarizability
 from gpu4pyscf.properties.raman import eval_raman_intensity, \
     polarizability_derivative_numerical_dx, polarizability_derivative_numerical_dEdE
 from gpu4pyscf.lib.multi_gpu import num_devices
@@ -63,7 +64,7 @@ def make_mf(mol, xc = None, if_density_fitting = False, pcm = None):
     return mf
 
 class KnownValues(unittest.TestCase):
-    @pytest.mark.skip("Too slow, and probably nobody wants to use direct SCF to compute the Raman spectra of a big molecule")
+    @unittest.skip("Too slow, and probably nobody wants to use direct SCF to compute the Raman spectra of a big molecule")
     def test_raman_wb97mv(self):
         ### Q-Chem input
         # $rem
@@ -166,7 +167,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_polarizability_derivative_pcm_with_response(self):
+    def test_polarizability_derivative_pcm_with_response_high_cost(self):
         mf = make_mf(mol, xc = "pbe", if_density_fitting = True, pcm = "IEF-PCM")
         mf.with_solvent.equilibrium_solvation = True
 
@@ -241,7 +242,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_polarizability_derivative_pcm_without_response(self):
+    def test_polarizability_derivative_pcm_without_response_high_cost(self):
         mf = make_mf(mol, xc = "pbe0", if_density_fitting = True, pcm = "IEF-PCM")
         assert mf.with_solvent.equilibrium_solvation is False
 
@@ -316,7 +317,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_raman_pbe0_densityfitting_pcm_with_response(self):
+    def test_raman_pbe0_densityfitting_pcm_with_response_high_cost(self):
         ### Q-Chem input
         # $rem
         # JOBTYPE       FREQ
@@ -362,7 +363,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_raman_pbe0_densityfitting_pcm_without_response(self):
+    def test_raman_pbe0_densityfitting_pcm_without_response_high_cost(self):
         # This is a consistent test, because Henry cannot find external reference for Raman + PCM without electric field response.
         reference_frequencies = np.array(
             [1268.31466976, 1268.53875777, 1268.89123638, 1501.31720611, 1501.68181867,

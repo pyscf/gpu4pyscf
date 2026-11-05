@@ -337,11 +337,7 @@ class SCF(mol_hf.SCF):
             raise NotImplementedError
         return cell.enuc
 
-    def get_init_guess(self, cell=None, key='minao', s1e=None):
-        if cell is None: cell = self.cell
-        dm = mol_hf.SCF.get_init_guess(self, cell, key)
-        dm = normalize_dm_(self, dm, s1e)
-        return dm
+    get_init_guess = NotImplemented
 
     # hf_cpu.SCF.init_guess_by_1e calls additional checks. Enabling the
     # following line to enable this.
@@ -393,6 +389,15 @@ class RHF(SCF):
     energy_elec = mol_hf.RHF.energy_elec
     newton = mol_hf.RHF.newton
     canonicalize = mol_hf.RHF.canonicalize
+
+    init_guess_by_minao = mol_hf.RHF.init_guess_by_minao
+    init_guess_by_atom = mol_hf.RHF.init_guess_by_atom
+
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        assert isinstance(key, str)
+        if cell is None: cell = self.cell
+        dm = mol_hf.RHF.get_init_guess(self, cell, key)
+        return normalize_dm_(self, dm, s1e)
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
                  hermi=1, kpt=None, kpts_band=None):

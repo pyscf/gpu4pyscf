@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
     def tearDownClass(cls):
         cls.mol.stdout.close()
 
-    def test_mcol_lda(self):
+    def test_mcol_lda_high_cost(self):
         mf = self.mol.UKS(xc='SVWN').to_gpu().run()
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20).run()
         grad_iter = td.Gradients().kernel(state=1)
@@ -191,7 +191,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
-    def test_col_b3lyp(self):
+    def test_col_b3lyp_high_cost(self):
         mf = self.mol.UKS(xc='B3LYP').to_gpu().run()
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='col').run()
         grad_iter = td.Gradients().kernel(state=1)
@@ -219,7 +219,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
         self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
-    def test_mcol_tpss(self):
+    def test_mcol_tpss_high_cost(self):
         mf = self.mol.UKS(xc='TPSS').to_gpu().run()
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         grad_iter = td.Gradients().kernel(state=1)

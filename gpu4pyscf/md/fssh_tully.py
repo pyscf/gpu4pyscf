@@ -118,11 +118,13 @@ class FSSH_Tully(FSSH):
 
             V11 = E0
             V22 = -E0
-            V12 = C * (np.exp(B * x) * np.heaviside(-x,0) + (2 - np.exp(-B * x))* np.heaviside(x,0))
+            exp_x = np.exp(-B * abs(x))
+            # Both branches meet at V12=C and dV12=B*C at the origin.
+            V12 = C * (exp_x if x < 0 else 2 - exp_x)
 
             dV11 = 0
             dV22 = 0
-            dV12 = C * B * np.exp(B * x) * np.heaviside(-x,0) + C * B * np.exp(-B * x) * np.heaviside(x,0)
+            dV12 = C * B * exp_x
 
         else:
             raise ValueError('model must be sac, dac or ecr')

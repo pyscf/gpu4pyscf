@@ -62,6 +62,14 @@ class KnownValues(unittest.TestCase):
         ovov_gpu = int4c2e.get_int4c2e_ovov(mol, orbo, orbv)
         assert np.linalg.norm(ovov_cpu - ovov_gpu.get()) < 1e-8
 
+    def test_range_separated_int4c2e(self):
+        mol = pyscf.M(atom='He 0 0 0; He 0 0 2', basis='cc-pvdz', verbose=0)
+        for omega in (.2, -.2):
+            with mol.with_range_coulomb(omega):
+                ref = mol.intor('int2e')
+                dat = int4c2e.get_int4c2e(mol).get()
+            assert abs(dat - ref).max() < 1e-12
+
 if __name__ == "__main__":
     print("Full Tests for int4c")
     unittest.main()
