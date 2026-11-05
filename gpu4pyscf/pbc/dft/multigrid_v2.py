@@ -29,7 +29,7 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.gto.mole import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
-from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from pyscf.pbc.lib.kpts_helper import is_gamma_point
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import numint
@@ -1435,7 +1435,7 @@ def get_pp(ni, kpts=None):
     vpp = convert_xc_on_g_mesh_to_fock(ni, vpplocG, hermi=1, kpts=kpts)[0]
     t1 = log.timer_debug1("vpploc", *t0)
 
-    vppnl = get_pp_nl_gpu(cell, kpts)
+    vppnl = get_pp_nl(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_single_kpt:
             vpp[k] += cp.asarray(vppnl[k].real)
