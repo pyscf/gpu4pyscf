@@ -5053,12 +5053,6 @@ while (1) {
                         _gx[736] = s1 - xlxk * s0;
                     }
                     __syncthreads();
-                    double xjxi = rjri[0];
-                    double yjyi = rjri[1];
-                    double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -8478,9 +8472,6 @@ while (1) {
                         _gx[960] = s1 - xlxk * s0;
                     }
                     __syncthreads();
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[64];
-                    double zlzk = rlrk[128];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -11660,9 +11651,6 @@ while (1) {
                         _gx[608] = s1 - xlxk * s0;
                     }
                     __syncthreads();
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -15104,9 +15092,6 @@ while (1) {
                         _gx[1280] = s1 - xjxi * s0;
                     }
                     __syncthreads();
-                    double xjxi = rjri[0];
-                    double yjyi = rjri[1];
-                    double zjzi = rjri[2];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -16624,12 +16609,6 @@ while (1) {
                         _gx[992] = s1 - xlxk * s0;
                     }
                     __syncthreads();
-                    double xjxi = rjri[0];
-                    double yjyi = rjri[1];
-                    double zjzi = rjri[2];
-                    double xlxk = rlrk[0];
-                    double ylyk = rlrk[32];
-                    double zlzk = rlrk[64];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -20135,9 +20114,6 @@ while (1) {
                         _gx[896] = s1 - xjxi * s0;
                     }
                     __syncthreads();
-                    double xjxi = rjri[0];
-                    double yjyi = rjri[1];
-                    double zjzi = rjri[2];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
@@ -24394,9 +24370,6 @@ while (1) {
                         _gx[1024] = s1 - xjxi * s0;
                     }
                     __syncthreads();
-                    double xjxi = rjri[0];
-                    double yjyi = rjri[1];
-                    double zjzi = rjri[2];
                     switch (gout_id) {
                     case 0:
                         dd = dd_cache[0];
