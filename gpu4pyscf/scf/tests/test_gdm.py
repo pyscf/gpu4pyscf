@@ -350,6 +350,9 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
         assert test_n_cycle <= ref_n_cycle + 5
 
+    def test_gdm_linear_dependent_basis(self):
+        raise
+
 if __name__ == "__main__":
     print("Full Tests for GDM")
     unittest.main()

@@ -834,6 +834,8 @@ def _kernel(mf, dm0,
 
         gradient = packed_kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts, conj_k_idx)
         gradient_norm = float(cp.linalg.norm(gradient))
+        if nkpts is not None:
+            gradient_norm *= cp.sqrt(nkpts) # gradient_norm = sqrt(1/nkpts * sum_k g_k^2), and g_k already includes a factor of 1/nkpts
 
         if not print_spin:
             spin_text = ""
@@ -882,6 +884,8 @@ def _kernel(mf, dm0,
                 step_type = "Descent Reset"
 
         step_norm = float(cp.linalg.norm(step))
+        if nkpts is not None:
+            step_norm /= cp.sqrt(nkpts) # step_norm = sqrt(1/nkpts * sum_k step_k^2)
         if step_norm > max_step_norm:
             step *= max_step_norm / step_norm
             step_type = "Clipped " + step_type
@@ -917,8 +921,15 @@ def _kernel(mf, dm0,
         previous_step = line_search_step
         previous_gradient = gradient
 
-    mo_energy, mo_coeff = mf.canonicalize(mo_coeff, mo_occ, fock)
+    mo_energy, mo_coeff, _ = pseudo_canonicalize(fock, mo_coeff, nocc, nmo, [], nkpts, conj_k_idx)
     e_tot, fock = get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e)
+
+    if nkpts is not None:
+        new_mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
+        if cp.max(cp.abs(new_mo_occ - mo_occ)) > 1e-10:
+            log.warn("MO occupation number changed after the fixed-occupation GDM converged. "
+                     "Please restart from the returned orbitals.")
+            converged = False
 
     mf.converged = converged
     mf.cycles = cycle + 1
@@ -990,7 +1001,9 @@ def gdm(mf):
     from gpu4pyscf.scf.hf import SCF
     assert isinstance(mf, SCF)
 
-    if mf.istype('ROHF'):
+    if mf.istype('RHF'):
+        pass
+    elif mf.istype('ROHF'):
         raise NotImplementedError("GDM does not support ROHF yet")
     elif mf.istype('UHF'):
         pass
@@ -1000,7 +1013,13 @@ def gdm(mf):
         raise NotImplementedError("GDM does not support RDHF yet")
     elif mf.istype('DHF'):
         raise NotImplementedError("GDM does not support DHF yet")
-    else: # RHF
+    elif mf.istype('KRHF'):
         pass
+    elif mf.istype('KUHF'):
+        pass
+    elif mf.istype('KGHF'):
+        raise NotImplementedError("GDM does not support KGHF yet")
+    else:
+        raise ValueError(f"Unknown SCF type {type(mf)}")
 
     return GDM(mf)
