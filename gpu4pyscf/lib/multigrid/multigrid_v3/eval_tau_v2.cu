@@ -288,11 +288,10 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
 extern "C" {
 #define eval_tau_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): { \
-        auto dev_envs = *envs; \
         auto _threads = make_block(WARP_SIZE, TILE); \
         auto _grids = make_grid(ntasks); \
         LAUNCH_KERNEL( (eval_tau_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
-            rho_c, tau_c, dm, dev_envs, factor, shl_pair_offsets, bas_ij_idx, \
+            rho_c, tau_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
                         atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
                         da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
     } \

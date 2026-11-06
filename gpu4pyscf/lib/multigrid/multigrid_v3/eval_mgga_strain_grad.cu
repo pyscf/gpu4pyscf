@@ -398,11 +398,10 @@ void eval_mgga_grad_kernel(double *grad, double *strain, double *dm,
 extern "C" {
 #define eval_mgga_grad_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): { \
-        auto dev_envs = *envs; \
         LAUNCH_KERNEL((eval_mgga_grad_kernel<li,lj,slice_i,slice_j>), grids, threads, 0, \
             grad, strain, dm, vxc, tau, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            factor, negligible, dev_envs); \
+            factor, negligible, *envs); \
     } \
     break
 

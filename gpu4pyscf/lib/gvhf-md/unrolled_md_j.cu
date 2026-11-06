@@ -20,7 +20,6 @@
     DYNAMIC_SHARED_PTR(double, vj_kl_cache);
 
 #define LAUNCH_MD_KERNEL(KERNEL, SHM, BLOCKS_IJ, BLOCKS_KL) { \
-    auto dev_envs = *envs; auto dev_jk = *jk; auto dev_bounds = *bounds; \
     auto _blocks = make_grid((npairs_ij + (BLOCKS_IJ) - 1) / (BLOCKS_IJ), \
                              (npairs_kl + (BLOCKS_KL) - 1) / (BLOCKS_KL)); \
     auto _threads = make_block(16, 16); \
@@ -28,7 +27,7 @@
                          ((SHM)+addition_buf)*sizeof(double)); \
     LAUNCH_KERNEL( KERNEL, _blocks, _threads, \
         ((SHM)+addition_buf)*sizeof(double), \
-        dev_envs, dev_jk, dev_bounds, q_cond_ij, q_cond_kl); \
+        *envs, *jk, *bounds, q_cond_ij, q_cond_kl); \
 }
 
 

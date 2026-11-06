@@ -379,14 +379,13 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
     // so the host passes offsets and each kernel derives its own pointers.
     const int rt2_off = offset_for_Rt2_idx(lij, lkl);
     const int efg_off = offset_for_Rt2_idx(0, lkl);
-    auto dev_envs = *envs;
     for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
         JKMatrix jmat = {vj+i_dm*dm_size, NULL, dm+i_dm*dm_size, n_dm, 0, omega};
         if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             LAUNCH_KERNEL( pbc_md_j_kernel, blocks, threads, buflen,
-                                dev_envs, jmat, bounds, q_cond_ij, q_cond_kl,
+                                *envs, jmat, bounds, q_cond_ij, q_cond_kl,
                                 threads_ij, threads_kl, tilex, tiley,
                                 rt2_off, efg_off);
         }

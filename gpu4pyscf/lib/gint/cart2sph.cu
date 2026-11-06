@@ -15,7 +15,6 @@
  */
 
 #include <stdio.h>
-#include <cuda_runtime.h>
 #include "gsycl/gpu_compat.h"
 
 template<int L>

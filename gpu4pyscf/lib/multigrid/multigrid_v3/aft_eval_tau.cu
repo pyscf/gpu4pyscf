@@ -254,11 +254,10 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntiles*nbatches_shl_pair);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( orth_ft_tau_dm_kernel, grids, threads, 0,
                     densityR, densityI, tauR, tauI, dm, shl_pair_offsets,
                     bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum,
-                    ntiles, factor, dev_envs);
+                    ntiles, factor, *envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));

@@ -250,11 +250,10 @@ int orth_aft_lda_mat(double *out, cuDoubleComplex *vxcG, cuDoubleComplex *placeh
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntile_batch*npair);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( orth_lda_mat_kernel, grids, threads, 0,
                     out, vxcG, bas_ij_idx, G_bases, L_bases, mesh_cum,
                     nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z,
-                    dev_envs);
+                    *envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_lda_mat_kernel: %s\n", cudaGetErrorString(err));

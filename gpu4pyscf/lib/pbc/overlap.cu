@@ -48,15 +48,14 @@
 // cudaFuncSetAttribute (where needed) must be placed outside this macro.
 //
 // The PBCIntEnvVars struct is owned by these macros, not passed by the caller:
-// `*envs` is copied into a host-local `dev_envs` before launch, so the SYCL
+// `*envs` is copied into a host-local `*envs` before launch, so the SYCL
 // [=] capture holds it by value (the raw host pointer `envs` must not be
 // dereferenced on the device). CUDA copies the value into kernel params.
 //   LAUNCH_OVERLAP_KERNEL -> KERNEL(out, envs, <rest>)
 #define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, out_, ...) { \
-    auto dev_envs = *envs; \
     auto blocks = make_grid(nbatches_); \
     auto threads = make_block(THREADS); \
-    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, dev_envs, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, *envs, __VA_ARGS__); \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
@@ -1226,11 +1225,10 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
                         int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(ovlp_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( ovlp_derivatives_kernel, blocks, threads, shm_size,
-            grad, sigma, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ovlp_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1244,11 +1242,10 @@ int PBCkin_derivatives(double *grad, double *sigma, double *dm,
                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(kin_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( kin_derivatives_kernel, blocks, threads, shm_size,
-            grad, sigma, dm, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in kin_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1270,11 +1267,10 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
     size_t njsh = jsh1 - jsh0;
     size_t npairs = nish * ncells * njsh;
     int nbatches = (npairs + 255) / 256;
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches);
     auto threads = make_block(256);
     LAUNCH_KERNEL( ovlp_mask_estimation_kernel, blocks, threads, 0,
-            ovlp_mask, exps, log_coeff, dev_envs, hermi, log_cutoff, bvkmesh_Ls,
+            ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff, bvkmesh_Ls,
             ish0, ish1, jsh0, jsh1);
 }
 }

@@ -838,7 +838,7 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                             int pair_ij, int ish, int jsh,
                             float *q_cond_ij, float *q_cond_kl,
                             int *swap,
-                            JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds)
+                            JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
@@ -909,7 +909,7 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
                                float *q_cond_ij, float *q_cond_kl,
                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                                int *swap,
-                               JKEnergy jk, RysIntEnvVars envs, BoundsInfo bounds)
+                               JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
     KERNEL_SETUP();
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;

@@ -304,7 +304,6 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
                   int nbatches_shl_pair, int *shl_pair_offsets,
                   uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -314,7 +313,7 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
         return 1;
     }
     LAUNCH_KERNEL( e_int2c2e_ip2_kernel, blocks, threads, shm_size,
-        out, dm, dev_envs, omega, lr_factor, sr_factor,
+        out, dm, *envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     err = cudaGetLastError();
     if (err != cudaSuccess) {

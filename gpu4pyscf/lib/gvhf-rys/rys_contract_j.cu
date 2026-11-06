@@ -894,7 +894,6 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             buflen += iprim * jprim;
             auto blocks = make_grid(workers, 1);
             auto threads = make_block(quartets_per_block, gout_stride);
-            auto dev_envs = *envs;
             buflen *= sizeof(double);
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -907,7 +906,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             }
             cudaMemset(head, 0, sizeof(int));
             LAUNCH_KERNEL( rys_j_with_gout_kernel, blocks, threads, buflen,
-                dev_envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
@@ -916,7 +915,6 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             buflen += nf3_ij; // dm_ij_cache
             auto blocks = make_grid(workers, 1);
             auto threads = make_block(quartets_per_block, gout_stride);
-            auto dev_envs = *envs;
             buflen *= sizeof(double);
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -934,7 +932,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 jk1.vj = vj + (size_t)i_dm * nao_pairs;
                 cudaMemset(head, 0, sizeof(int));
                 LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
-                    dev_envs, jk1, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                    *envs, jk1, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                     s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
             }
         }

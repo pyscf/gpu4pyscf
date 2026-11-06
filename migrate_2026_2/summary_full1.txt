@@ -1,0 +1,239 @@
+full1 gto_test_ecp gpu6 rc=0 t=57s 7 passed, 1 warning in 55.09s
+full1 df_hessian_test_df_rhf_hessian gpu8 rc=0 t=81s 8 passed, 1 warning in 78.70s (0:01:18)
+full1 cc_test_ccsd gpu7 rc=0 t=106s 4 passed, 1 warning in 104.75s (0:01:44)
+full1 dft_test_ao_values gpu7 rc=0 t=4s 10 passed, 1 warning in 3.10s
+full1 dft_test_dft_ecp gpu7 rc=0 t=32s 1 passed, 4 warnings in 31.69s
+full1 gto_test_int1e_grids_ipip gpu6 rc=0 t=94s 20 passed, 1 warning in 93.00s (0:01:32)
+full1 pbc_df_test_pbc_aft gpu11 rc=0 t=160s 19 passed, 1 warning in 158.72s (0:02:38)
+full1 dft_test_dftu gpu7 rc=0 t=29s 2 passed, 7 warnings in 27.80s
+full1 pbc_df_test_pbc_df gpu11 rc=0 t=15s 8 passed, 5 skipped, 7 warnings in 13.94s
+full1 gto_test_int1e_grids_ip gpu6 rc=0 t=42s 12 passed, 1 warning in 41.50s
+full1 dft_test_gks gpu7 rc=0 t=23s 4 passed, 7 skipped, 16 warnings in 22.34s
+full1 grad_test_geomopt gpu9 rc=0 t=195s 4 passed, 25 warnings in 193.77s (0:03:13)
+full1 gto_test_int1e_grids gpu6 rc=0 t=10s 19 passed, 1 warning in 9.46s
+full1 gto_test_mole gpu6 rc=0 t=4s 4 passed, 3 warnings in 2.80s
+full1 lib_test_cublas gpu6 rc=5 t=1s no tests ran in 0.94s
+full1 lib_test_cuest_wrapper gpu6 rc=0 t=3s 119 skipped, 1 warning in 1.93s
+full1 grad_test_grad_rkspu gpu9 rc=0 t=17s 3 passed, 13 warnings in 16.08s
+full1 dft_test_grids gpu7 rc=0 t=19s 8 passed, 59 warnings in 18.53s
+full1 lib_test_c_helper.py gpu6 rc=0 t=7s 17 passed, 2 warnings in 6.27s
+full1 dft_test_libxc gpu7 rc=0 t=5s 7 passed, 3 xfailed, 2 warnings in 4.07s
+full1 lib_test_cusolver gpu6 rc=0 t=3s 4 passed, 1 warning in 2.24s
+full1 lib_test_cutensor gpu6 rc=0 t=2s 5 passed, 1 warning in 2.30s
+full1 dft_test_numint2c gpu7 rc=0 t=7s 6 passed, 1 skipped, 1 xfailed, 4 warnings in 6.88s
+full1 lib_test_dftd3 gpu6 rc=0 t=3s 2 passed, 1 warning in 1.96s
+full1 lib_test_dftd4 gpu6 rc=0 t=3s 2 passed, 1 warning in 1.96s
+full1 lib_test_diis gpu6 rc=0 t=2s 4 passed, 1 warning in 2.00s
+full1 lib_test_multi_gpu gpu6 rc=0 t=3s 1 skipped, 1 warning in 1.98s
+full1 grad_test_grad_ukspu gpu9 rc=0 t=23s 2 passed, 13 warnings in 22.46s
+full1 dft_test_numint gpu7 rc=0 t=20s 24 passed, 102 warnings in 18.35s
+full1 lib_test_to_gpu gpu6 rc=0 t=29s 5 passed, 31 warnings in 28.19s
+full1 dft_test_rks_lowmem gpu7 rc=0 t=48s 4 passed, 34 warnings in 47.92s
+full1 grad_test_grid_response gpu9 rc=0 t=95s 7 passed, 315 warnings in 93.61s (0:01:33)
+full1 df_hessian_test_df_rks_hessian gpu8 rc=0 t=256s 5 passed, 175 warnings in 255.23s (0:04:15)
+full1 df_hessian_test_df_uhf_hessian gpu8 rc=0 t=28s 8 passed, 1 warning in 27.85s
+full1 pbc_df_test_pbc_df_derivatives gpu10 rc=0 t=371s 22 passed, 1 warning in 369.57s (0:06:09)
+full1 grad_test_level_shift_grad gpu9 rc=0 t=53s 6 passed, 10 warnings in 52.74s
+full1 pbc_df_test_pbc_ft_ao gpu10 rc=0 t=22s 11 passed, 1 skipped, 1 xfailed, 1 warning in 20.99s
+full1 df_hessian_test_df_uks_hessian gpu8 rc=0 t=30s 4 passed, 16 warnings in 29.00s
+full1 df_test_df_ao2mo gpu8 rc=0 t=4s 3 passed, 1 warning in 3.61s
+full1 pbc_df_test_pbc_int3c2e gpu10 rc=0 t=13s 10 passed, 3 warnings in 12.98s
+full1 pbc_df_test_pbc_hcore_derivatives gpu11 rc=0 t=233s 6 passed, 7 warnings in 232.35s (0:03:52)
+full1 pbc_dft_test_multigrid gpu10 rc=5 t=3s 1 skipped, 1 warning in 1.81s
+full1 dft_test_rks gpu7 rc=0 t=136s 17 passed, 1 skipped, 105 warnings in 135.18s (0:02:15)
+full1 pbc_df_test_rsdf_builder gpu11 rc=0 t=36s 29 passed, 1 skipped, 3 warnings in 35.95s
+full1 pbc_dft_test_multigrid_v2 gpu11 rc=5 t=3s 1 skipped, 1 warning in 1.83s
+full1 df_test_df_ecp gpu8 rc=0 t=55s 3 passed, 64 warnings in 54.28s
+full1 grad_test_lowmem_grad gpu9 rc=0 t=83s 4 passed, 7 warnings in 81.93s (0:01:21)
+full1 grad_test_rhf_grad gpu9 rc=0 t=37s 7 passed, 1 warning in 36.66s
+full1 df_test_df_geomopt gpu8 rc=0 t=56s 4 passed, 25 warnings in 55.24s
+full1 dft_test_ucdft gpu7 rc=0 t=90s 16 passed, 28 warnings in 89.46s (0:01:29)
+full1 df_test_df_ghf gpu8 rc=0 t=10s 2 passed, 1 skipped, 1 warning in 9.94s
+full1 pbc_dft_test_pbc_dft_damp_levelshift gpu11 rc=0 t=86s 9 passed, 1 warning in 85.34s (0:01:25)
+full1 df_test_df_gks gpu8 rc=0 t=13s 1 passed, 2 skipped, 4 warnings in 12.47s
+full1 pbc_dft_test_pbc_gks gpu11 rc=0 t=33s 6 passed, 6 skipped, 1 warning in 32.63s
+full1 pbc_dft_test_multigrid_v3 gpu10 rc=0 t=188s 40 passed, 1 warning in 188.10s (0:03:08)
+full1 pbc_dft_test_pbc_krkspu gpu11 rc=0 t=38s 3 passed, 1 warning in 37.58s
+full1 dft_test_uks gpu7 rc=0 t=94s 10 passed, 54 warnings in 93.43s (0:01:33)
+full1 dispersion_test_d3 gpu7 rc=0 t=3s 4 passed, 1 warning in 1.85s
+full1 pbc_dft_test_pbc_dftu gpu10 rc=0 t=23s 3 passed, 1 warning in 22.27s
+full1 dispersion_test_d4 gpu7 rc=0 t=5s 8 passed, 1 warning in 4.95s
+full1 dispersion_test_gcp gpu7 rc=0 t=3s 4 passed, 1 warning in 1.89s
+full1 fci_test_direct_spin1 gpu7 rc=0 t=6s 3 passed, 1 warning, 3 subtests passed in 5.26s
+full1 geomopt_test_pbc_geomopt_ase gpu7 rc=0 t=2s 5 skipped in 1.88s
+full1 mcscf_test_casscf gpu7 rc=0 t=10s 4 passed, 1 warning in 8.92s
+full1 mcscf_test_df_casci gpu7 rc=0 t=8s 4 passed, 1 warning, 4 subtests passed in 8.12s
+full1 pbc_dft_test_pbc_kucdft gpu11 rc=0 t=57s 1 passed, 1 warning in 55.41s
+full1 nac_test_tdrhf_mecp gpu6 rc=0 t=411s 1 passed, 1 skipped, 1 warning in 410.17s (0:06:50)
+full1 grad_test_rks_grad gpu9 rc=0 t=193s 15 passed, 159 warnings in 192.81s (0:03:12)
+full1 pbc_dft_test_pbc_numint gpu11 rc=0 t=40s 17 passed, 2 warnings in 39.65s
+full1 md_test_fssh gpu7 rc=0 t=125s 5 passed, 10 warnings in 123.50s (0:02:03)
+full1 mp_test_dfmp2 gpu7 rc=0 t=11s 4 passed, 1 warning in 11.11s
+full1 mp_test_dfmp2_utilities_large gpu7 rc=0 t=18s 1 passed, 1 warning in 16.84s
+full1 mp_test_dfmp2_utilities gpu7 rc=0 t=6s 6 passed, 1 warning in 5.31s
+full1 mp_test_dfump2 gpu7 rc=0 t=13s 4 passed, 1 warning in 12.90s
+full1 mp_test_dfump2_utilities gpu7 rc=0 t=5s 1 passed, 1 warning in 4.18s
+full1 pbc_dft_test_pbc_uks gpu11 rc=0 t=139s 11 passed, 3 skipped, 3 warnings in 138.23s (0:02:18)
+full1 grad_test_tddft_opt gpu9 rc=0 t=147s 4 passed, 64 warnings in 146.13s (0:02:26)
+full1 mp_test_mp2 gpu7 rc=0 t=19s 5 passed, 1 warning in 17.66s
+full1 pop_test_pop gpu7 rc=0 t=27s 2 passed, 229 warnings in 26.51s
+full1 pbc_grad_test_pbc_grad_krkspu gpu11 rc=0 t=37s 3 passed, 1 warning in 36.72s
+full1 properties_test_c6 gpu7 rc=0 t=17s 5 passed, 10 warnings in 16.56s
+full1 nac_test_tdrhf_nac_batch gpu6 rc=0 t=429s 6 passed, 1 warning in 428.27s (0:07:08)
+full1 df_test_df_hessian gpu8 rc=0 t=644s 21 passed, 359 warnings in 642.41s (0:10:42)
+full1 df_test_df_int3c2e gpu8 rc=0 t=14s 16 passed, 7 warnings in 13.76s
+full1 pbc_dft_test_pbc_grids gpu10 rc=0 t=578s 12 passed, 10 warnings in 576.86s (0:09:36)
+full1 pbc_dft_test_pbc_krks gpu10 rc=0 t=3s 1 passed, 1 skipped, 1 warning in 2.07s
+full1 df_test_df_jk gpu8 rc=0 t=17s 8 passed, 3 warnings in 15.96s
+full1 df_test_df_rhf_grad gpu8 rc=0 t=19s 5 passed, 1 warning in 18.61s
+full1 df_test_df_rhf gpu8 rc=0 t=12s 7 passed, 1 warning in 11.20s
+full1 grad_test_tddft_ris_grad gpu9 rc=0 t=403s 8 passed, 133 warnings in 402.10s (0:06:42)
+full1 pbc_dft_test_pbc_kukspu gpu10 rc=0 t=47s 3 passed, 1 warning in 46.68s
+full1 nac_test_tdrhf_nac_ee gpu6 rc=0 t=147s 3 passed, 1 xfailed, 1 warning in 146.52s (0:02:26)
+full1 pbc_grad_test_pbc_grad_kucdft gpu11 rc=0 t=420s 3 passed, 1 warning in 419.20s (0:06:59)
+full1 pbc_grad_test_pbc_grad_kukspu gpu11 rc=0 t=41s 2 passed, 1 warning in 40.41s
+full1 grad_test_tddft_ris_opt gpu9 rc=0 t=111s 2 passed, 67 warnings in 110.59s (0:01:50)
+full1 nac_test_tdrhf_nac_ge gpu6 rc=0 t=134s 3 passed, 1 warning in 133.07s (0:02:13)
+full1 nac_test_tdrhf_nac_scanner gpu6 rc=0 t=25s 3 passed, 1 warning in 24.57s
+full1 pbc_dft_test_pbc_rks gpu10 rc=0 t=165s 30 passed, 4 skipped, 11 warnings in 164.49s (0:02:44)
+full1 pbc_grad_test_pbc_grad_rks gpu11 rc=0 t=102s 17 passed, 4 warnings in 101.26s (0:01:41)
+full1 grad_test_tdrhf_grad gpu9 rc=0 t=174s 7 passed, 1 xfailed, 1 warning in 172.33s (0:02:52)
+full1 pbc_grad_test_pbc_krhf_stress gpu11 rc=0 t=139s 4 passed, 3 warnings in 138.18s (0:02:18)
+full1 pbc_grad_test_pbc_kuhf_stress gpu11 rc=0 t=137s 4 passed, 3 warnings in 136.47s (0:02:16)
+full1 grad_test_tdrks_grad gpu9 rc=0 t=246s 7 passed, 50 warnings in 246.12s (0:04:06)
+full1 pbc_grad_test_pbc_pp_grad gpu11 rc=0 t=122s 19 passed, 5 warnings in 121.26s (0:02:01)
+full1 df_test_df_rks_grad gpu8 rc=0 t=604s 11 passed, 967 warnings in 603.81s (0:10:03)
+full1 grad_test_tduhf_grad gpu9 rc=0 t=74s 4 passed, 1 xfailed, 1 warning in 72.55s (0:01:12)
+full1 df_test_df_rks gpu8 rc=0 t=38s 12 passed, 114 warnings in 36.79s
+full1 pbc_grad_test_pbc_grad_krhf gpu10 rc=0 t=518s 13 passed, 1 skipped, 6 warnings in 517.49s (0:08:37)
+full1 df_test_df_tddft_ris_nac gpu8 rc=0 t=196s 8 passed, 921 warnings in 195.32s (0:03:15)
+full1 df_test_df_tddft_ris gpu8 rc=0 t=11s 3 passed, 27 warnings, 2 subtests passed in 10.74s
+full1 pbc_grad_test_pbc_uks_stress gpu11 rc=0 t=263s 12 passed, 4 warnings in 261.23s (0:04:21)
+full1 pbc_gto_test_pbc_int1e gpu11 rc=0 t=6s 13 passed, 1 warning in 5.72s
+full1 pbc_lib_test_kpts_helper gpu11 rc=0 t=4s 2 passed, 1 warning in 2.99s
+full1 pbc_grad_test_pbc_grad_krks gpu10 rc=0 t=193s 22 passed, 4 warnings in 192.07s (0:03:12)
+full1 df_test_df_tdrhf_grad gpu8 rc=0 t=41s 6 passed, 1 warning, 4 subtests passed in 39.73s
+full1 pbc_scf_test_pbc_scf_diffuse_orbital gpu11 rc=0 t=87s 9 passed, 1 warning in 86.84s (0:01:26)
+full1 df_test_df_tdrhf_nac_batch gpu8 rc=0 t=71s 5 passed, 1 warning in 70.02s (0:01:10)
+full1 grad_test_tduks_grad gpu9 rc=0 t=394s 5 passed, 28 warnings in 393.04s (0:06:33)
+full1 properties_test_eda gpu7 rc=0 t=1370s 12 passed, 1 skipped, 744 warnings in 1369.65s (0:22:49)
+full1 df_test_df_tdrhf_nac gpu8 rc=0 t=78s 5 passed, 1 xfailed, 1 warning in 77.68s (0:01:17)
+full1 properties_test_ir_intensity gpu7 rc=0 t=22s 2 passed, 1 skipped, 7 warnings in 20.59s
+full1 grad_test_tduks_sf_grad gpu9 rc=0 t=123s 3 passed, 10 warnings in 122.67s (0:02:02)
+full1 properties_test_polarizability gpu7 rc=0 t=112s 7 passed, 1 skipped, 287 warnings in 111.96s (0:01:51)
+full1 nac_test_tdrks_nac_batch gpu6 rc=0 t=1024s 13 passed, 84 warnings in 1023.22s (0:17:03)
+full1 df_test_df_tdrks_grad gpu8 rc=0 t=171s 5 passed, 286 warnings in 169.98s (0:02:49)
+full1 pbc_scf_test_pbc_scf_j_engine gpu11 rc=0 t=306s 12 passed, 1 warning in 304.91s (0:05:04)
+full1 pbc_scf_test_pbc_scf_smearing gpu11 rc=0 t=12s 5 passed, 1 warning in 11.76s
+full1 grad_test_ucdft_grad gpu9 rc=0 t=194s 4 passed, 37 warnings in 193.54s (0:03:13)
+full1 pbc_grad_test_pbc_grad_kuhf gpu10 rc=0 t=460s 8 passed, 6 warnings in 459.04s (0:07:39)
+full1 grad_test_uhf_grad gpu9 rc=0 t=66s 6 passed, 1 warning in 65.37s (0:01:05)
+full1 pbc_scf_test_pbc_soscf gpu11 rc=0 t=129s 17 passed, 2 xfailed, 4 warnings in 127.56s (0:02:07)
+full1 pbc_tools_test_magmom gpu11 rc=0 t=6s 14 passed, 1 warning, 86 subtests passed in 5.46s
+TILEDONE gpu11 10:41:52
+full1 df_test_df_tdrks_nac_batch gpu8 rc=0 t=268s 12 passed, 309 warnings in 267.53s (0:04:27)
+full1 nac_test_tdrks_nac_ee gpu6 rc=0 t=315s 8 passed, 251 warnings in 314.09s (0:05:14)
+full1 pbc_grad_test_pbc_grad_kuks gpu10 rc=0 t=196s 20 passed, 3 warnings in 194.82s (0:03:14)
+full1 grad_test_uks_grad gpu9 rc=0 t=209s 12 passed, 69 warnings in 207.92s (0:03:27)
+full1 pbc_grad_test_pbc_grad_uks gpu10 rc=0 t=58s 11 passed, 1 skipped, 1 warning in 57.89s
+full1 grad_test_vv10_grid gpu9 rc=0 t=197s 20 passed, 909 warnings in 196.76s (0:03:16)
+full1 hessian_test_large_exponent gpu9 rc=0 t=10s 7 passed, 1 skipped, 33 warnings in 8.71s
+full1 df_test_df_tdrks_nac gpu8 rc=0 t=341s 9 passed, 958 warnings in 340.29s (0:05:40)
+full1 nac_test_tdrks_nac_ge gpu6 rc=0 t=337s 6 passed, 259 warnings in 336.54s (0:05:36)
+full1 nac_test_tdrks_nac_scanner gpu6 rc=0 t=31s 2 passed, 25 warnings in 29.85s
+full1 hessian_test_level_shift_hessian gpu9 rc=0 t=103s 4 passed, 13 warnings in 102.72s (0:01:42)
+full1 df_test_df_tdrks_ris_grad gpu8 rc=0 t=94s 3 passed, 28 warnings in 93.49s (0:01:33)
+full1 nac_test_tdrks_ris_mecp gpu6 rc=0 t=75s 2 passed, 47 warnings in 74.55s (0:01:14)
+full1 hessian_test_rhf_hessian gpu9 rc=0 t=132s 8 passed, 1 warning in 130.93s (0:02:10)
+full1 properties_test_raman_intensity gpu7 rc=0 t=895s 7 passed, 1 skipped, 948 warnings in 893.99s (0:14:53)
+full1 properties_test_shielding gpu7 rc=0 t=35s 4 passed, 1 skipped, 29 warnings in 34.31s
+full1 df_test_df_tdrks_ris_nac_batch gpu8 rc=0 t=283s 13 passed, 358 warnings in 281.59s (0:04:41)
+full1 df_test_df_tduhf_grad gpu8 rc=0 t=20s 2 passed, 1 warning in 19.61s
+full1 pbc_grad_test_pbc_krks_stress gpu10 rc=0 t=618s 20 passed, 1 skipped, 4 warnings in 616.81s (0:10:16)
+full1 hessian_test_rks_hessian_grid_response gpu9 rc=0 t=197s 17 passed, 2220 warnings in 196.49s (0:03:16)
+full1 tdscf_test_diffuse_orbital_tdscf gpu7 rc=0 t=230s 3 passed, 1 xfailed, 39 warnings in 229.21s (0:03:49)
+full1 tdscf_test_krylov gpu7 rc=0 t=11s 3 passed, 1 warning in 9.70s
+full1 tdscf_test_ris gpu7 rc=0 t=33s 12 passed, 68 warnings in 32.51s
+full1 tdscf_test_sftddft gpu7 rc=0 t=50s 10 passed, 57 warnings in 49.45s
+full1 tdscf_test_tdrhf gpu7 rc=0 t=19s 8 passed, 1 warning in 18.58s
+full1 hessian_test_rks_hessian gpu9 rc=0 t=197s 12 passed, 52 warnings in 195.99s (0:03:15)
+full1 tdscf_test_tdrks gpu7 rc=0 t=57s 28 passed, 108 warnings in 56.28s
+full1 hessian_test_uhf_hessian gpu9 rc=0 t=54s 5 passed, 1 warning in 53.56s
+full1 df_test_df_tduks_grad gpu8 rc=0 t=329s 8 passed, 277 warnings in 328.36s (0:05:28)
+full1 hessian_test_uks_hessian_grid_response gpu9 rc=0 t=174s 16 passed, 2265 warnings in 172.95s (0:02:52)
+full1 df_test_df_ucdft_grad gpu8 rc=0 t=153s 4 passed, 79 warnings in 152.63s (0:02:32)
+full1 tdscf_test_tdrks_vv10 gpu7 rc=0 t=221s 6 passed, 285 warnings in 220.03s (0:03:40)
+full1 tdscf_test_tduhf gpu7 rc=0 t=16s 8 passed, 1 warning in 15.01s
+full1 df_test_df_ucdft gpu8 rc=0 t=33s 1 passed, 13 warnings in 32.30s
+full1 nac_test_tdrks_ris_nac_batch gpu6 rc=0 t=833s 14 passed, 185 warnings in 831.85s (0:13:51)
+full1 df_test_df_uhf gpu8 rc=0 t=91s 9 passed, 1 warning in 89.85s (0:01:29)
+full1 tdscf_test_tduks gpu7 rc=0 t=122s 20 passed, 121 warnings in 121.31s (0:02:01)
+full1 hessian_test_uks_hessian gpu9 rc=0 t=200s 12 passed, 52 warnings in 198.67s (0:03:18)
+full1 x2c_test_x2c gpu7 rc=0 t=38s 8 passed, 1 skipped, 1 warning in 37.30s
+TILEDONE gpu7 11:06:23
+full1 pbc_grad_test_pbc_kuks_stress gpu10 rc=0 t=698s 14 passed, 4 warnings in 697.10s (0:11:37)
+full1 pbc_grad_test_pbc_rks_stress gpu10 rc=0 t=213s 20 passed, 4 warnings in 211.93s (0:03:31)
+full1 pbc_gto_pseudo_test_pp_int gpu10 rc=0 t=5s 7 passed, 1 warning in 4.34s
+full1 pbc_hessian_test_gamma_hessian gpu10 rc=0 t=2s 6 skipped, 1 warning in 1.98s
+full1 pbc_properties_berry_test_wannier_polarization gpu10 rc=0 t=7s 10 passed, 2 skipped, 1 warning, 2 subtests passed in 6.06s
+full1 df_test_df_uks_grad gpu8 rc=0 t=321s 11 passed, 945 warnings in 319.96s (0:05:19)
+full1 hessian_test_vv10_hessian gpu9 rc=0 t=310s 14 passed, 2895 warnings in 309.71s (0:05:09)
+TILEDONE gpu9 11:11:12
+full1 df_test_df_uks gpu8 rc=0 t=57s 12 passed, 122 warnings in 56.57s
+full1 pbc_scf_test_pbc_scf_hf gpu10 rc=0 t=67s 12 passed, 1 skipped, 10 warnings, 6 subtests passed in 66.64s (0:01:06)
+full1 df_test_range_separation_in_kernel gpu8 rc=0 t=120s 8 passed, 425 warnings in 119.52s (0:01:59)
+TILEDONE gpu8 11:13:40
+full1 nac_test_tdrks_ris_nac_ee gpu6 rc=0 t=537s 8 passed, 279 warnings in 536.65s (0:08:56)
+full1 pbc_scf_test_pbc_scf_jk gpu10 rc=0 t=527s 26 passed, 1 warning in 526.37s (0:08:46)
+full1 nac_test_tdrks_ris_nac_ge gpu6 rc=0 t=432s 8 passed, 275 warnings in 431.39s (0:07:11)
+full1 nac_test_tdrks_ris_nac_scanner gpu6 rc=0 t=21s 2 passed, 25 warnings in 20.40s
+full1 pbc_scf_test_pbc_scf_uhf gpu10 rc=0 t=105s 7 passed, 8 warnings in 103.88s (0:01:43)
+full1 pbc_tools_test_discretization gpu10 rc=0 t=2s 2 passed, 1 warning in 1.67s
+full1 pbc_x2c_test_pbc_x2c gpu10 rc=0 t=5s 1 passed, 1 skipped, 1 warning in 4.22s
+TILEDONE gpu10 11:22:28
+full1 nac_test_tduks_sf_nac gpu6 rc=0 t=95s 5 passed, 16 warnings in 93.65s (0:01:33)
+full1 qmmm_pbc_test_qmmm gpu6 rc=0 t=12s 3 passed, 28 warnings in 12.00s
+full1 qmmm_test_chelpg gpu6 rc=0 t=20s 2 passed, 7 warnings in 19.03s
+full1 qmmm_test_external_field gpu6 rc=0 t=12s 4 passed, 13 warnings in 11.26s
+full1 qmmm_test_hirshfeld gpu6 rc=0 t=43s 4 passed, 153 warnings in 43.31s
+full1 qmmm_test_itrf gpu6 rc=0 t=13s 5 passed, 37 warnings in 11.73s
+full1 qmmm_test_mbis gpu6 rc=0 t=63s 6 passed, 66 warnings in 62.32s (0:01:02)
+full1 scf_test_addons gpu6 rc=0 t=4s 26 passed, 2 warnings in 3.56s
+full1 scf_test_cphf gpu6 rc=0 t=3s 3 passed, 1 warning in 2.71s
+full1 scf_test_diffuse_orbital gpu6 rc=0 t=101s 11 passed, 189 warnings in 100.05s (0:01:40)
+full1 scf_test_dispersion_logic gpu6 rc=0 t=2s 8 passed, 1 warning in 1.63s
+full1 scf_test_fermi_smearing gpu6 rc=0 t=7s 3 passed, 1 warning in 6.52s
+full1 scf_test_gdm gpu6 rc=0 t=165s 5 passed, 271 warnings in 164.44s (0:02:44)
+full1 scf_test_ghf gpu6 rc=0 t=17s 6 passed, 2 warnings in 15.69s
+full1 scf_test_hf_lowmem gpu6 rc=0 t=7s 2 passed, 1 warning in 6.94s
+full1 scf_test_init_guess gpu6 rc=0 t=57s 23 passed, 1 xpassed, 131 warnings in 56.33s
+full1 scf_test_int4c2e gpu6 rc=0 t=3s 3 passed, 1 warning in 2.13s
+full1 scf_test_rhf gpu6 rc=0 t=142s 17 passed, 4 warnings in 141.14s (0:02:21)
+full1 scf_test_scf_ecp gpu6 rc=0 t=19s 1 passed, 1 warning in 19.28s
+full1 scf_test_scf_j_engine gpu6 rc=0 t=107s 8 passed, 1 warning in 105.63s (0:01:45)
+full1 scf_test_scf_jk gpu6 rc=0 t=35s 12 passed, 1 warning in 35.00s
+full1 scf_test_scf gpu6 rc=0 t=113s 7 passed, 7 warnings in 112.39s (0:01:52)
+full1 scf_test_soscf gpu6 rc=0 t=44s 14 passed, 28 warnings in 43.41s
+full1 scf_test_uhf gpu6 rc=0 t=408s 13 passed, 3 skipped, 4 warnings in 407.15s (0:06:47)
+full1 sem_dmp_test_sem_purification gpu6 rc=0 t=6s 1 passed, 1 warning in 5.36s
+full1 sem_grad_test_sem_geomopt gpu6 rc=0 t=8s 2 passed, 1 warning in 6.89s
+full1 sem_grad_test_sem_grad_rhf gpu6 rc=0 t=3s 1 passed, 1 warning in 2.86s
+full1 sem_gto_test_sem_mole gpu6 rc=0 t=3s 6 passed, 1 warning in 2.86s
+full1 sem_gto_test_sem_params gpu6 rc=0 t=3s 9 passed, 1 warning in 1.66s
+full1 sem_integral_test_sem_eri1c2e gpu6 rc=0 t=8s 5 passed, 1 warning in 7.55s
+full1 sem_integral_test_sem_eri2c2e gpu6 rc=0 t=15s 11 passed, 1 warning in 14.81s
+full1 sem_integral_test_sem_fock gpu6 rc=0 t=40s 3 passed, 1 warning in 39.66s
+full1 sem_integral_test_sem_hcore2c1e gpu6 rc=0 t=19s 8 passed, 1 warning in 17.88s
+full1 solvent_test_pcm_grad gpu6 rc=0 t=22s 11 passed, 1 warning in 21.79s
+full1 solvent_test_pcm_hessian gpu6 rc=0 t=731s 20 passed, 134 warnings in 729.76s (0:12:09)
+full1 solvent_test_pcm_lowmem_grad gpu6 rc=0 t=97s 7 passed, 42 warnings in 95.68s (0:01:35)
+full1 solvent_test_pcm_lowmem gpu6 rc=0 t=23s 6 passed, 31 warnings in 22.42s
+full1 solvent_test_pcm gpu6 rc=0 t=41s 26 passed, 22 warnings in 41.05s
+full1 solvent_test_pcm_tdscf_grad gpu6 rc=0 t=282s 11 passed, 1 skipped, 103 warnings in 281.29s (0:04:41)
+full1 solvent_test_pcm_tdscf_nac gpu6 rc=0 t=539s 27 passed, 1 skipped, 1 xfailed, 1165 warnings in 538.74s (0:08:58)
+full1 solvent_test_pcm_tdscf gpu6 rc=0 t=57s 6 passed, 10 warnings in 55.68s
+full1 solvent_test_smd_grad gpu6 rc=0 t=24s 14 passed, 19 warnings in 23.79s
+full1 solvent_test_smd_hessian gpu6 rc=0 t=48s 15 passed, 37 warnings in 46.93s
+full1 solvent_test_smd gpu6 rc=0 t=56s 26 passed, 25 warnings in 55.69s
+TILEDONE gpu6 12:19:53
+DONE 12:19:53

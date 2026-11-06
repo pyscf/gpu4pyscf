@@ -425,7 +425,6 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
     threads_scheme(scheme, bounds, shm_size, nf);
     auto blocks = make_grid(workers);
     auto threads = make_block(scheme[0], scheme[1]);
-    auto dev_envs = *envs;
     int buflen = scheme[2];
     int reserved_shm_size = scheme[3];
     cudaFuncSetAttribute(int4c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -437,7 +436,7 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
     }
 
     LAUNCH_KERNEL( int4c2e_kernel, blocks, threads, buflen,
-        out, dev_envs, bounds, q_cond_ij, q_cond_kl, ij_pair_loc, kl_pair_loc,
+        out, *envs, bounds, q_cond_ij, q_cond_kl, ij_pair_loc, kl_pair_loc,
         pool, head, nf, nao_pairs, reserved_shm_size, omega, lr_factor, sr_factor);
 
     err = cudaGetLastError();

@@ -494,7 +494,6 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
 {
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -504,7 +503,7 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
         return 1;
     }
     LAUNCH_KERNEL( int3c2e_ip1_kernel, blocks, threads, shm_size,
-        out, dev_envs, omega, lr_factor, sr_factor,
+        out, *envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
         nao_pairs, naux);
@@ -523,7 +522,6 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int nao_pairs, int naux)
 {
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -533,7 +531,7 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
         return 1;
     }
     LAUNCH_KERNEL( int3c2e_ipaux_kernel, blocks, threads, shm_size,
-        out, dev_envs, omega, lr_factor, sr_factor,
+        out, *envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
         nao_pairs, naux);

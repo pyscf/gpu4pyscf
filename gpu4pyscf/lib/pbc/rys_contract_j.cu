@@ -553,10 +553,9 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
             }
             auto blocks = make_grid(workers, 1);
             auto threads = make_block(scheme[0], scheme[1]);
-            auto dev_envs = *envs;
             int reserved_shm_size = scheme[3];
             LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
-                dev_envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 dm_penalty, pool, head + offset/256,

@@ -581,18 +581,12 @@ int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
                         int nbas_aux, int nbatches_shl_pair, int *shl_pair_offsets,
                         uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbas_aux, nbatches_shl_pair);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
-        out, dm, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
-    err = cudaGetLastError();
+        out, dm, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
         return 1;
@@ -607,24 +601,17 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
-        vj, auxvec, n_dm, naux, dev_envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        vj, auxvec, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup);
-    err = cudaGetLastError();
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
-
 }

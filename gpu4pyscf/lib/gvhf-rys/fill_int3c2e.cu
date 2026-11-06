@@ -1611,9 +1611,8 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
     cudaMemset(head, 0, sizeof(int));
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( int3c2e_kernel, blocks, threads, shm_size,
-        out, dev_envs, pool, omega, lr_factor, sr_factor,
+        out, *envs, pool, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
         reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
@@ -1633,9 +1632,8 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
     int aux_batches = (naux + threads - 1) / threads;
     auto blocks = make_grid(nshl_pair, aux_batches);
     auto thread_block = make_block(threads);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0,
-        out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets,
+        out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
         naux, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

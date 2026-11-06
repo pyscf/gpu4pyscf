@@ -77,7 +77,7 @@ int ECP_cart(double *gctr,
             int smem_size4 = lj1*nfj*ljc1; // angj
             int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
 
-            LAUNCH_KERNEL((static_cast<void (*)(double *, int, int, int, const int *, int, const int *, int, const int *, const int *, const int *, const int *, const double *)>(type2_cart)), blocks, threads, smem_size*sizeof(double),
+            LAUNCH_KERNEL(type2_cart_general, blocks, threads, smem_size*sizeof(double),
                 gctr,
                 li, lj, lc,
                 ao_loc, nao,
@@ -105,7 +105,7 @@ int ECP_cart(double *gctr,
             int smem_size = 0;
             smem_size += lij3;      // rad_ang
             smem_size += lij1*lij1; // rad_all
-            LAUNCH_KERNEL((static_cast<void (*)(double *, int, int, const int *, int, const int *, int, const int *, const int *, const int *, const int *, const double *)>(type1_cart)), blocks, threads, smem_size*sizeof(double),
+            LAUNCH_KERNEL(type1_cart_general, blocks, threads, smem_size*sizeof(double),
                 gctr, li, lj,
                 ao_loc, nao,
                 tasks, ntasks,

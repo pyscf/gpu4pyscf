@@ -986,7 +986,6 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     // so the host passes offsets and each kernel derives its own pointers.
     const int rt2_off = offset_for_Rt2_idx(lij, lkl);
     const int efg_off = offset_for_Rt2_idx(0, lkl);
-    auto dev_envs = *envs;
     if (n_dm == 1) {
         if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega)) {
             cudaFuncSetAttribute(md_j_1dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -999,7 +998,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             LAUNCH_KERNEL( md_j_1dm_kernel, blocks, threads, buflen,
-                                dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
+                                *envs, jk, bounds, q_cond_ij, q_cond_kl,
                                 threads_ij, threads_kl, tilex, tiley,
                                 rt2_off, efg_off);
         }
@@ -1019,7 +1018,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 jk.dm = dm + dm_offset * dm_size;
                 jk.n_dm = n_dm - dm_offset;
                 LAUNCH_KERNEL( md_j_4dm_kernel, blocks, threads, buflen,
-                                    dev_envs, jk, bounds, q_cond_ij, q_cond_kl,
+                                    *envs, jk, bounds, q_cond_ij, q_cond_kl,
                                     threads_ij, threads_kl, tilex, tiley, dm_size,
                                     rt2_off, efg_off);
             }

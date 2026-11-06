@@ -775,7 +775,6 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm)
 {
-    auto dev_envs = *envs;
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -785,7 +784,7 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
         return 1;
     }
     LAUNCH_KERNEL( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
-        ejk, ejk_aux, dm, density_auxvec, n_dm, dev_envs,
+        ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
         omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
         ao_pair_loc, aux_offset, naux);
@@ -816,12 +815,11 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     }
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
-    auto dev_envs = *envs;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
         LAUNCH_KERNEL( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
             ejk+n*natm*3, ejk_aux ? ejk_aux+n*natm*3 : (double *)NULL,
             dm, density_auxvec, n_dm-n,
-            omega, lr_factor, sr_factor, dev_envs,
+            omega, lr_factor, sr_factor, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
             ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange

@@ -235,10 +235,9 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntiles*nbatches_shl_pair);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( orth_aopair_dm_kernel, grids, threads, 0,
                     outR, outI, dm, shl_pair_offsets, bas_ij_idx, G_bases,
-                    L_bases, mesh_cum, nimgs_cum, ntiles, factor, dev_envs);
+                    L_bases, mesh_cum, nimgs_cum, ntiles, factor, *envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_aopair_dm_kernel: %s\n", cudaGetErrorString(err));

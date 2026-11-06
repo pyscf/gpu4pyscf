@@ -498,11 +498,10 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
-    auto dev_envs = *envs;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( fill_s_estimator, blocks, threads, buflen,
-        s_estimator, dev_envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
+        s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
         npairs, omega, tril_symmetry, Ecut_mask);
 
@@ -520,11 +519,10 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
                   uint32_t npairs, double omega)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
-    auto dev_envs = *envs;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( q_cond_kernel, blocks, threads, shm_size,
-        q_cond, dev_envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
+        q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

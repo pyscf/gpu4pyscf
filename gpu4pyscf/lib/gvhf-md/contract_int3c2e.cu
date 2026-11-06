@@ -810,9 +810,8 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nksh, nbatches_shl_pair);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( contract_int3c2e_kernel, blocks, threads, shm_size,
-                        dev_envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
+                        *envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm, error message = %s\n", cudaGetErrorString(err));
@@ -834,9 +833,8 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
     cudaFuncSetAttribute(contract_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
-    auto dev_envs = *envs;
     LAUNCH_KERNEL( contract_auxvec_kernel, blocks, threads, shm_size,
-                        dev_envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
+                        *envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
                         aux_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

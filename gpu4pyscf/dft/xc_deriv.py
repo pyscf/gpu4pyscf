@@ -35,18 +35,18 @@ def transform_vxc(rho, vxc, xctype, spin=0, work=None):
     if xctype == 'GGA':
         order = 1
         nvar = 4
-        fr = vxc[0].transpose()
-        fg = vxc[1].transpose()
+        fr = vxc[0].T
+        fg = vxc[1].T
     elif xctype == 'MGGA':
         order = 2
         nvar = 5
-        fr = vxc[0].transpose()
-        fg = vxc[1].transpose()
-        ft = vxc[3].transpose()
+        fr = vxc[0].T
+        fg = vxc[1].T
+        ft = vxc[3].T
     else:  # LDA
         order = 0
         nvar = 1
-        fr = vxc[0].transpose()
+        fr = vxc[0].T
 
     ngrids = rho.shape[-1]
     if spin == 1:
@@ -89,19 +89,19 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, work=None):
     if xctype == 'GGA':
         order = 1
         nvar = 4
-        fg = vxc[1].transpose()
-        frr = fxc[0].transpose()
-        frg = fxc[1].transpose()
-        fgg = fxc[2].transpose()
+        fg = vxc[1].T
+        frr = fxc[0].T
+        frg = fxc[1].T
+        fgg = fxc[2].T
     elif xctype == 'MGGA':
         order = 2
         nvar = 5
-        fg = vxc[1].transpose()
-        frr, frg, fgg, ftt, frt, fgt = [fxc[i].transpose() for i in [0, 1, 2, 4, 6, 9]]
+        fg = vxc[1].T
+        frr, frg, fgg, ftt, frt, fgt = [fxc[i].T for i in [0, 1, 2, 4, 6, 9]]
     else:  # LDA
         order = 0
         nvar = 1
-        frr = fxc[0].transpose()
+        frr = fxc[0].T
 
     ngrids = rho.shape[-1]
     if spin == 1:
@@ -192,21 +192,21 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
     if xctype == 'GGA':
         order = 1
         nvar = 4
-        frg = fxc[1].transpose()
-        fgg = fxc[2].transpose()
-        frrr, frrg, frgg, fggg = [x.transpose() for x in kxc[:4]]
+        frg = fxc[1].T
+        fgg = fxc[2].T
+        frrr, frrg, frgg, fggg = [x.T for x in kxc[:4]]
     elif xctype == 'MGGA':
         order = 2
         nvar = 5
-        frg = fxc[1].transpose()
-        fgg = fxc[2].transpose()
-        fgt = fxc[9].transpose()
+        frg = fxc[1].T
+        fgg = fxc[2].T
+        fgt = fxc[9].T
         frrr, frrg, frgg, fggg, frrt, frgt, frtt, fggt, fgtt, fttt = \
-                [kxc[i].transpose() for i in [0, 1, 2, 3, 5, 7, 10, 12, 15, 19]]
+                [kxc[i].T for i in [0, 1, 2, 3, 5, 7, 10, 12, 15, 19]]
     else:  # LDA
         order = 0
         nvar = 1
-        frrr = kxc[0].transpose()
+        frrr = kxc[0].T
 
     ngrids = rho.shape[-1]
     if spin == 1:

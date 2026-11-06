@@ -510,12 +510,11 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset, int naux)
 {
-    auto dev_envs = *envs;
     cudaFuncSetAttribute(ejk_int3c2e_ipip_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( ejk_int3c2e_ipip_kernel, blocks, threads, shm_size,
-        ejk, dm, density_auxvec, omega, lr_factor, sr_factor, dev_envs,
+        ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();

@@ -16,6 +16,7 @@ import numpy as np
 import ctypes
 import cupy
 import copy
+import sys
 from ctypes import POINTER
 # Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
@@ -184,6 +185,15 @@ def _set_omega(func, omega):
         if _has_omega(func_aux[i]):
             _libxc.xc_func_set_ext_params_name(func_aux[i], b'_omega', omega)
 
+def _can_set_omega(func):
+    '''True if omega is a runtime ext param of func or one of its components.
+    Real libxc always exposes _omega for range-separated functionals; the SYCL
+    ExchCXX shim reports none because ExchCXX fixes omega at construction.'''
+    if _has_omega(func):
+        return True
+    func_aux = ctypes.cast(func.contents.xc_func_type, POINTER(_xc_func_p))
+    return any(_has_omega(func_aux[i]) for i in range(func.contents.n_func_aux))
+
 class XCfun:
     def __init__(self, xc, spin, omega=0):
         self.spin = spin
@@ -207,12 +217,29 @@ class XCfun:
             if ret != 0:
                 raise RuntimeError('failed to initialize xc fun')
             if omega != 0:
-                _set_omega(self.xc_func, omega)
+                default_omega = libxc_cpu.rsh_coeff(self.func_id)[0]
+                if ('dpnp' in sys.modules and default_omega != 0
+                        and abs(omega - default_omega) > 1e-14
+                        and not _can_set_omega(self.xc_func)):
+                    # SYCL only: the device library (ExchCXX) fixes omega at
+                    # construction and cannot change it at runtime. Fall back
+                    # to CPU libxc, which honours omega, instead of silently
+                    # evaluating with the default omega (numint routes
+                    # on_gpu=False functionals to pyscf's CPU libxc).
+                    _libxc.xc_func_end(self.xc_func)
+                    _libxc.xc_func_free(self.xc_func)
+                    self.xc_func = None
+                    self.on_gpu = False
+                else:
+                    _set_omega(self.xc_func, omega)
 
-            self.xc_func_sizes = {}
-            for attr in dir(self.xc_func.contents.dim):
-                if "_" not in attr:
-                    self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
+            if self.xc_func is not None:
+                self.xc_func_sizes = {}
+                for attr in dir(self.xc_func.contents.dim):
+                    if "_" not in attr:
+                        self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
+            else:
+                self.xc_func_sizes = {}
 
     def __del__(self):
         if self.xc_func is None:

@@ -253,11 +253,10 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights,
 extern "C" {
 #define eval_lda_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): { \
-        auto dev_envs = *envs; \
         LAUNCH_KERNEL((eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j>), grids, threads, 0, \
             out, vxc, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            negligible, dev_envs); \
+            negligible, *envs); \
     } \
     break
 

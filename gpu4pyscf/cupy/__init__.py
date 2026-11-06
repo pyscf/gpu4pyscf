@@ -144,6 +144,18 @@ else:
     cupy_fake.ndarray = _CuPyNdarray
     cupy_fake.asnumpy = dpnp.asnumpy
 
+    # cupy.get_array_module(*args): returns cupy if any arg is a cupy array
+    # or cupyx.sparse matrix, else numpy. Shim equivalent: dpnp for dpnp
+    # arrays / dpnp.scipy.sparse matrices, else numpy.
+    def _get_array_module(*args):
+        import numpy as _np
+        import dpnp.scipy.sparse as _dps
+        for a in args:
+            if isinstance(a, dpnp.ndarray) or _dps.issparse(a):
+                return dpnp
+        return _np
+    cupy_fake.get_array_module = _get_array_module
+
     # einsum: dpnp can return a non-contiguous result where numpy and cupy
     # both return a C-contiguous one. For 'lkz,lxpq->kxpqz' on
     # (3,2,2) x (3,1,6,6) numpy gives strides (576,1152,96,16,8) while dpnp
@@ -240,6 +252,32 @@ else:
 
         _ndarray_reshape_method.__gpu4pyscf_patched__ = True
         dpnp.ndarray.reshape = _ndarray_reshape_method
+
+
+    # -----------------------------------------------------------------
+    # dpnp Device.id -- upstream gpu4pyscf (since #1004) reads
+    # `array.device.id`; cupy's Device has `.id`, dpnp's does not.
+    # Map the underlying sycl_device to its index in the shim's gpu
+    # device list (cuda._gpu_devices()), the same indexing that
+    # cuda.Device(i) / sycl_get_device_id() use.
+    # -----------------------------------------------------------------
+    try:
+        from dpnp.tensor._device import Device as _DpnpDevice
+        if not hasattr(_DpnpDevice, "id"):
+            def _dpnp_device_id(self):
+                import sys as _sys
+                _cuda = (_sys.modules.get("gpu4pyscf.cupy.cuda")
+                         or _sys.modules.get("cupy.cuda"))
+                sd = self.sycl_device
+                if _cuda is not None:
+                    for _i, _d in enumerate(_cuda._gpu_devices()):
+                        if _d == sd:
+                            return _i
+                    return int(_cuda.libgpu.sycl_get_device_id())
+                return 0
+            _DpnpDevice.id = property(_dpnp_device_id)
+    except Exception:
+        pass
 
 
     # -----------------------------------------------------------------
@@ -415,30 +453,13 @@ else:
 
 
     # =================================================================
-    # bool() on a size-1 array of ndim > 0.
-    #
-    # NumPy (and therefore CuPy) allow truth-testing any array whose size is
-    # 1, regardless of ndim: `bool(np.array([[5.0]]))` is True. dpnp only
-    # accepts 0-d and otherwise raises "TypeError: only 0-dimensional arrays
-    # can be converted to Python scalars".
-    #
-    # tdscf/math_helper.py:407 relies on the NumPy behaviour: `xy_norm` comes
-    # out of `cp.dot(x_tmp, x_tmp.T)` with shape (1, 1) and is then used as
-    # `if xy_norm > 1e-14:`.
-    #
-    # Note we do NOT relax __float__/__int__ -- NumPy 2 raises there for
-    # ndim > 0 and dpnp already matches, so the two agree.
+    # bool() on a size-1 array of ndim > 0: NOT patched here. NumPy/CuPy
+    # allow it, dpnp raises for ndim > 0 -- instead the (single) call site
+    # that relied on it, tdscf/math_helper.py:407, uses .item() explicitly,
+    # which is portable across numpy/cupy/dpnp. Verified by running the
+    # tdscf/df-grad/nac/soscf/ris test subsets with dpnp-native strict
+    # __bool__: 71 passed, 0 failed.
     # =================================================================
-    if not getattr(dpnp_array, "__gpu4pyscf_bool_patched__", False):
-        _orig_dpnp_bool = dpnp_array.__bool__
-
-        def __bool__(self):
-            if self.ndim != 0 and self.size == 1:
-                return bool(self.reshape(()))
-            return _orig_dpnp_bool(self)
-
-        dpnp_array.__bool__ = __bool__
-        dpnp_array.__gpu4pyscf_bool_patched__ = True
 
 
     # =================================================================
@@ -475,7 +496,9 @@ else:
     def _to_dpnp_seq(seq):
         out = []
         for s in seq:
-            if isinstance(s, (np.ndarray, np.generic)) and not isinstance(s, dpnp.ndarray):
+            # cupy accepts array_like (lists/tuples of lists); dpnp's iface
+            # rejects plain lists, so convert them like cupy.asarray would
+            if isinstance(s, (np.ndarray, np.generic, list, tuple)) and not isinstance(s, dpnp.ndarray):
                 out.append(dpnp.asarray(s))
             else:
                 out.append(s)

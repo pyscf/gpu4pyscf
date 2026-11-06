@@ -402,6 +402,8 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
         else:
             raise NotImplementedError
         out [:,mask] = cderi_tril
+        if ndim == 1:
+            out = out[0]
         return out
 
     if stream is None:
@@ -480,7 +482,8 @@ def add_sparse(a, b, indices):
     '''
     assert a.device == b.device
     assert a.flags.c_contiguous
-    assert b.flags.c_contiguous
+    if not b.flags.c_contiguous:
+        b = dpnp.ascontiguousarray(b)
     if len(indices) == 0: return a
     indices = dpnp.asarray(indices, dtype=np.int32)
     n = a.shape[-1]
@@ -589,7 +592,13 @@ def block_diag(blocks, out=None):
     offsets = np.cumsum(np.asarray([0] + [x.shape[0]*x.shape[1] for x in blocks]))
 
     m, n = rows[-1], cols[-1]
-    if out is None: out = dpnp.zeros([m, n])
+    dtype = np.result_type(*[x.dtype for x in blocks])
+    out = ndarray([m, n], dtype=dtype, buffer=out)
+    out.fill(0)
+    if dtype != np.float64:
+        for block, r0, r1, c0, c1 in zip(blocks, rows[:-1], rows[1:], cols[:-1], cols[1:]):
+            out[r0:r1, c0:c1] = block
+        return out
     rows = dpnp.asarray(rows, dtype='int32')
     cols = dpnp.asarray(cols, dtype='int32')
     offsets = dpnp.asarray(offsets, dtype='int32')

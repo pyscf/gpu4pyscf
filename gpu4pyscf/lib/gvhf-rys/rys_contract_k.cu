@@ -688,7 +688,6 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
             int reserved_shm_size = scheme[3];
             auto blocks = make_grid(workers, 1);
             auto threads = make_block(scheme[0], scheme[1]);
-            auto dev_envs = *envs;
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 cudaError_t err = cudaGetLastError();
@@ -699,7 +698,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                 }
             }
             LAUNCH_KERNEL( rys_k_kernel, blocks, threads, buflen,
-                dev_envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
                 head + offset/256, gout_pattern, reserved_shm_size);
         };
