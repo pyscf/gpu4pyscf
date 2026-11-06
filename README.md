@@ -60,6 +60,9 @@ GPU4PySCF supports molecular and periodic Hartree-Fock and DFT, analytical
 derivatives, excited states, solvent models, properties, geometry optimization,
 and non-adiabatic dynamics.
 
+SCF calculations support the default CUDA stream and blocking CuPy streams.
+Non-blocking CuPy streams are rejected because they can produce incorrect SCF results.
+
 See [FEATURES](FEATURES) for the detailed list of supported methods and
 experimental capabilities.
 
