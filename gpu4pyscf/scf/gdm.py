@@ -24,12 +24,13 @@ import numpy as np
 import cupy as cp
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import eigh
-from gpu4pyscf.pbc.scf.khf import kpt_pair_reverse_map
+from gpu4pyscf.pbc.scf.khf import kpt_pair_reverse_map, PBC_LINDEP_MO_ENERGY_OFFSET
 
 GDM_LBFGS_Y_DOT_S_ZERO_THRESHOLD = 1e-12
 
 def pack_nocc_nvir_shape_vector(vector, nocc, nmo, nkpts = None):
     if nkpts is None:
+        assert isinstance(nmo, int)
         if isinstance(nocc, int):
             assert nocc < nmo
             assert vector.shape == (nocc, nmo - nocc)
@@ -46,32 +47,36 @@ def pack_nocc_nvir_shape_vector(vector, nocc, nmo, nkpts = None):
         assert len(nocc) > 0
         if isinstance(nocc[0], int):
             assert len(nocc) == nkpts
+            assert len(nmo) == nkpts
             assert len(vector) == nkpts
             flattened_v = []
             for k in range(nkpts):
-                assert isinstance(nocc[k], int) and nocc[k] < nmo
-                assert vector[k].shape == (nocc[k], nmo - nocc[k])
+                assert isinstance(nocc[k], int) and nocc[k] < nmo[k]
+                assert vector[k].shape == (nocc[k], nmo[k] - nocc[k])
                 flattened_v.append(vector[k].flatten(order = "C"))
             return cp.concatenate(flattened_v)
         else:
             nocca, noccb = nocc
+            nmoa, nmob = nmo
             va, vb = vector
             assert len(nocca) == nkpts and len(noccb) == nkpts
+            assert len(nmoa) == nkpts and len(nmob) == nkpts
             assert len(va) == nkpts and len(vb) == nkpts
             flattened_v = []
             for k in range(nkpts):
-                assert isinstance(nocca[k], int) and nocca[k] < nmo
-                assert va[k].shape == (nocca[k], nmo - nocca[k])
+                assert isinstance(nocca[k], int) and nocca[k] < nmoa[k]
+                assert va[k].shape == (nocca[k], nmoa[k] - nocca[k])
                 flattened_v.append(va[k].flatten(order = "C"))
             for k in range(nkpts):
-                assert isinstance(noccb[k], int) and noccb[k] < nmo
-                assert vb[k].shape == (noccb[k], nmo - noccb[k])
+                assert isinstance(noccb[k], int) and noccb[k] < nmob[k]
+                assert vb[k].shape == (noccb[k], nmob[k] - noccb[k])
                 flattened_v.append(vb[k].flatten(order = "C"))
             return cp.concatenate(flattened_v)
 
 def unpack_nocc_nvir_shape_vector(vector, nocc, nmo, nkpts = None):
     assert vector.ndim == 1
     if nkpts is None:
+        assert isinstance(nmo, int)
         if isinstance(nocc, int):
             assert nocc < nmo
             assert vector.size == nocc * (nmo - nocc)
@@ -88,45 +93,48 @@ def unpack_nocc_nvir_shape_vector(vector, nocc, nmo, nkpts = None):
         assert len(nocc) > 0
         if isinstance(nocc[0], int):
             assert len(nocc) == nkpts
+            assert len(nmo) == nkpts
             vks = []
             offset_k = 0
             for k in range(nkpts):
-                assert isinstance(nocc[k], int) and nocc[k] < nmo
-                vk = vector[offset_k : offset_k + nocc[k] * (nmo - nocc[k])]
-                vk = vk.reshape(nocc[k], nmo - nocc[k])
+                assert isinstance(nocc[k], int) and nocc[k] < nmo[k]
+                vk = vector[offset_k : offset_k + nocc[k] * (nmo[k] - nocc[k])]
+                vk = vk.reshape(nocc[k], nmo[k] - nocc[k])
                 vks.append(vk)
-                offset_k += nocc[k] * (nmo - nocc[k])
+                offset_k += nocc[k] * (nmo[k] - nocc[k])
             assert offset_k == vector.size
             return vks
         else:
             nocca, noccb = nocc
+            nmoa, nmob = nmo
             assert len(nocca) == nkpts and len(noccb) == nkpts
+            assert len(nmoa) == nkpts and len(nmob) == nkpts
             va_ks = []
             vb_ks = []
             offset_k = 0
             for k in range(nkpts):
-                assert isinstance(nocca[k], int) and nocca[k] < nmo
-                vk = vector[offset_k : offset_k + nocca[k] * (nmo - nocca[k])]
-                vk = vk.reshape(nocca[k], nmo - nocca[k])
+                assert isinstance(nocca[k], int) and nocca[k] < nmoa[k]
+                vk = vector[offset_k : offset_k + nocca[k] * (nmoa[k] - nocca[k])]
+                vk = vk.reshape(nocca[k], nmoa[k] - nocca[k])
                 va_ks.append(vk)
-                offset_k += nocca[k] * (nmo - nocca[k])
+                offset_k += nocca[k] * (nmoa[k] - nocca[k])
             for k in range(nkpts):
-                assert isinstance(noccb[k], int) and noccb[k] < nmo
-                vk = vector[offset_k : offset_k + noccb[k] * (nmo - noccb[k])]
-                vk = vk.reshape(noccb[k], nmo - noccb[k])
+                assert isinstance(noccb[k], int) and noccb[k] < nmob[k]
+                vk = vector[offset_k : offset_k + noccb[k] * (nmob[k] - noccb[k])]
+                vk = vk.reshape(noccb[k], nmob[k] - noccb[k])
                 vb_ks.append(vk)
-                offset_k += noccb[k] * (nmo - noccb[k])
+                offset_k += noccb[k] * (nmob[k] - noccb[k])
             assert offset_k == vector.size
             return va_ks, vb_ks
 
-def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
+def apply_exp_U(mo_coeff, nocc, nmo, kappa, nkpts = None, conj_k_idx = None):
     """
         Computes C @ U where
         U = exp( 0 & kappa \\ -kappa^dagger & 0 )
     """
     new_mo_coeff = cp.zeros_like(mo_coeff)
-    nmo = mo_coeff.shape[-1]
     if nkpts is None:
+        assert isinstance(nmo, int)
         if isinstance(nocc, int):
             assert nocc < nmo
             assert mo_coeff.ndim == 2
@@ -172,18 +180,26 @@ def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
         assert len(nocc) > 0
         if isinstance(nocc[0], int):
             assert len(nocc) == nkpts
+            assert len(nmo) == nkpts
             assert len(kappa) == nkpts
             assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == nkpts
             for k in range(nkpts):
-                assert isinstance(nocc[k], int) and nocc[k] < nmo
-                assert kappa[k].shape == (nocc[k], nmo - nocc[k])
-                assert mo_coeff.dtype == kappa[k].dtype
+                assert isinstance(nocc[k], int) and nocc[k] < nmo[k]
+                kappa_k = kappa[k]
+                assert kappa_k.shape == (nocc[k], nmo[k] - nocc[k])
+                assert mo_coeff.dtype == kappa_k.dtype
+
                 if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                     new_mo_coeff[k] = new_mo_coeff[conj_k_idx[k]].conj()
                     continue
+
                 mocc = mo_coeff[k, :, :nocc[k]]
-                mvir = mo_coeff[k, :, nocc[k]:]
-                U, sigma, VT = cp.linalg.svd(kappa[k], full_matrices=False)
+                mvir = mo_coeff[k, :, nocc[k]:nmo[k]]
+                if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(mo_coeff):
+                    mocc = mocc.real
+                    mvir = mvir.real
+                    kappa_k = kappa_k.real
+                U, sigma, VT = cp.linalg.svd(kappa_k, full_matrices=False)
                 V = VT.conj().T
                 del VT
                 cos_sigma = cp.cos(sigma) - 1
@@ -191,10 +207,12 @@ def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
                 moccU = mocc @ U
                 mvirV = mvir @ V
                 new_mo_coeff[k, :, :nocc[k]] = moccU @ (cos_sigma * U).conj().T + mocc - mvirV @ (sin_sigma * U).conj().T
-                new_mo_coeff[k, :, nocc[k]:] = moccU @ (sin_sigma * V).conj().T + mvirV @ (cos_sigma * V).conj().T + mvir
+                new_mo_coeff[k, :, nocc[k]:nmo[k]] = moccU @ (sin_sigma * V).conj().T + mvirV @ (cos_sigma * V).conj().T + mvir
+                new_mo_coeff[k, :, nmo[k]:] = 0
                 del U, V, sigma, moccU, mvirV, mocc, mvir, cos_sigma, sin_sigma
         else:
             assert len(nocc) == 2
+            assert len(nmo) == 2
             assert len(kappa) == 2
             assert mo_coeff.ndim == 4 and mo_coeff.shape[0:2] == (2, nkpts)
             for s in range(2):
@@ -202,15 +220,22 @@ def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
                 assert len(kappa[s]) == nkpts
                 for k in range(nkpts):
                     nocc_sk = nocc[s][k]
+                    nmo_sk = nmo[s][k]
                     kappa_sk = kappa[s][k]
-                    assert isinstance(nocc_sk, int) and nocc_sk < nmo
-                    assert kappa_sk.shape == (nocc_sk, nmo - nocc_sk)
+                    assert isinstance(nocc_sk, int) and nocc_sk < nmo_sk
+                    assert kappa_sk.shape == (nocc_sk, nmo_sk - nocc_sk)
                     assert mo_coeff.dtype == kappa_sk.dtype
+
                     if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                         new_mo_coeff[s, k] = new_mo_coeff[s, conj_k_idx[k]].conj()
                         continue
+
                     mocc = mo_coeff[s, k, :, :nocc_sk]
-                    mvir = mo_coeff[s, k, :, nocc_sk:]
+                    mvir = mo_coeff[s, k, :, nocc_sk:nmo_sk]
+                    if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(mo_coeff):
+                        mocc = mocc.real
+                        mvir = mvir.real
+                        kappa_sk = kappa_sk.real
                     U, sigma, VT = cp.linalg.svd(kappa_sk, full_matrices=False)
                     V = VT.conj().T
                     del VT
@@ -219,16 +244,16 @@ def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
                     moccU = mocc @ U
                     mvirV = mvir @ V
                     new_mo_coeff[s, k, :, :nocc_sk] = moccU @ (cos_sigma * U).conj().T + mocc - mvirV @ (sin_sigma * U).conj().T
-                    new_mo_coeff[s, k, :, nocc_sk:] = moccU @ (sin_sigma * V).conj().T + mvirV @ (cos_sigma * V).conj().T + mvir
+                    new_mo_coeff[s, k, :, nocc_sk:nmo_sk] = moccU @ (sin_sigma * V).conj().T + mvirV @ (cos_sigma * V).conj().T + mvir
+                    new_mo_coeff[s, k, :, nmo_sk:] = 0
                     del U, V, sigma, moccU, mvirV, mocc, mvir, cos_sigma, sin_sigma
 
     return new_mo_coeff
 
-def packed_apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
-    nmo = mo_coeff.shape[-1]
-    return apply_exp_U(mo_coeff, nocc, unpack_nocc_nvir_shape_vector(kappa, nocc, nmo, nkpts), nkpts, conj_k_idx)
+def packed_apply_exp_U(mo_coeff, nocc, nmo, kappa, nkpts = None, conj_k_idx = None):
+    return apply_exp_U(mo_coeff, nocc, nmo, unpack_nocc_nvir_shape_vector(kappa, nocc, nmo, nkpts), nkpts, conj_k_idx)
 
-def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx = None):
+def pseudo_canonicalize(fock, mo_coeff, nocc, nmo, kappas, nkpts = None, conj_k_idx = None):
     '''
         Computes Coo^dagger X Cvv
         where Coo and Cvv diagonalize the oo and vv block of the Fock matrix
@@ -236,8 +261,8 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
         This is equivalent to Eq 28 e^(H^dagger) V e^H, where V = ( 0 & kappa \\ -kappa^dagger & 0 ), e^H = ( Coo & 0 \\ 0 & Cvv )
     '''
     new_mo_coeff = cp.zeros_like(mo_coeff)
-    nmo = mo_coeff.shape[-1]
     if nkpts is None:
+        assert isinstance(nmo, int)
         if isinstance(nocc, int):
             assert nocc < nmo
             assert mo_coeff.ndim == 2
@@ -275,7 +300,7 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
             assert len(nocc) == 2
             assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == 2
             assert fock.ndim == 3 and fock.shape[0] == 2
-            new_mo_energy = cp.zeros((2, nmo))
+            new_mo_energy = cp.zeros((2, nmo), dtype = cp.float64)
             transformed_kappas = []
             for s in range(2):
                 assert isinstance(nocc[s], int) and nocc[s] < nmo
@@ -314,13 +339,14 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
         assert len(nocc) > 0
         if isinstance(nocc[0], int):
             assert len(nocc) == nkpts
+            assert len(nmo) == nkpts
             assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == nkpts
             assert fock.ndim == 3 and fock.shape[0] == nkpts
-            new_mo_energy = cp.zeros((nkpts, nmo))
+            new_mo_energy = cp.zeros((nkpts, mo_coeff.shape[-1]), dtype = cp.float64)
             n_kappa = len(kappas)
             transformed_kappas = [ [None] * nkpts for _ in range(n_kappa) ]
             for k in range(nkpts):
-                assert isinstance(nocc[k], int) and nocc[k] < nmo
+                assert isinstance(nocc[k], int) and nocc[k] < nmo[k]
 
                 if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                     new_mo_energy[k] = new_mo_energy[conj_k_idx[k]]
@@ -328,32 +354,42 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
                     Coo = Cvv = None
                 else:
                     mocc = mo_coeff[k, :, :nocc[k]]
-                    mvir = mo_coeff[k, :, nocc[k]:]
-                    Foo = mocc.conj().T @ fock[k] @ mocc
+                    mvir = mo_coeff[k, :, nocc[k]:nmo[k]]
+                    fock_k = fock[k]
+                    if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(mo_coeff):
+                        mocc = mocc.real
+                        mvir = mvir.real
+                        fock_k = fock_k.real
+                    Foo = mocc.conj().T @ fock_k @ mocc
                     eoo, Coo = eigh(Foo)
                     del Foo
-                    Fvv = mvir.conj().T @ fock[k] @ mvir
+                    Fvv = mvir.conj().T @ fock_k @ mvir
                     evv, Cvv = eigh(Fvv)
                     del Fvv
 
                     new_mo_energy[k, :nocc[k]] = eoo
-                    new_mo_energy[k, nocc[k]:] = evv
+                    new_mo_energy[k, nocc[k]:nmo[k]] = evv
+                    new_mo_energy[k, nmo[k]:] = abs(evv.max()) * 2 + PBC_LINDEP_MO_ENERGY_OFFSET
                     del eoo, evv
                     new_mo_coeff[k, :, :nocc[k]] = mocc @ Coo
-                    new_mo_coeff[k, :, nocc[k]:] = mvir @ Cvv
+                    new_mo_coeff[k, :, nocc[k]:nmo[k]] = mvir @ Cvv
+                    new_mo_coeff[k, :, nmo[k]:] = 0
                     del mocc, mvir
 
                 for i_kappa in range(n_kappa):
                     kappa = kappas[i_kappa]
                     assert len(kappa) == nkpts
                     kappa_k = kappa[k]
-                    assert kappa_k.shape == (nocc[k], nmo - nocc[k])
+                    assert kappa_k.shape == (nocc[k], nmo[k] - nocc[k])
                     assert mo_coeff.dtype == kappa_k.dtype
                     if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                         kappa_k = transformed_kappas[i_kappa][conj_k_idx[k]].conj()
                         assert kappa_k is not None
                     else:
                         kappa_k = Coo.conj().T @ kappa_k @ Cvv
+
+                    if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(kappa_k):
+                        kappa_k.imag = 0
                     transformed_kappas[i_kappa][k] = kappa_k
                     del kappa_k
                 del Coo, Cvv
@@ -361,16 +397,19 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
             return new_mo_energy, new_mo_coeff, transformed_kappas
         else:
             assert len(nocc) == 2
+            assert len(nmo) == 2
             assert mo_coeff.ndim == 4 and mo_coeff.shape[0:2] == (2, nkpts)
             assert fock.ndim == 4 and fock.shape[0:2] == (2, nkpts)
-            new_mo_energy = cp.zeros((2, nkpts, nmo))
+            new_mo_energy = cp.zeros((2, nkpts, mo_coeff.shape[-1]), dtype = cp.float64)
             n_kappa = len(kappas)
             transformed_kappas = [ ([None] * nkpts, [None] * nkpts) for _ in range(n_kappa) ]
             for s in range(2):
                 assert len(nocc[s]) == nkpts
+                assert len(nmo[s]) == nkpts
                 for k in range(nkpts):
                     nocc_sk = nocc[s][k]
-                    assert isinstance(nocc_sk, int) and nocc_sk < nmo
+                    nmo_sk = nmo[s][k]
+                    assert isinstance(nocc_sk, int) and nocc_sk < nmo_sk
 
                     if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                         new_mo_energy[s, k] = new_mo_energy[s, conj_k_idx[k]]
@@ -378,19 +417,26 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
                         Coo = Cvv = None
                     else:
                         mocc = mo_coeff[s, k, :, :nocc_sk]
-                        mvir = mo_coeff[s, k, :, nocc_sk:]
-                        Foo = mocc.conj().T @ fock[s, k] @ mocc
+                        mvir = mo_coeff[s, k, :, nocc_sk:nmo_sk]
+                        fock_sk = fock[s, k]
+                        if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(mo_coeff):
+                            mocc = mocc.real
+                            mvir = mvir.real
+                            fock_sk = fock_sk.real
+                        Foo = mocc.conj().T @ fock_sk @ mocc
                         eoo, Coo = eigh(Foo)
                         del Foo
-                        Fvv = mvir.conj().T @ fock[s, k] @ mvir
+                        Fvv = mvir.conj().T @ fock_sk @ mvir
                         evv, Cvv = eigh(Fvv)
                         del Fvv
 
                         new_mo_energy[s, k, :nocc_sk] = eoo
-                        new_mo_energy[s, k, nocc_sk:] = evv
+                        new_mo_energy[s, k, nocc_sk:nmo_sk] = evv
+                        new_mo_energy[s, k, nmo_sk:] = abs(evv.max()) * 2 + PBC_LINDEP_MO_ENERGY_OFFSET
                         del eoo, evv
                         new_mo_coeff[s, k, :, :nocc_sk] = mocc @ Coo
-                        new_mo_coeff[s, k, :, nocc_sk:] = mvir @ Cvv
+                        new_mo_coeff[s, k, :, nocc_sk:nmo_sk] = mvir @ Cvv
+                        new_mo_coeff[s, k, :, nmo_sk:] = 0
                         del mocc, mvir
 
                     for i_kappa in range(n_kappa):
@@ -399,30 +445,32 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
                         kappa_s = kappa[s]
                         assert len(kappa_s) == nkpts
                         kappa_sk = kappa_s[k]
-                        assert kappa_sk.shape == (nocc_sk, nmo - nocc_sk)
+                        assert kappa_sk.shape == (nocc_sk, nmo_sk - nocc_sk)
                         assert mo_coeff.dtype == kappa_sk.dtype
                         if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                             kappa_sk = transformed_kappas[i_kappa][s][conj_k_idx[k]].conj()
                             assert kappa_sk is not None
                         else:
                             kappa_sk = Coo.conj().T @ kappa_sk @ Cvv
+
+                        if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(kappa_sk):
+                            kappa_sk.imag = 0
                         transformed_kappas[i_kappa][s][k] = kappa_sk
                         del kappa_s, kappa_sk
                     del Coo, Cvv
 
             return new_mo_energy, new_mo_coeff, transformed_kappas
 
-def packed_pseudo_canonicalize(fock, mo_coeff, nocc, packed_kappas, nkpts = None, conj_k_idx = None):
-    nmo = mo_coeff.shape[-1]
+def packed_pseudo_canonicalize(fock, mo_coeff, nocc, nmo, packed_kappas, nkpts = None, conj_k_idx = None):
     assert not any([kappa is None for kappa in packed_kappas])
     kappas = [unpack_nocc_nvir_shape_vector(kappa, nocc, nmo, nkpts) for kappa in packed_kappas]
-    new_mo_energy, new_mo_coeff, new_kappas = pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts, conj_k_idx)
+    new_mo_energy, new_mo_coeff, new_kappas = pseudo_canonicalize(fock, mo_coeff, nocc, nmo, kappas, nkpts, conj_k_idx)
     packed_new_kappas = [pack_nocc_nvir_shape_vector(kappa, nocc, nmo, nkpts) for kappa in new_kappas]
     return new_mo_energy, new_mo_coeff, packed_new_kappas
 
-def approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts = None):
-    nmo = mo_energy.shape[-1]
+def approximate_optimal_diagonal_hessian(mo_energy, nocc, nmo, delta_E, minimal_diagonal_hessian, nkpts = None):
     if nkpts is None:
+        assert isinstance(nmo, int)
         if isinstance(nocc, int):
             assert nocc < nmo
             assert mo_energy.shape == (nmo,)
@@ -446,40 +494,42 @@ def approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diago
         assert len(nocc) > 0
         if isinstance(nocc[0], int):
             assert len(nocc) == nkpts
-            assert mo_energy.shape == (nkpts, nmo)
+            assert len(nmo) == nkpts
+            assert mo_energy.shape[0] == nkpts
             mo_energy_gap = []
             for k in range(nkpts):
-                assert isinstance(nocc[k], int) and nocc[k] < nmo
-                mo_energy_gap_k = mo_energy[k, nocc[k]:][None, :] - mo_energy[k, :nocc[k]][:, None]
+                assert isinstance(nocc[k], int) and nocc[k] < nmo[k]
+                mo_energy_gap_k = mo_energy[k, nocc[k]:nmo[k]][None, :] - mo_energy[k, :nocc[k]][:, None]
                 mo_energy_gap_k = 2.0 / nkpts * cp.maximum((mo_energy_gap_k + delta_E), minimal_diagonal_hessian)
                 mo_energy_gap.append(mo_energy_gap_k)
             return mo_energy_gap
         else:
             nocca, noccb = nocc
+            nmoa, nmob = nmo
             assert len(nocca) == nkpts and len(noccb) == nkpts
-            assert mo_energy.shape == (2, nkpts, nmo)
+            assert len(nmoa) == nkpts and len(nmob) == nkpts
+            assert mo_energy.shape[0:2] == (2, nkpts)
             mo_energy_gapa = []
             mo_energy_gapb = []
             for k in range(nkpts):
-                assert isinstance(nocca[k], int) and nocca[k] < nmo
-                mo_energy_gap_k = mo_energy[0, k, nocca[k]:][None, :] - mo_energy[0, k, :nocca[k]][:, None]
+                assert isinstance(nocca[k], int) and nocca[k] < nmoa[k]
+                mo_energy_gap_k = mo_energy[0, k, nocca[k]:nmoa[k]][None, :] - mo_energy[0, k, :nocca[k]][:, None]
                 mo_energy_gap_k = 2.0 / nkpts * cp.maximum((mo_energy_gap_k + delta_E), minimal_diagonal_hessian)
                 mo_energy_gapa.append(mo_energy_gap_k)
             for k in range(nkpts):
-                assert isinstance(noccb[k], int) and noccb[k] < nmo
-                mo_energy_gap_k = mo_energy[1, k, noccb[k]:][None, :] - mo_energy[1, k, :noccb[k]][:, None]
+                assert isinstance(noccb[k], int) and noccb[k] < nmob[k]
+                mo_energy_gap_k = mo_energy[1, k, noccb[k]:nmob[k]][None, :] - mo_energy[1, k, :noccb[k]][:, None]
                 mo_energy_gap_k = 2.0 / nkpts * cp.maximum((mo_energy_gap_k + delta_E), minimal_diagonal_hessian)
                 mo_energy_gapb.append(mo_energy_gap_k)
             return mo_energy_gapa, mo_energy_gapb
 
-def packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts = None):
-    nmo = mo_energy.shape[-1]
-    h = approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts)
+def packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, nmo, delta_E, minimal_diagonal_hessian, nkpts = None):
+    h = approximate_optimal_diagonal_hessian(mo_energy, nocc, nmo, delta_E, minimal_diagonal_hessian, nkpts)
     return pack_nocc_nvir_shape_vector(h, nocc, nmo, nkpts)
 
-def kappa_gradient(mo_coeff, nocc, fock, nkpts = None, conj_k_idx = None):
-    nmo = mo_coeff.shape[-1]
+def kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts = None, conj_k_idx = None):
     if nkpts is None:
+        assert isinstance(nmo, int)
         if isinstance(nocc, int):
             assert nocc < nmo
             assert mo_coeff.ndim == 2
@@ -512,93 +562,135 @@ def kappa_gradient(mo_coeff, nocc, fock, nkpts = None, conj_k_idx = None):
         assert len(nocc) > 0
         if isinstance(nocc[0], int):
             assert len(nocc) == nkpts
+            assert len(nmo) == nkpts
             assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == nkpts
             assert fock.ndim == 3 and fock.shape[0] == nkpts
             g = [ None ] * nkpts
             for k in range(nkpts):
-                assert isinstance(nocc[k], int) and nocc[k] < nmo
+                assert isinstance(nocc[k], int) and nocc[k] < nmo[k]
                 if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                     g[k] = g[conj_k_idx[k]].conj()
                     continue
                 mocc = mo_coeff[k, :, :nocc[k]]
-                mvir = mo_coeff[k, :, nocc[k]:]
+                mvir = mo_coeff[k, :, nocc[k]:nmo[k]]
                 Fov = mocc.conj().T @ fock[k] @ mvir
                 gk = -2.0 / nkpts * Fov
+                if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(gk):
+                    gk.imag = 0
                 g[k] = gk
             return g
         else:
             assert len(nocc) == 2
+            assert len(nmo) == 2
             assert mo_coeff.ndim == 4 and mo_coeff.shape[0:2] == (2, nkpts)
             assert fock.ndim == 4 and fock.shape[0:2] == (2, nkpts)
             g = ([ None ] * nkpts, [ None ] * nkpts)
             for s in range(2):
                 assert len(nocc[s]) == nkpts
+                assert len(nmo[s]) == nkpts
                 for k in range(nkpts):
                     nocc_sk = nocc[s][k]
-                    assert isinstance(nocc_sk, int) and nocc_sk < nmo
+                    nmo_sk = nmo[s][k]
+                    assert isinstance(nocc_sk, int) and nocc_sk < nmo_sk
                     if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                         g[s][k] = g[s][conj_k_idx[k]].conj()
                         continue
                     mocc = mo_coeff[s, k, :, :nocc_sk]
-                    mvir = mo_coeff[s, k, :, nocc_sk:]
+                    mvir = mo_coeff[s, k, :, nocc_sk:nmo_sk]
                     Fov = mocc.conj().T @ fock[s, k] @ mvir
                     gk = -2.0 / nkpts * Fov
+                    if (conj_k_idx is not None) and (k == -conj_k_idx[k] - 1) and cp.iscomplexobj(gk):
+                        gk.imag = 0
                     g[s][k] = gk
             return g
 
-def packed_kappa_gradient(mo_coeff, nocc, fock, nkpts = None, conj_k_idx = None):
-    nmo = mo_coeff.shape[-1]
-    g = kappa_gradient(mo_coeff, nocc, fock, nkpts, conj_k_idx)
+def packed_kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts = None, conj_k_idx = None):
+    g = kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts, conj_k_idx)
     return pack_nocc_nvir_shape_vector(g, nocc, nmo, nkpts)
 
 def get_nocc(mo_occ, nkpts = None):
-    nmo = mo_occ.shape[-1]
+    nmo_full = mo_occ.shape[-1]
     if nkpts is None:
         if mo_occ.ndim == 1:
-            assert mo_occ.shape == (nmo,)
+            assert mo_occ.shape == (nmo_full,)
             nocc = int(cp.sum(mo_occ == 2))
             nvir = int(cp.sum(mo_occ == 0))
-            assert nocc + nvir == nmo, "Only integer occupations are supported for GDM yet."
+            assert nocc + nvir == nmo_full, "Only integer occupations are supported for GDM yet."
             assert cp.all(mo_occ[:nocc] == 2), "Occupation number must be sorted."
             return nocc
         else:
-            assert mo_occ.shape == (2, nmo)
+            assert mo_occ.shape == (2, nmo_full)
             nocca = int(cp.sum(mo_occ[0] == 1))
             nvira = int(cp.sum(mo_occ[0] == 0))
-            assert nocca + nvira == nmo, "Only integer occupations are supported for GDM yet."
+            assert nocca + nvira == nmo_full, "Only integer occupations are supported for GDM yet."
             assert cp.all(mo_occ[0, :nocca] == 1), "Occupation number must be sorted."
             noccb = int(cp.sum(mo_occ[1] == 1))
             nvirb = int(cp.sum(mo_occ[1] == 0))
-            assert noccb + nvirb == nmo, "Only integer occupations are supported for GDM yet."
+            assert noccb + nvirb == nmo_full, "Only integer occupations are supported for GDM yet."
             assert cp.all(mo_occ[1, :noccb] == 1), "Occupation number must be sorted."
             return (nocca, noccb)
     else:
         if mo_occ.ndim == 2:
-            assert mo_occ.shape == (nkpts, nmo)
+            assert mo_occ.shape == (nkpts, nmo_full)
             nocc_list = []
             for k in range(nkpts):
                 nocc = int(cp.sum(mo_occ[k] == 2))
                 nvir = int(cp.sum(mo_occ[k] == 0))
-                assert nocc + nvir == nmo, "Only integer occupations are supported for GDM yet."
+                assert nocc + nvir == nmo_full, "Only integer occupations are supported for GDM yet."
                 assert cp.all(mo_occ[k, :nocc] == 2), "Occupation number must be sorted."
                 nocc_list.append(nocc)
             return nocc_list
         else:
-            assert mo_occ.shape == (2, nkpts, nmo)
+            assert mo_occ.shape == (2, nkpts, nmo_full)
             nocca_list = []
             noccb_list = []
             for k in range(nkpts):
                 nocca = int(cp.sum(mo_occ[0, k] == 1))
                 nvira = int(cp.sum(mo_occ[0, k] == 0))
-                assert nocca + nvira == nmo, "Only integer occupations are supported for GDM yet."
+                assert nocca + nvira == nmo_full, "Only integer occupations are supported for GDM yet."
                 assert cp.all(mo_occ[0, k, :nocca] == 1), "Occupation number must be sorted."
                 nocca_list.append(nocca)
                 noccb = int(cp.sum(mo_occ[1, k] == 1))
                 nvirb = int(cp.sum(mo_occ[1, k] == 0))
-                assert noccb + nvirb == nmo, "Only integer occupations are supported for GDM yet."
+                assert noccb + nvirb == nmo_full, "Only integer occupations are supported for GDM yet."
                 assert cp.all(mo_occ[1, k, :noccb] == 1), "Occupation number must be sorted."
                 noccb_list.append(noccb)
             return (nocca_list, noccb_list)
+
+def get_nmo(mo_coeff, nkpts = None):
+    nmo_full = int(mo_coeff.shape[-1])
+    if nkpts is None:
+        nmo = nmo_full
+    else:
+        if mo_coeff.ndim == 3:
+            assert mo_coeff.shape[0] == nkpts
+            nmo = [ nmo_full ] * nkpts
+            for k in range(nkpts):
+                n_lindep = 0
+                for i_mo in range(nmo_full):
+                    if cp.all(mo_coeff[k, :, i_mo] == 0):
+                        n_lindep += 1
+                nmo[k] -= n_lindep
+                for i_mo in range(nmo[k]):
+                    assert not cp.all(mo_coeff[k, :, i_mo] == 0)
+                for i_mo in range(nmo[k], nmo_full):
+                    assert cp.all(mo_coeff[k, :, i_mo] == 0)
+        else:
+            assert mo_coeff.ndim == 4
+            assert mo_coeff.shape[0:2] == (2, nkpts)
+            nmo = ([ nmo_full ] * nkpts, [ nmo_full ] * nkpts)
+            for s in range(2):
+                for k in range(nkpts):
+                    n_lindep = 0
+                    for i_mo in range(nmo_full):
+                        if cp.all(mo_coeff[s, k, :, i_mo] == 0):
+                            n_lindep += 1
+                    nmo[s][k] -= n_lindep
+                    for i_mo in range(nmo[s][k]):
+                        assert not cp.all(mo_coeff[s, k, :, i_mo] == 0)
+                    for i_mo in range(nmo[s][k], nmo_full):
+                        assert cp.all(mo_coeff[s, k, :, i_mo] == 0)
+    return nmo
 
 def get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e):
     assert isinstance(mo_coeff, cp.ndarray)
@@ -667,6 +759,9 @@ def _kernel(mf, dm0,
         https://en.wikipedia.org/wiki/Limited-memory_BFGS
         https://en.wikipedia.org/wiki/Backtracking_line_search
     """
+    verbose = mf.verbose
+    log = logger.new_logger(mf, verbose)
+
     if dm0 is None:
         dm0 = mf.get_init_guess(mf.mol, mf.init_guess)
     dm0 = cp.asarray(dm0)
@@ -675,7 +770,8 @@ def _kernel(mf, dm0,
     s1e = cp.asarray(mf.get_ovlp())
     vhf0 = mf.get_veff(mf.mol, dm0)
     fock0 = mf.get_fock(h1e, s1e, vhf0, dm0)
-    mo_energy, mo_coeff = mf.eig(fock0, s1e) # The initial density is converted to orbitals by one Roothaan diagonalization.
+    x_orth = mf.check_linear_dependency(s1e, log)
+    mo_energy, mo_coeff = mf.eig(fock0, s1e, x=x_orth) # The initial density is converted to orbitals by one Roothaan diagonalization.
     del vhf0, fock0
     mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
     e_tot, fock = get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e)
@@ -694,9 +790,8 @@ def _kernel(mf, dm0,
         nkpts = None
         conj_k_idx = None
     nocc = get_nocc(mo_occ, nkpts)
+    nmo = get_nmo(mo_coeff, nkpts)
 
-    verbose = mf.verbose
-    log = logger.new_logger(mf, verbose)
     if mf.conv_tol_grad is None:
         mf.conv_tol_grad = mf.conv_tol**0.5
         log.info('Set gradient conv threshold to %g', mf.conv_tol_grad)
@@ -719,7 +814,7 @@ def _kernel(mf, dm0,
         flatten_to_transform = [s_or_y for sy in lbfgs_s_y for s_or_y in sy]
         if previous_gradient is not None and previous_step is not None:
             flatten_to_transform.extend([previous_gradient, previous_step])
-        mo_energy, mo_coeff, flatten_transformed = packed_pseudo_canonicalize(fock, mo_coeff, nocc, flatten_to_transform, nkpts, conj_k_idx)
+        mo_energy, mo_coeff, flatten_transformed = packed_pseudo_canonicalize(fock, mo_coeff, nocc, nmo, flatten_to_transform, nkpts, conj_k_idx)
         del flatten_to_transform
 
         if previous_gradient is not None and previous_step is not None:
@@ -737,7 +832,7 @@ def _kernel(mf, dm0,
         lbfgs_s_y = transformed_s_y
         del transformed_s_y
 
-        gradient = packed_kappa_gradient(mo_coeff, nocc, fock, nkpts, conj_k_idx)
+        gradient = packed_kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts, conj_k_idx)
         gradient_norm = float(cp.linalg.norm(gradient))
 
         if not print_spin:
@@ -769,7 +864,7 @@ def _kernel(mf, dm0,
                 lbfgs_s_y = lbfgs_s_y[-max_n_lbfgs_record:]
 
         delta_E = 0.0 if previous_e_tot is None else e_tot - previous_e_tot
-        approx_hess_diag = packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts)
+        approx_hess_diag = packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, nmo, delta_E, minimal_diagonal_hessian, nkpts)
 
         if len(lbfgs_s_y) < min_n_lbfgs_record:
             step = -gradient / approx_hess_diag
@@ -801,7 +896,7 @@ def _kernel(mf, dm0,
         line_search_scale = line_search_initial_scale
         for i_line_search_attempt in range(max_n_line_search_attempt + 1):
             line_search_step = line_search_scale * step
-            line_search_mo_coeff = packed_apply_exp_U(mo_coeff, nocc, line_search_step, nkpts, conj_k_idx)
+            line_search_mo_coeff = packed_apply_exp_U(mo_coeff, nocc, nmo, line_search_step, nkpts, conj_k_idx)
             line_search_energy, line_search_fock = get_energy_and_fock(mf, line_search_mo_coeff, mo_occ, h1e, s1e)
             if e_tot - line_search_energy >= -line_search_c * line_search_scale * line_search_slope:
                 line_search_succeed = True

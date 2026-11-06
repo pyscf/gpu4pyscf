@@ -41,6 +41,8 @@ from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 
+PBC_LINDEP_MO_ENERGY_OFFSET = 1e5
+
 def _check_kpts(kpts):
     if len(member(np.zeros(3), kpts)) == 0:
         raise NotImplementedError(
@@ -297,17 +299,21 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
 def kpt_pair_reverse_map(nkpts, k_pairs):
     '''
     Generate a 1d array conj_k_idx of length nkpts.
-    If the conj_k_idx[k] < 0, then the corresponding k point value (of Fock, for example) must be computed independently.
-    If the conj_k_idx[k] >= 0, then the corresponding k point value can be obtained by time reversal symmetry, and
-    conj_k_idx[k] stores the k index of -k. And it is guaranteed that conj_k_idx[k] < k, so
+    If conj_k_idx[k] < 0, then the corresponding k point value (of Fock, for example) must be computed independently.
+    If conj_k_idx[k] == -k-1, then the k = -k + G, and the corresponding k point value is real.
+    If conj_k_idx[k] >= 0, then the corresponding k point value can be obtained by time reversal symmetry,
+    and conj_k_idx[k] stores the k index of -k + G. And it is guaranteed that conj_k_idx[k] < k, so
     if k is looped from 0 to nkpts, conj_k_idx[k] must have been already computed.
     '''
-    conj_k_idx = np.zeros(nkpts, dtype=int) - 1
+    conj_k_idx = np.zeros(nkpts, dtype=int) - (nkpts + 2)
     for k, k_conj in k_pairs:
-        if k == k_conj or k_conj is None:
+        if k_conj is None:
             continue
-        k, k_conj = min(k, k_conj), max(k, k_conj)
-        conj_k_idx[k_conj] = k
+        elif k == k_conj:
+            conj_k_idx[k] = -k - 1
+        else:
+            k, k_conj = min(k, k_conj), max(k, k_conj)
+            conj_k_idx[k_conj] = k
     return conj_k_idx
 
 class KSCF(pbchf.SCF):
@@ -613,7 +619,7 @@ class KSCF(pbchf.SCF):
                 eig_kpts[k, :nmo_k] = ek
                 mo_coeff_kpts[k, :, :nmo_k] = xk.dot(ck)
                 if nmo_k < nao:
-                    eig_kpts[k, nmo_k:] = abs(ek.max()) * 2 + 1e5
+                    eig_kpts[k, nmo_k:] = abs(ek.max()) * 2 + PBC_LINDEP_MO_ENERGY_OFFSET
                     mo_coeff_kpts[k, :, nmo_k:] = 0
                 count += 1
                 if k_conj is not None and k != k_conj:
