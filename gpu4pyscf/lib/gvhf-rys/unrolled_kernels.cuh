@@ -48,6 +48,7 @@
 #define JKENERGY_KERNEL_SETUP() \
     int sq_id = threadIdx.x; \
     int gout_id = threadIdx.y; \
+    int _nsq_per_block = blockDim.x; \
     int worker_id = blockIdx.x; \
     extern __shared__ double shared_memory[]; \
     __shared__ int ntasks, pair_ij, pair_kl0; \
