@@ -306,6 +306,11 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
+        if callable(mf.check_convergence):
+            scf_conv = mf.check_convergence(locals())
+        elif abs(e_tot-last_hf_e) < conv_tol and norm_gorb < conv_tol_grad:
+            scf_conv = True
+
         if dump_chk:
             mf.dump_chk({
                 'mol': mol,
@@ -318,9 +323,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         if callable(callback):
             callback(locals())
 
-        e_diff = abs(e_tot-last_hf_e)
-        if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
-            scf_conv = True
+        if scf_conv:
             break
     else:
         log.warn("SCF failed to converge")
@@ -342,11 +345,14 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         conv_tol = conv_tol * 10
         conv_tol_grad = conv_tol_grad * 3
-        if abs(e_tot-last_hf_e) < conv_tol or norm_gorb < conv_tol_grad:
+        if callable(mf.check_convergence):
+            scf_conv = mf.check_convergence(locals())
+        elif abs(e_tot-last_hf_e) < conv_tol or norm_gorb < conv_tol_grad:
             scf_conv = True
         else:
-            log.warn("Level-shifted SCF extra cycle failed to converge")
             scf_conv = False
+        if not scf_conv:
+            log.warn("Level-shifted SCF extra cycle failed to converge")
         logger.info(mf, 'Extra cycle  E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
                     e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
         if dump_chk:
