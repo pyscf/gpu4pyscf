@@ -34,7 +34,7 @@
 #include "g2e_root3.cu"
 
 __host__
-static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
+static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars *envs)
 {
     int nrys_roots = envs->nrys_roots;
     int ntasks_ij = offsets->ntasks_ij;
@@ -46,60 +46,60 @@ static int GINTrun_tasks_jk(JKMatrix *jk, BasisProdOffsets *offsets, GINTEnvVars
     switch (nrys_roots) {
     case 1:
         if (envs->nf == 1) {
-            GINTint2e_jk_kernel0000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+            GINTint2e_jk_kernel0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets);
         } else {
-            GINTint2e_jk_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+            GINTint2e_jk_kernel1000<<<blocks, threads, 0>>>(*envs, *jk, *offsets);
         }
         break;
     case 2:
         type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
         switch (type_ijkl) {
-        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel1010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel1011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel1100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel1110<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel2000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel2010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel2100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel3000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel1010<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel1011<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel1100<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel1110<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel2000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel2010<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel2100<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(0<<4)|(0<<2)|0: GINTint2e_jk_kernel3000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
         default:
-            GINTint2e_jk_kernel<2, GSIZE2> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            GINTint2e_jk_kernel<2, GSIZE2> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
         }
         break;
     case 3:
         type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
         switch (type_ijkl) {
-        case (1<<6)|(1<<4)|(1<<2)|1: GINTint2e_jk_kernel1111<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel2011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel2020<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(2<<2)|1: GINTint2e_jk_kernel2021<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel2110<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(1<<4)|(1<<2)|1: GINTint2e_jk_kernel2111<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(1<<4)|(2<<2)|0: GINTint2e_jk_kernel2120<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(2<<4)|(0<<2)|0: GINTint2e_jk_kernel2200<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(2<<4)|(1<<2)|0: GINTint2e_jk_kernel2210<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel3010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel3011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel3020<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel3100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel3110<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(2<<4)|(0<<2)|0: GINTint2e_jk_kernel3200<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|1: GINTint2e_jk_kernel1111<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel2011<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel2020<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(2<<2)|1: GINTint2e_jk_kernel2021<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel2110<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(1<<4)|(1<<2)|1: GINTint2e_jk_kernel2111<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(1<<4)|(2<<2)|0: GINTint2e_jk_kernel2120<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(2<<4)|(0<<2)|0: GINTint2e_jk_kernel2200<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(2<<4)|(1<<2)|0: GINTint2e_jk_kernel2210<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(0<<4)|(1<<2)|0: GINTint2e_jk_kernel3010<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(0<<4)|(1<<2)|1: GINTint2e_jk_kernel3011<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(0<<4)|(2<<2)|0: GINTint2e_jk_kernel3020<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(1<<4)|(0<<2)|0: GINTint2e_jk_kernel3100<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(1<<4)|(1<<2)|0: GINTint2e_jk_kernel3110<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(2<<4)|(0<<2)|0: GINTint2e_jk_kernel3200<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
         default:
-            GINTint2e_jk_kernel<3, GSIZE3> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+            GINTint2e_jk_kernel<3, GSIZE3> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
         }
         break;
     case 4:
-        GINTint2e_jk_kernel<4, GSIZE4> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        GINTint2e_jk_kernel<4, GSIZE4> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
     case 5:
-        GINTint2e_jk_kernel<5, GSIZE5> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        GINTint2e_jk_kernel<5, GSIZE5> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
     case 6:
-        GINTint2e_jk_kernel<6, GSIZE6> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        GINTint2e_jk_kernel<6, GSIZE6> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
     case 7:
-        GINTint2e_jk_kernel<7, GSIZE7> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        GINTint2e_jk_kernel<7, GSIZE7> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
     case 8:
-        GINTint2e_jk_kernel<8, GSIZE8> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        GINTint2e_jk_kernel<8, GSIZE8> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
     case 9:
-        GINTint2e_jk_kernel<9, GSIZE9> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        GINTint2e_jk_kernel<9, GSIZE9> <<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
@@ -121,7 +121,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
                  int nbins_ij, int nbins_kl,
                  int cp_ij_id, int cp_kl_id, double omega, double log_cutoff, double sub_dm_cond,
                  double *dm_sh, int nshls,
-                 double *log_q_ij, double *log_q_kl, cudaStream_t stream)
+                 double *log_q_ij, double *log_q_kl)
 {
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -166,8 +166,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
     envs.nao = nao;
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-    cudaStreamSynchronize(stream);
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     JKMatrix jk;
     jk.n_dm = n_dm;
@@ -215,7 +214,7 @@ int GINTbuild_jk(BasisProdCache *bpcache,
         offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
         offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
 
-        int err = GINTrun_tasks_jk(&jk, &offsets, &envs, stream);
+        int err = GINTrun_tasks_jk(&jk, &offsets, &envs);
         if (err != 0) {
             return err;
         }

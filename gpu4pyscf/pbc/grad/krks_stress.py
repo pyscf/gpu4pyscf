@@ -307,8 +307,7 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
         ctypes.c_int(ngrids),
         ctypes.c_int(bvk_ncells*nao), ctypes.c_int(bvkcell.nbas),
         ctypes.c_int(deriv), ctypes.c_int(cart),
-        ctypes.cast(opt.bas_rcut.data.ptr, ctypes.c_void_p),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.cast(opt.bas_rcut.data.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('PBCeval_gto_strain_tensor failed')
 

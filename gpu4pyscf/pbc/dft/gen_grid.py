@@ -157,7 +157,6 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
     )
     if err != 0:
         raise RuntimeError('GDFTbecke_partition_weights kernel failed')
@@ -205,7 +204,6 @@ def get_becke_weight_derivative(grids, natm, grid_range = None):
     assert Ar_distance.shape == (sup_natm, ngrids)
 
     P_B = cp.zeros([sup_natm, ngrids], order = "C")
-    stream = cp.cuda.get_current_stream()
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
@@ -214,7 +212,6 @@ def get_becke_weight_derivative(grids, natm, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(stream.ptr),
     )
     sum_P_B = cp.sum(P_B, axis = 0)
     inv_sum_P_B = cp.zeros(ngrids)
@@ -238,7 +235,6 @@ def get_becke_weight_derivative(grids, natm, grid_range = None):
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(stream.ptr),
     )
     P_B = None
     inv_sum_P_B = None

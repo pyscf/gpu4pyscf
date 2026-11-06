@@ -485,7 +485,6 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
     with cupy.cuda.Device(device_id):
-        stream = cupy.cuda.get_current_stream()
         assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
@@ -558,9 +557,9 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
-                    stream.synchronize()
+                    cupy.cuda.get_current_stream().synchronize()
                     copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
-                    stream.synchronize()
+                    cupy.cuda.get_current_stream().synchronize()
             elif num_devices > 1:
                 # Multi-GPU case, copy data to other Devices
                 for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
@@ -682,11 +681,11 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
+                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p),
                     cderi_cpu.ctypes,
                     ctypes.cast(cderi_gpu.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux), ctypes.c_int(cderi_npairs),
-                    ctypes.c_int(p0), ctypes.c_int(p1),
-                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p))
+                    ctypes.c_int(p0), ctypes.c_int(p1))
                 if err != 0:
                     raise RuntimeError('transpose_write cderi_cpu failed')
 

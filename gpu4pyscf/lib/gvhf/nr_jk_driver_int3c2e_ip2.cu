@@ -138,18 +138,17 @@ static int GINTrun_tasks_int3c2e_ip2_jk(JKMatrix *jk, BasisProdOffsets *offsets,
 
 
 extern "C" { __host__
-int GINTbuild_int3c2e_ip2_jk(BasisProdCache *bpcache,
+int GINTbuild_int3c2e_ip2_jk(cudaStream_t stream, BasisProdCache *bpcache,
                  double *vj, double *vk, double *dm, double *rhoj, double *rhok,
                  int *ao_offsets, int nao, int naux, int n_dm,
-                 int *bins_locs_ij, int ntasks_kl, int ncp_ij, int cp_kl_id, double omega, cudaStream_t stream)
+                 int *bins_locs_ij, int ntasks_kl, int ncp_ij, int cp_kl_id, double omega)
 {
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
 
     int ng[4] = {0,0,1,0};
 
     // move bpcache to constant memory
-    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-    cudaStreamSynchronize(stream);
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     JKMatrix jk;
     jk.n_dm = n_dm;

@@ -13285,7 +13285,7 @@ while (1) {
 int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                   uint32_t *pool, int *head, int workers, cudaStream_t stream)
+                   uint32_t *pool, int *head, int workers)
 {
     int li = bounds->li;
     int lj = bounds->lj;

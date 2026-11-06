@@ -445,7 +445,6 @@ def get_jk(mol, dm):
     aoslice_c = cp.ascontiguousarray(cp.asarray(mol._aoslice), dtype=cp.int32)
     natorb_c = cp.ascontiguousarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
     
-    stream = cp.cuda.get_current_stream()
     if mol.npairs > 0:
         
         w_1d = mol.two_center_integrals.w
@@ -470,8 +469,7 @@ def get_jk(mol, dm):
             ctypes.cast(_LOCAL_ROW_IDX.data.ptr, ctypes.c_void_p), 
             ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(mol.npairs)),
-            ctypes.c_int(int(nao)),
-            ctypes.c_void_p(stream.ptr)
+            ctypes.c_int(int(nao))
         )
 
         if err != 0:
@@ -526,8 +524,7 @@ def get_jk(mol, dm):
             ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(mol.natm)),
             ctypes.c_int(int(nao)),
-            ctypes.c_int(int(num_d_pairs)),
-            ctypes.c_void_p(stream.ptr)
+            ctypes.c_int(int(num_d_pairs))
         )
 
         if err != 0:

@@ -312,7 +312,6 @@ def get_partition(mol, atom_grids_tab,
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr),
     )
     if err != 0:
         raise RuntimeError('GDFTbecke_partition_weights kernel failed')
@@ -387,12 +386,12 @@ def atomic_group_grids(mol, coords):
     group_ids = cupy.empty([ngrids], dtype=numpy.int32)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTgroup_grids(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(group_ids.data.ptr, ctypes.c_void_p),
         ctypes.cast(atom_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p),
         ctypes.c_int(natm),
-        ctypes.c_int(ngrids),
-        ctypes.cast(stream.ptr, ctypes.c_void_p)
+        ctypes.c_int(ngrids)
     )
     if err != 0:
         raise RuntimeError('CUDA Error')
@@ -682,6 +681,7 @@ class Grids(lib.StreamObject):
         _env_gpu = cp.asarray(_sorted_mol._env, dtype=np.float64)
 
         libgdft.GDFTscreen_index(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
             ctypes.c_double(np.log(cutoff)),
             ctypes.cast(coords.data.ptr, ctypes.c_void_p),
@@ -690,8 +690,7 @@ class Grids(lib.StreamObject):
             ctypes.c_int(len(_atm_gpu)),
             ctypes.cast(_bas_gpu.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(_bas_gpu)),
-            ctypes.cast(_env_gpu.data.ptr, ctypes.c_void_p),
-            ctypes.cast(stream.ptr, ctypes.c_void_p))
+            ctypes.cast(_env_gpu.data.ptr, ctypes.c_void_p))
 
         # offset of contraction pattern, used in eval_ao
         l_ctr_offsets = opt.l_ctr_offsets

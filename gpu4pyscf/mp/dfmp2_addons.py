@@ -768,12 +768,11 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     t1 = log.timer_debug1('prepare for j3c_ovl_cart_bdiv', *t1)
 
     nbatch_aux = len(aux_offsets) - 1
-    stream = cupy.cuda.stream.get_current_stream()
     for ibatch_aux, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         naux_batch = p1 - p0
         # step 1: evaluate compressed 3c-2e ERI
         j3c_raw = int3c2e_gen(aux_batch_id=ibatch_aux, out=cache1)
-        stream.synchronize()
+        cupy.cuda.stream.get_current_stream().synchronize()
         t1 = log.timer_debug1(f'compute int3c2e for aux batch {ibatch_aux}/{nbatch_aux}', *t1)
         # step 2: decompress to full 3c-2e ERI (3-dimension tensor)
         j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], dtype=np.float64, buffer=cache_j3c)
@@ -781,7 +780,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
         j3c_expand_pair[rows, cols] = j3c_raw
         j3c_expand_pair[cols, rows] = j3c_raw
         j3c_raw = None
-        stream.synchronize()
+        cupy.cuda.stream.get_current_stream().synchronize()
         t1 = log.timer_debug1(f'decompress int3c2e for aux batch {ibatch_aux}/{nbatch_aux}', *t1)
         for iset in range(nset):
             occ_coeff_cart = occ_coeff_cart_set[iset]
@@ -801,7 +800,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
             else:
                 j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted.get(blocking=False)
             j3c_ovl_sorted = None
-            stream.synchronize()
+            cupy.cuda.stream.get_current_stream().synchronize()
             t1 = log.timer_debug1(f'contract for aux batch {ibatch_aux}/{nbatch_aux}, set {iset}/{nset}', *t1)
     t0 = log.timer('get_j3c_ovl_cart_bdiv_gpu', *t0)
 

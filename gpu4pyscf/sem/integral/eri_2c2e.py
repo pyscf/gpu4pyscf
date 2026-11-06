@@ -68,8 +68,7 @@ def multipole_eval(r, l1, l2, m, da, db, add):
     err = libsem.launch_multipole_eval_kernel_c(
         ctypes.c_int(n_pair),
         _ptr(r), _ptr(l1), _ptr(l2), _ptr(m),
-        _ptr(da), _ptr(db), _ptr(add), _ptr(out),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        _ptr(da), _ptr(db), _ptr(add), _ptr(out)
     )
 
     if err != 0:
@@ -193,8 +192,7 @@ def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
         ctypes.cast(d_vec.data.ptr, ctypes.c_void_p),
         ctypes.cast(fg_vec.data.ptr, ctypes.c_void_p),
         ctypes.cast(rho_out.data.ptr, ctypes.c_void_p),
-        ctypes.c_double(HARTREE2EV),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.c_double(HARTREE2EV)
     )
 
     if err != 0:
@@ -258,8 +256,7 @@ def debug_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r,
         _ptr(li), _ptr(lj), _ptr(lk), _ptr(ll),
         _ptr(ic), _ptr(r),
         _ptr(po_tensor), _ptr(ddp_tensor), _ptr(core_rho), _ptr(ch),
-        _ptr(out_val),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        _ptr(out_val)
     )
 
     if err != 0:
@@ -641,8 +638,7 @@ def calc_local_rep_core(
         _ptr(action), _ptr(target),
         _ptr(t_ij), _ptr(t_kl), _ptr(t_li), _ptr(t_lj), _ptr(t_lk), _ptr(t_ll),
         ctypes.c_double(HATREE2EV),
-        _ptr(rep_out), _ptr(core_out), _ptr(gab_out),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        _ptr(rep_out), _ptr(core_out), _ptr(gab_out)
     )
 
     if err != 0:
@@ -720,8 +716,7 @@ def global_transform_gpu(
         _ptr(tore),  _ptr(xfac),  _ptr(alpb),
         _ptr(guess1), _ptr(guess2), _ptr(guess3),
         _ptr(v_par6), ctypes.c_double(mol.BOHR),
-        _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out)
     )
 
     if err != 0:

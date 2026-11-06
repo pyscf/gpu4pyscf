@@ -38,7 +38,7 @@ void _add_sparse(double *a, double *b, int *indices, int n, int m, int count)
 
 extern "C" {
 __host__
-int add_sparse(double *a, double *b, int *indices, int n, int m, int count, cudaStream_t stream){
+int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, int m, int count){
     int ntile = (m + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ntile, ntile);

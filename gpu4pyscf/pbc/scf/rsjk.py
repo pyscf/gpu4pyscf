@@ -380,8 +380,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_float(log_cutoff), ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega),
-                    ctypes.c_void_p(stream.ptr))
+                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
                 if err != 0:
                     raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
                 kern_counts += 1
@@ -750,8 +749,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_float(log_cutoff), ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega),
-                    ctypes.c_void_p(stream.ptr))
+                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
                 if err != 0:
                     raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
                 kern_counts += 1
@@ -1033,8 +1031,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(omega),
-                    ctypes.c_void_p(stream.ptr))
+                    supmol._bas.ctypes, ctypes.c_double(omega))
                 if err != 0:
                     raise RuntimeError(f'PBC_jk_derivatives kernel for {llll} failed')
                 kern_counts += 1
@@ -1191,7 +1188,6 @@ class PBCJKMatrixOpt:
             aft_envs = ft_opt.aft_envs
             kern = libpbc.PBC_ft_aopair_ej_deriv
             ej_sigma = cp.zeros([cell.natm+3, 3])
-            stream = cp.cuda.get_current_stream()
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 nGv = p1 - p0
                 Gpq = ft_kern(Gv[p0:p1])
@@ -1214,8 +1210,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(int(ft_opt.permutation_symmetry)),
-                    ctypes.c_void_p(stream.ptr))
+                    ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
@@ -1237,8 +1232,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(int(ft_opt.permutation_symmetry)),
-                        ctypes.c_void_p(stream.ptr))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
                 Gpq = None
@@ -1268,7 +1262,6 @@ class PBCJKMatrixOpt:
             kern = libpbc.PBC_ft_aopair_ek_deriv
             ek_sigma = cp.zeros([cell.natm+3, 3])
             sigma = cp.zeros((3, 3))
-            stream = cp.cuda.get_current_stream()
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
                 Gvk = Gv + cp.asarray(kpt)
@@ -1346,8 +1339,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(int(ft_opt.permutation_symmetry)),
-                        ctypes.c_void_p(stream.ptr))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
@@ -1392,8 +1384,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.c_int(int(ft_opt.permutation_symmetry)),
-                            ctypes.c_void_p(stream.ptr))
+                            ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
                             raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                     Gpq = Gpq_conj = dm_k = tmp = dm_vG = None
@@ -1752,14 +1743,12 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
         nish = len(ish)
         njsh = len(jsh)
         pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
-        stream = cp.cuda.get_current_stream()
         err = pair_ij_kern(
             ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
             ctypes.cast(ish.data.ptr, ctypes.c_void_p),
             ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nish), ctypes.c_int(njsh),
-            ctypes.c_int(NBAS_MAX), ctypes.c_int(tile),
-            ctypes.c_void_p(stream.ptr))
+            ctypes.c_int(NBAS_MAX), ctypes.c_int(tile))
         if err != 0:
             raise RuntimeError(f'PBCsort_pair_ij kernel failed for group {(i,j)} batch {b0}:{b1}')
         pair_ij = pair_ij.ravel()
@@ -1779,8 +1768,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                      ctypes.c_uint32(pair_ij.size),
                      ctypes.c_double(omega),
                      ctypes.c_int(tril_symmetry),
-                     Ecut_mask_ptr,
-                     ctypes.c_void_p(stream.ptr))
+                     Ecut_mask_ptr)
         if err != 0:
             raise RuntimeError(f'PBCfill_s_estimator kernel failed for group {(i,j)} batch {b0}:{b1}')
         idx = cp.where(s_estimator > s_log_cutoff)[0]
@@ -1793,8 +1781,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                          ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                          ctypes.c_uint32(pair_ij.size),
-                         ctypes.c_double(omega),
-                         ctypes.c_void_p(stream.ptr))
+                         ctypes.c_double(omega))
             if err != 0:
                 raise RuntimeError('PBCfill_qcond kernel failed for group {(i,j)} batch {b0}:{b1}')
         return pair_ij, q_cond, s_estimator

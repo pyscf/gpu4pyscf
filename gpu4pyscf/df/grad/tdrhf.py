@@ -209,8 +209,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
             ctypes.c_int(nao), ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     buf = buf1 = buf2 = compressed = dm_tensor = dm_tensor1 = tmp = None
@@ -307,8 +306,7 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
         lib.c_null_ptr(),
         ctypes.c_int(0),
         ctypes.c_int(0), ctypes.c_int(0),
-        ctypes.c_int(naux), ctypes.c_int(mol.natm),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.c_int(naux), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     ej *= 2
@@ -672,8 +670,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
             ctypes.c_int(nao), ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     ejk += ejk_aux
@@ -775,8 +772,7 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         lib.c_null_ptr(), ctypes.c_int(0),
         ctypes.c_int(dms.shape[-1]), ctypes.c_int(0),
-        ctypes.c_int(naux), ctypes.c_int(mol.natm),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.c_int(naux), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
 

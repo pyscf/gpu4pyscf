@@ -496,8 +496,7 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(int(ft_opt.permutation_symmetry)),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_int(int(ft_opt.permutation_symmetry)))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
     if not ft_opt.permutation_symmetry:
@@ -682,8 +681,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(int(ft_opt.permutation_symmetry)),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_int(int(ft_opt.permutation_symmetry)))
             pqG = pqG_conj = dm_k = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
@@ -813,13 +811,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
     avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
-    # The FT workspace spans the BvK supercell, even for a single k-point.
-    # Also allow for the density-matrix contraction and retained intermediates.
-    bvk_ncells = len(ft_opt.bvkmesh_Ls)
-    unit = nao**2 * (2*bvk_ncells + nset + 2)
-    Gblksize = int(avail_mem/(16*unit))//8*8
-    if Gblksize < 8:
-        raise MemoryError('Insufficient memory for evaluating ft_aopair')
+    Gblksize = max(16, int(avail_mem/(16*nao**2*2)//8*8))
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 

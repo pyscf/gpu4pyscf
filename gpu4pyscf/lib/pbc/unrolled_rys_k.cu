@@ -2546,7 +2546,7 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    float dm_penalty, int64_t *pool, int *head, int workers, cudaStream_t stream)
+                    float dm_penalty, int64_t *pool, int *head, int workers)
 {
     int li = bounds->li;
     int lj = bounds->lj;

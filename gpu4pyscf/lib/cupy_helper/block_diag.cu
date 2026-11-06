@@ -42,7 +42,7 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
 }
 
 extern "C" {
-int block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols, cudaStream_t stream)
+int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
 {
     auto threads = make_block(THREADS, THREADS);
     auto blocks = make_grid(ndiags);

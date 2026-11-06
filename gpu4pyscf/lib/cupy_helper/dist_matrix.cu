@@ -36,7 +36,7 @@ static void _calc_distances(double *dist, const double *x, const double *y, int 
 }
 
 extern "C" {
-int dist_matrix(double *dist, const double *x, const double *y, int m, int n, cudaStream_t stream)
+int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double *y, int m, int n)
 {
     int ntilex = (m + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;

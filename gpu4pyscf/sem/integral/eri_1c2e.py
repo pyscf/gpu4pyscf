@@ -89,8 +89,7 @@ def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
         ctypes.cast(ed.data.ptr, ctypes.c_void_p),
         ctypes.cast(_FACT_GPU.data.ptr, ctypes.c_void_p),
         ctypes.cast(BINOMIALS_GPU_FLAT.data.ptr, ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.cast(out.data.ptr, ctypes.c_void_p)
     )
 
     if err != 0:

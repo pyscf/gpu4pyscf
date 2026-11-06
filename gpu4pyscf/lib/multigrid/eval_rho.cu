@@ -245,25 +245,25 @@ static size_t buflen(int l, MGridBounds *bounds)
 extern "C" {
 int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
                      int l, int n_radius, int *mesh, int nshl_pair,
-                     int *bas_ij_idx, double *pool, int workers, cudaStream_t stream)
+                     int *bas_ij_idx, double *pool, int workers)
 {
     MGridBounds bounds = {
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
-    cudaMemsetAsync(batch_head, 0, sizeof(uint32_t), stream);
+    cudaMemset(batch_head, 0, sizeof(uint32_t));
 
     switch (l) {
-    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen(0, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen(1, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen(2, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen(3, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen(4, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen(5, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen(6, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen(7, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
-    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen(8, &bounds), stream>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 0: eval_rho_orth_kernel<0> <<<workers, THREADS, buflen(0, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 1: eval_rho_orth_kernel<1> <<<workers, THREADS, buflen(1, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 2: eval_rho_orth_kernel<2> <<<workers, THREADS, buflen(2, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 3: eval_rho_orth_kernel<3> <<<workers, THREADS, buflen(3, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 4: eval_rho_orth_kernel<4> <<<workers, THREADS, buflen(4, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 5: eval_rho_orth_kernel<5> <<<workers, THREADS, buflen(5, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 6: eval_rho_orth_kernel<6> <<<workers, THREADS, buflen(6, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 7: eval_rho_orth_kernel<7> <<<workers, THREADS, buflen(7, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
+    case 8: eval_rho_orth_kernel<8> <<<workers, THREADS, buflen(8, &bounds)>>>(rho, dm, envs, bounds, pool, batch_head); break;
     default: return 1;
     }
 

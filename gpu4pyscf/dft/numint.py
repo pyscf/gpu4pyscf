@@ -105,6 +105,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     out = ndarray((comp, nao_slice, ngrids), buffer=out)
 
     err = libgdft.GDFTeval_gto(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(deriv), ctypes.c_int(_sorted_mol.cart),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p), ctypes.c_int(ngrids),
@@ -114,8 +115,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
         ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
         _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p),
-        ctypes.byref(opt.envs_cache),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.byref(opt.envs_cache))
 
     if err != 0:
         raise RuntimeError('CUDA Error in evaluating AO')
@@ -370,6 +370,7 @@ def _vv10nlc(rho_drho, coords, weights, nlc_pars):
     domega_dgamma_i = cupy.empty(ngrids)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.VXC_vv10nlc_fock_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
@@ -377,7 +378,6 @@ def _vv10nlc(rho_drho, coords, weights, nlc_pars):
         ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
         ctypes.c_double(C_in_omega),
         ctypes.c_int(ngrids),
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('CUDA Error in vv10 Fock kernel')
@@ -389,7 +389,9 @@ def _vv10nlc(rho_drho, coords, weights, nlc_pars):
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     E_i = cupy.empty(ngrids)
+    stream = cupy.cuda.get_current_stream()
     err = libgdft.VXC_vv10nlc_fock_eval_UWE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
@@ -398,7 +400,6 @@ def _vv10nlc(rho_drho, coords, weights, nlc_pars):
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('CUDA Error in vv10 Fock kernel')
@@ -1958,6 +1959,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     coords = cupy.asarray(coords, order='F')
 
     libgdft.GDFTscreen_index_legacy(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
         ctypes.c_double(cutoff),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p),
@@ -1965,8 +1967,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
         l_ctr_offsets.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(nctr),
         mol._bas.ctypes.data_as(ctypes.c_void_p),
-        ctypes.byref(opt.envs_cache),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.byref(opt.envs_cache))
     non0shl_mask = non0shl_mask.get()
 
     # offset of contraction pattern, used in eval_ao
@@ -2315,11 +2316,11 @@ def _contract_rho(bra, ket, rho=None):
         assert bra.shape == ket.shape
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(rho.data.ptr, ctypes.c_void_p),
             ctypes.cast(bra.data.ptr, ctypes.c_void_p),
             ctypes.cast(ket.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids), ctypes.c_int(nao),
-            ctypes.cast(stream.ptr, ctypes.c_void_p))
+            ctypes.c_int(ngrids), ctypes.c_int(nao))
         if err != 0:
             raise RuntimeError('CUDA Error')
     else:
@@ -2340,11 +2341,11 @@ def _contract_rho1(bra, ket, rho=None):
     for i in range(nvar):
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(rho[i].data.ptr, ctypes.c_void_p),
             ctypes.cast(bra[i].data.ptr, ctypes.c_void_p),
             ctypes.cast(ket.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids), ctypes.c_int(nao),
-            ctypes.cast(stream.ptr, ctypes.c_void_p))
+            ctypes.c_int(ngrids), ctypes.c_int(nao))
         if err != 0:
             raise RuntimeError('CUDA Error')
     return rho
@@ -2357,11 +2358,11 @@ def _contract_rho_gga(bra, ket, rho=None):
     rho = ndarray([4,ngrids], buffer=rho)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTcontract_rho_gga(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(rho.data.ptr, ctypes.c_void_p),
         ctypes.cast(bra.data.ptr, ctypes.c_void_p),
         ctypes.cast(ket.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids), ctypes.c_int(nao),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.c_int(ngrids), ctypes.c_int(nao))
     if err != 0:
         raise RuntimeError('CUDA Error')
     return rho
@@ -2374,11 +2375,11 @@ def _contract_rho_mgga(bra, ket, rho=None):
     rho = ndarray([5,ngrids], buffer=rho)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTcontract_rho_mgga(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(rho.data.ptr, ctypes.c_void_p),
         ctypes.cast(bra.data.ptr, ctypes.c_void_p),
         ctypes.cast(ket.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids), ctypes.c_int(nao),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.c_int(ngrids), ctypes.c_int(nao))
     if err != 0:
         raise RuntimeError('CUDA Error')
     return rho
@@ -2408,8 +2409,7 @@ def _dot_ao_dm_sparse(ao, dm, nbins, screen_index, pair_mask, ao_loc,
         l_bas_offsets.ctypes.data_as(ctypes.c_void_p),
         screen_index.ctypes.data_as(ctypes.c_void_p),
         pair_mask.ctypes.data_as(ctypes.c_void_p),
-        ao_loc.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+        ao_loc.ctypes.data_as(ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('CUDA Error')
     return out
@@ -2432,8 +2432,7 @@ def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
             bas_pairs_locs.ctypes.data_as(ctypes.c_void_p),
             bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
             screen_index.ctypes.data_as(ctypes.c_void_p),
-            ao_loc.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+            ao_loc.ctypes.data_as(ctypes.c_void_p))
     else:
         err = libgdft.GDFTdot_aow_ao_sparse(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -2445,8 +2444,7 @@ def _dot_ao_ao_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
             bas_pairs_locs.ctypes.data_as(ctypes.c_void_p),
             bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
             screen_index.ctypes.data_as(ctypes.c_void_p),
-            ao_loc.ctypes.data_as(ctypes.c_void_p),
-            ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+            ao_loc.ctypes.data_as(ctypes.c_void_p))
 
     if err != 0:
         raise RuntimeError('CUDA Error')
@@ -2487,8 +2485,7 @@ def _scale_ao(ao, wv, out=None):
         ctypes.cast(ao.data.ptr, ctypes.c_void_p),
         ctypes.cast(wv.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nvar),
-        ctypes.c_int(is_real),
-        ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+        ctypes.c_int(is_real))
     if err != 0:
         raise RuntimeError('GDFTscale_ao failed')
     return out

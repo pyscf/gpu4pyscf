@@ -109,23 +109,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
-        metric_solve = _gen_metric_solver(j2c, 'CD')
+        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
     else:
-        metric_solve = _gen_metric_solver(j2c, 'ED')
-    j2c = None
-
-    dm_oo = j3c_oo
-    j3c_oo = j3c_oo.reshape(2, naux, nocc**2)
-    pair_blksize = min(nocc**2, int(mem_avail*.4/(naux*4*8)))
-    assert pair_blksize > 0
-    buf = cp.empty((aux_coeff.shape[1], pair_blksize), order='F')
-    for spin in range(2):
-        for p0, p1 in lib.prange(0, nocc**2, pair_blksize):
-            tmp = buf[:,:p1-p0]
-            contract('uv,up->vp', aux_coeff, j3c_oo[spin,:,p0:p1], out=tmp)
-            tmp = metric_solve(tmp, overwrite=True)
-            contract('uv,vp->up', aux_coeff, tmp, out=j3c_oo[spin,:,p0:p1])
-    metric_solve = j3c_oo = aux_coeff = buf = tmp = None
+        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
+    j2c = aux_coeff = None
+    dm_oo = contract('uv,nvij->nuij', metric, j3c_oo)
+    metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
 
@@ -209,8 +198,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
             ctypes.c_int(nao), ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     buf = buf1 = buf2 = compressed = dm_tensor = dm_tensor1 = tmp = None

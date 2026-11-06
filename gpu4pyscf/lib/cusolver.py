@@ -126,7 +126,6 @@ def eigh(h, s, overwrite=False):
         A = h.copy()
         B = s.copy()
     _handle = device.get_cusolver_handle()
-    cusolver.setStream(_handle, cupy.cuda.get_current_stream().ptr)
     w = cupy.zeros(n)
 
     # TODO: reuse workspace
@@ -198,7 +197,6 @@ def cholesky(A):
         A = A.T
     x = A.copy(order='C')
     handle = device.get_cusolver_handle()
-    cusolver.setStream(handle, cupy.cuda.get_current_stream().ptr)
     if A.dtype == np.float64:
         potrf = cusolver.dpotrf
         potrf_bufferSize = cusolver.dpotrf_bufferSize

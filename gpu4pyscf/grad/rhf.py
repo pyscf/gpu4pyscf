@@ -158,8 +158,7 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
             if err != 0:
                 raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
             kern_counts += 1
@@ -297,8 +296,7 @@ def _grad_nuc_without_ecp(mol, dm0):
         lib.c_null_ptr(),
         ctypes.c_int(0),
         ctypes.c_int(0), ctypes.c_int(0),
-        ctypes.c_int(mol.natm), ctypes.c_int(mol.natm),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        ctypes.c_int(mol.natm), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     de += de_aux

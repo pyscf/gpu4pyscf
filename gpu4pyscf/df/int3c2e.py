@@ -274,8 +274,7 @@ class VHFOpt(_vhf.VHFOpt):
                     self.bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
                     _tot_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.natm),
                     _tot_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_tot_mol.nbas),
-                    _tot_mol._env.ctypes.data_as(ctypes.c_void_p),
-                    ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+                    _tot_mol._env.ctypes.data_as(ctypes.c_void_p))
                 self._bpcache[device_id] = bpcache
                 cput0 = log.timer_debug1(f'Initialize GPU cache on Device {device_id}', *cput0)
         bpcache = self._bpcache[device_id]
@@ -399,6 +398,7 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
     ntasks_kl = len(log_q_kl)
     ncp_ij = len(intopt.log_qs)
     err = fn(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ej_ptr,
         ek_ptr,
@@ -413,8 +413,7 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
         ctypes.c_int(ntasks_kl),
         ctypes.c_int(ncp_ij),
         ctypes.c_int(cp_kl_id),
-        ctypes.c_double(omega),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.c_double(omega))
     if err != 0:
         raise RuntimeError(f'GINT_getjk_int2e_ip failed, err={err}')
     return ej, ek
@@ -481,6 +480,7 @@ def loop_int3c2e_general(intopt, task_list=None, ip_type='', omega=None, stream=
         if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
             int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(norb),
@@ -491,8 +491,7 @@ def loop_int3c2e_general(intopt, task_list=None, ip_type='', omega=None, stream=
                 ctypes.c_int(nbins),
                 ctypes.c_int(cp_ij_id),
                 ctypes.c_int(cp_kl_id),
-                ctypes.c_double(omega),
-                ctypes.cast(stream.ptr, ctypes.c_void_p))
+                ctypes.c_double(omega))
             if err != 0:
                 raise RuntimeError(f'GINT_fill_int3c2e general failed, err={err}')
         else:
@@ -568,6 +567,7 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True, stream=None):
     rhoj = cupy.zeros([naux])
 
     err = libgvhf.GINTbuild_j_int3c2e_pass1(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(dm_cart.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
@@ -577,8 +577,7 @@ def get_j_int3c2e_pass1(intopt, dm0, sort_j=True, stream=None):
         bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
         bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(ncp_ij),
-        ctypes.c_int(ncp_kl),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.c_int(ncp_kl))
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass1')
 
@@ -616,6 +615,7 @@ def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
         rhoj = intopt.aux_cart2sph @ rhoj
 
     err = libgvhf.GINTbuild_j_int3c2e_pass2(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
         ctypes.cast(rhoj.data.ptr, ctypes.c_void_p),
@@ -625,8 +625,7 @@ def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
         bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
         bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(ncp_ij),
-        ctypes.c_int(ncp_kl),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.c_int(ncp_kl))
 
     if err != 0:
         raise RuntimeError('CUDA error in get_j_pass2')
@@ -1085,6 +1084,7 @@ def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, strea
     for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
         bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
         err = fn(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
             ctypes.c_int(norb),
@@ -1095,8 +1095,7 @@ def get_int3c2e_ip_slice(intopt, cp_aux_id, ip_type, out=None, omega=None, strea
             ctypes.c_int(nbins),
             ctypes.c_int(cp_ij_id),
             ctypes.c_int(cp_kl_id),
-            ctypes.c_double(omega),
-            ctypes.cast(stream.ptr, ctypes.c_void_p))
+            ctypes.c_double(omega))
 
         if err != 0:
             raise RuntimeError(f'GINT_fill_int2e_ip failed, err={err}')
@@ -1152,6 +1151,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
 
             int3c_blk = cupy.zeros([3, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(norb_cart),
@@ -1162,8 +1162,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
                 ctypes.c_int(nbins),
                 ctypes.c_int(cp_ij_id),
                 ctypes.c_int(cp_kl_id),
-                ctypes.c_double(omega),
-                ctypes.cast(stream.ptr, ctypes.c_void_p))
+                ctypes.c_double(omega))
 
             if err != 0:
                 raise RuntimeError("int3c2e_ip failed\n")
@@ -1241,6 +1240,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
             if (li + lj + lk + order)//2 + 1 < NROOT_ON_GPU:
                 int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
                 err = fn(
+                    ctypes.cast(stream.ptr, ctypes.c_void_p),
                     intopt.bpcache,
                     ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(norb_cart),
@@ -1251,8 +1251,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
                     ctypes.c_int(nbins),
                     ctypes.c_int(cp_ij_id),
                     ctypes.c_int(cp_kl_id),
-                    ctypes.c_double(omega),
-                    ctypes.cast(stream.ptr, ctypes.c_void_p))
+                    ctypes.c_double(omega))
                 if err != 0:
                     raise RuntimeError("int3c2e failed\n")
             else:
@@ -1370,6 +1369,7 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
         strides = np.array([s[2]//8 ,s[1]//8, s[0]//8, 1], dtype=np.int32)
 
     err = libgint.GINTfill_int3c2e(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
         ctypes.cast(int3c_blk.data.ptr, ctypes.c_void_p),
         ctypes.c_int(norb_cart),
@@ -1380,8 +1380,7 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
         ctypes.c_int(nbins),
         ctypes.c_int(cp_ij_id),
         ctypes.c_int(cp_kl_id),
-        ctypes.c_double(omega),
-        ctypes.cast(stream.ptr, ctypes.c_void_p))
+        ctypes.c_double(omega))
 
     if err != 0:
         raise RuntimeError('GINT_fill_int2e failed')

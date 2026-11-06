@@ -277,8 +277,7 @@ class PBCJMatrixOpt:
                     ctypes.c_float(log_cutoff),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
-                    supmol._env.ctypes,
-                    ctypes.c_void_p(stream.ptr))
+                    supmol._env.ctypes)
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
@@ -465,7 +464,6 @@ def _cache_q_cond_and_non0pairs(vhfopt):
     s_kern.restype = ctypes.c_int
     rys_envs = vhfopt.rys_envs
     pair_cache = {}
-    stream = cp.cuda.get_current_stream()
     for i in range(n_groups):
         for j in range(i+1):
             nish_cell0 = cell.l_ctr_counts[i]
@@ -491,8 +489,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega),
                          ctypes.c_int(tril_symmetry),
-                         lib.c_null_ptr(),
-                         ctypes.c_void_p(stream.ptr))
+                         lib.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
@@ -506,8 +503,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                              ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                              ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                              ctypes.c_int(pair_ij.size),
-                             ctypes.c_double(omega),
-                             ctypes.c_void_p(stream.ptr))
+                             ctypes.c_double(omega))
                 if err != 0:
                     raise RuntimeError('PBCfill_qcond kernel failed')
                 idx = cp.where(q_cond_ij > q_log_cutoff)[0]
@@ -534,8 +530,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(pair_kl.size),
                          ctypes.c_double(omega),
                          ctypes.c_int(tril_symmetry),
-                         lib.c_null_ptr(),
-                         ctypes.c_void_p(stream.ptr))
+                         lib.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
@@ -548,8 +543,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                              ctypes.cast(pair_kl.data.ptr, ctypes.c_void_p),
                              ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                              ctypes.c_int(pair_kl.size),
-                             ctypes.c_double(omega),
-                             ctypes.c_void_p(stream.ptr))
+                             ctypes.c_double(omega))
                 if err != 0:
                     raise RuntimeError('PBCfill_qcond kernel failed')
                 idx = cp.where(q_cond_kl > q_log_cutoff)[0]

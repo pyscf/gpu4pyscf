@@ -307,7 +307,6 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         buf3 = cp.empty(nao_pair*Gblksize, dtype=np.complex128)
         buf_auxG = cp.empty(naux*Gblksize, dtype=np.complex128)
-        stream = cp.cuda.get_current_stream()
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
             GvT = cp.asarray(Gv[p0:p1].T, order='C')
@@ -352,8 +351,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry),
-                ctypes.c_void_p(stream.ptr))
+                ctypes.c_int(ft_opt.permutation_symmetry))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
 
@@ -429,8 +427,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aux_ft_envs),
-                ctypes.c_int(p1-p0),
-                ctypes.c_void_p(stream.ptr))
+                ctypes.c_int(p1-p0))
             if err != 0:
                 raise RuntimeError('ft_ao_deriv failed')
 
@@ -534,8 +531,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.c_int(naux_in_batch),
                 ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff),
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                ctypes.c_float(log_cutoff))
             if err != 0:
                 raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         if hermi == 1:

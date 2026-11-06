@@ -37,7 +37,7 @@
 __host__
 static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
                                       BasisProdOffsets *offsets,
-                                      GINTEnvVars *envs, cudaStream_t stream)
+                                      GINTEnvVars *envs)
 {
   int nrys_roots = envs->nrys_roots;
   int ntasks_ij = offsets->ntasks_ij;
@@ -50,7 +50,7 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
   switch (nrys_roots) {
     case 1:
       switch (type_ijkl) {
-        case 0b0000: GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 0b0000: GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
         default:
           fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
       }
@@ -58,32 +58,32 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
 
     case 2:
       switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_get_veff_ip1_kernel0011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_get_veff_ip1_kernel0020<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel1010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel2000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel0010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_get_veff_ip1_kernel0011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_get_veff_ip1_kernel0020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_get_veff_ip1_kernel1010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel1100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_get_veff_ip1_kernel2000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
         default:
           fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
       }
       break;
 
     case 3:
-      GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 4:
-      GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 5:
-      GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 6:
-      GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 7:
-      GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);
@@ -108,7 +108,7 @@ int GINTget_veff_ip1(BasisProdCache *bpcache,
                      int nbins_ij, int nbins_kl,
                      int cp_ij_id, int cp_kl_id, double omega, double log_cutoff, double sub_dm_cond,
                      double *dm_sh, int nshls,
-                     double *log_q_ij, double *log_q_kl, cudaStream_t stream)
+                     double *log_q_ij, double *log_q_kl)
 {
   ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
   ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -132,9 +132,8 @@ int GINTget_veff_ip1(BasisProdCache *bpcache,
       DEVICE_INIT(int16_t, d_idx4c, idx4c, envs.nf * 3);
       envs.idx = d_idx4c;
     } else {
-      checkCudaErrors(cudaMemcpyToSymbolAsync(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3, 0, cudaMemcpyHostToDevice, stream));
+      checkCudaErrors(cudaMemcpyToSymbol(c_idx4c, idx4c, sizeof(int16_t)*envs.nf*3));
     }
-    checkCudaErrors(cudaStreamSynchronize(stream));
     free(idx4c);
     free(idx_ij);
     free(idx_kl);
@@ -148,8 +147,7 @@ int GINTget_veff_ip1(BasisProdCache *bpcache,
 
 //  checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
   // move bpcache to constant memory
-  checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-  cudaStreamSynchronize(stream);
+  checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
   JKMatrix jk;
   jk.n_dm = n_dm;
@@ -194,7 +192,7 @@ int GINTget_veff_ip1(BasisProdCache *bpcache,
     offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
     offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
 
-    int err = GINTrun_tasks_get_veff_ip1(&jk, &offsets, &envs, stream);
+    int err = GINTrun_tasks_get_veff_ip1(&jk, &offsets, &envs);
     if (err != 0) {
       return err;
     }

@@ -163,12 +163,12 @@ static int GINTfill_int3c1e_ipip2_density_contracted_tasks(double* output, const
 }
 
 extern "C" {
-int GINTfill_int3c1e_ipip1_charge_contracted(const BasisProdCache* bpcache,
+int GINTfill_int3c1e_ipip1_charge_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
                                              const double* grid_points, const double* charge_exponents, const int ngrids,
                                              double* integral_charge_contracted,
                                              const int* strides, const int* ao_offsets,
                                              const int* bins_locs_ij, const int nbins,
-                                             const int cp_ij_id, const double omega, const int n_charge_sum_per_thread, const cudaStream_t stream)
+                                             const int cp_ij_id, const double omega, const int n_charge_sum_per_thread)
 {
     const ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     const int i_l = cp_ij->l_bra;
@@ -181,8 +181,7 @@ int GINTfill_int3c1e_ipip1_charge_contracted(const BasisProdCache* bpcache,
         return 2;
     }
 
-    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-    cudaStreamSynchronize(stream);
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -214,12 +213,12 @@ int GINTfill_int3c1e_ipip1_charge_contracted(const BasisProdCache* bpcache,
     return 0;
 }
 
-int GINTfill_int3c1e_ipvip1_charge_contracted(const BasisProdCache* bpcache,
+int GINTfill_int3c1e_ipvip1_charge_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
                                               const double* grid_points, const double* charge_exponents, const int ngrids,
                                               double* integral_charge_contracted,
                                               const int* strides, const int* ao_offsets,
                                               const int* bins_locs_ij, const int nbins,
-                                              const int cp_ij_id, const double omega, const int n_charge_sum_per_thread, const cudaStream_t stream)
+                                              const int cp_ij_id, const double omega, const int n_charge_sum_per_thread)
 {
     const ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     const int i_l = cp_ij->l_bra;
@@ -232,8 +231,7 @@ int GINTfill_int3c1e_ipvip1_charge_contracted(const BasisProdCache* bpcache,
         return 2;
     }
 
-    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-    cudaStreamSynchronize(stream);
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -265,12 +263,12 @@ int GINTfill_int3c1e_ipvip1_charge_contracted(const BasisProdCache* bpcache,
     return 0;
 }
 
-int GINTfill_int3c1e_ip1ip2_charge_contracted(const BasisProdCache* bpcache,
+int GINTfill_int3c1e_ip1ip2_charge_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
                                               const double* grid_points, const double* charge_exponents, const int ngrids,
                                               double* integral_charge_contracted,
                                               const int* strides, const int* ao_offsets,
                                               const int* bins_locs_ij, const int nbins,
-                                              const int cp_ij_id, const double omega, const int n_charge_sum_per_thread, const cudaStream_t stream)
+                                              const int cp_ij_id, const double omega, const int n_charge_sum_per_thread)
 {
     const ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     const int i_l = cp_ij->l_bra;
@@ -283,8 +281,7 @@ int GINTfill_int3c1e_ip1ip2_charge_contracted(const BasisProdCache* bpcache,
         return 2;
     }
 
-    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-    cudaStreamSynchronize(stream);
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -316,12 +313,12 @@ int GINTfill_int3c1e_ip1ip2_charge_contracted(const BasisProdCache* bpcache,
     return 0;
 }
 
-int GINTfill_int3c1e_ipip2_density_contracted(const BasisProdCache* bpcache,
+int GINTfill_int3c1e_ipip2_density_contracted(const cudaStream_t stream, const BasisProdCache* bpcache,
                                               const double* grid_points, const double* charge_exponents, const int ngrids,
                                               const double* dm_pair_ordered, const int* density_offset,
                                               double* integral_density_contracted,
                                               const int* bins_locs_ij, const int nbins,
-                                              const int cp_ij_id, const double omega, const int n_pair_sum_per_thread, const cudaStream_t stream)
+                                              const int cp_ij_id, const double omega, const int n_pair_sum_per_thread)
 {
     const ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     const int i_l = cp_ij->l_bra;
@@ -334,8 +331,7 @@ int GINTfill_int3c1e_ipip2_density_contracted(const BasisProdCache* bpcache,
         return 2;
     }
 
-    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-    cudaStreamSynchronize(stream);
+    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;

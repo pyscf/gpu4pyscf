@@ -25,7 +25,7 @@ __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
 
 extern "C" {
-int MG_init_constant(int shm_size, cudaStream_t stream)
+int MG_init_constant(int shm_size)
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];
@@ -46,9 +46,8 @@ int MG_init_constant(int shm_size, cudaStream_t stream)
             i_in_fold2idx[n2].y = j;
         } }
     }
-    cudaMemcpyToSymbolAsync(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index), 0, cudaMemcpyHostToDevice, stream);
-    cudaMemcpyToSymbolAsync(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index), 0, cudaMemcpyHostToDevice, stream);
-    cudaStreamSynchronize(stream);
+    cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
+    cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

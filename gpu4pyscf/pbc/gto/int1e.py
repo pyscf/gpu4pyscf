@@ -253,8 +253,7 @@ class _Int1eOpt:
             ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(self.shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(naoi), ctypes.c_int(naoj), ctypes.c_size_t(ij_offset),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.c_int(naoi), ctypes.c_int(naoj), ctypes.c_size_t(ij_offset))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
 
@@ -336,8 +335,7 @@ class _Int1eOpt:
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(self.shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
         grad_sigma *= 2 / nkpts
@@ -507,8 +505,7 @@ def _shell_overlap_mask(cell, hermi=1, precision=1e-14, Ls=None, envs=None,
         ctypes.byref(envs), ctypes.c_int(hermi),
         ctypes.c_float(math.log(precision)),
         ctypes.cast(bvkmesh_Ls.data.ptr, ctypes.c_void_p),
-        (ctypes.c_int*4)(*shls_slice),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+        (ctypes.c_int*4)(*shls_slice))
     return ovlp_mask
 
 def _bvkcell_lattice_sum_Ls(bvkcell, rcut=None):

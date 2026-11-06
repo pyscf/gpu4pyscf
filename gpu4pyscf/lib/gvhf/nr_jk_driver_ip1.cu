@@ -35,7 +35,7 @@
 __host__
 static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
                                 BasisProdOffsets *offsets,
-                                GINTEnvVars *envs, cudaStream_t stream)
+                                GINTEnvVars *envs)
 {
   int nrys_roots = envs->nrys_roots;
   int ntasks_ij = offsets->ntasks_ij;
@@ -48,7 +48,7 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
   switch (nrys_roots) {
     case 1:
       switch (type_ijkl) {
-        case 0b0000: GINTint2e_ip1_jk_kernel_0000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case 0b0000: GINTint2e_ip1_jk_kernel_0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); break;
         default:
           fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
       }
@@ -56,13 +56,13 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
 
     case 2:
       switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_0010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_0011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_0020<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_1000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_1010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_1100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_2000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_0010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_0011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_0020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_1000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_1010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_1100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_2000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
         default:
           fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
       }
@@ -70,42 +70,42 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
 
     case 3:
       switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(2<<2)|1: GINTint2e_ip1_jk_kernel_0021<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(2<<2)|2: GINTint2e_ip1_jk_kernel_0022<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(3<<2)|0: GINTint2e_ip1_jk_kernel_0030<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (0<<6)|(0<<4)|(3<<2)|1: GINTint2e_ip1_jk_kernel_0031<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_1011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_1020<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(2<<2)|1: GINTint2e_ip1_jk_kernel_1021<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(0<<4)|(3<<2)|0: GINTint2e_ip1_jk_kernel_1030<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_1110<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_1111<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (1<<6)|(1<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_1120<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_2010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_2011<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(0<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_2020<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(1<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_2100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(1<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_2110<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (2<<6)|(2<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_2200<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(0<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_3000<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_3010<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
-        case (3<<6)|(1<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_3100<<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|1: GINTint2e_ip1_jk_kernel_0021<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(2<<2)|2: GINTint2e_ip1_jk_kernel_0022<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(3<<2)|0: GINTint2e_ip1_jk_kernel_0030<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (0<<6)|(0<<4)|(3<<2)|1: GINTint2e_ip1_jk_kernel_0031<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_1011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_1020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(2<<2)|1: GINTint2e_ip1_jk_kernel_1021<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(0<<4)|(3<<2)|0: GINTint2e_ip1_jk_kernel_1030<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_1110<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_1111<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (1<<6)|(1<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_1120<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_2010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(1<<2)|1: GINTint2e_ip1_jk_kernel_2011<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(0<<4)|(2<<2)|0: GINTint2e_ip1_jk_kernel_2020<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(1<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_2100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(1<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_2110<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (2<<6)|(2<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_2200<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(0<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_3000<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(0<<4)|(1<<2)|0: GINTint2e_ip1_jk_kernel_3010<<<blocks, threads>>>(*envs, *jk, *offsets); break;
+        case (3<<6)|(1<<4)|(0<<2)|0: GINTint2e_ip1_jk_kernel_3100<<<blocks, threads>>>(*envs, *jk, *offsets); break;
         default:
           fprintf(stderr, "roots=3 type_ijkl %d\n", type_ijkl);
       }
       break;
 
     case 4:
-      GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 5:
-      GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 6:
-      GINTint2e_ip1_jk_kernel<6, NABLAGOUTSIZE6> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_ip1_jk_kernel<6, NABLAGOUTSIZE6> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     case 7:
-      GINTint2e_ip1_jk_kernel<7, NABLAGOUTSIZE7> <<<blocks, threads, 0, stream>>>(*envs, *jk, *offsets);
+      GINTint2e_ip1_jk_kernel<7, NABLAGOUTSIZE7> <<<blocks, threads>>>(*envs, *jk, *offsets);
       break;
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);
@@ -130,7 +130,7 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
                      int nbins_ij, int nbins_kl,
                      int cp_ij_id, int cp_kl_id, double omega, double log_cutoff, double sub_dm_cond,
                      double *dm_sh, int nshls,
-                     double *log_q_ij, double *log_q_kl, cudaStream_t stream)
+                     double *log_q_ij, double *log_q_kl)
 {
   ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
   ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -169,8 +169,7 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
 
 //  checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
   // move bpcache to constant memory
-  checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
-  cudaStreamSynchronize(stream);
+  checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 
   JKMatrix jk;
   jk.n_dm = n_dm;
@@ -215,7 +214,7 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
     offsets.primitive_ij = primitive_pairs_locs[cp_ij_id] + bas_ij0 * envs.nprim_ij;
     offsets.primitive_kl = primitive_pairs_locs[cp_kl_id] + bas_kl0 * envs.nprim_kl;
 
-    int err = GINTrun_tasks_ip1_jk(&jk, &offsets, &envs, stream);
+    int err = GINTrun_tasks_ip1_jk(&jk, &offsets, &envs);
     if (err != 0) {
       return err;
     }

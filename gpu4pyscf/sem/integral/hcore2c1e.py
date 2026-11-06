@@ -90,8 +90,7 @@ def bfn(x):
         ctypes.c_int(n_data),
         ctypes.cast(x_flat.data.ptr, ctypes.c_void_p),
         ctypes.cast(TAYLOR_COEFFS_GPU_T.data.ptr, ctypes.c_void_p),
-        ctypes.cast(bf.data.ptr, ctypes.c_void_p),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.cast(bf.data.ptr, ctypes.c_void_p)
     )
 
     if err != 0:
@@ -109,8 +108,7 @@ def afn(p):
     err = libsem.launch_afn_kernel_c(
         ctypes.c_int(n_data),
         ctypes.cast(p_flat.data.ptr, ctypes.c_void_p),
-        ctypes.cast(af.data.ptr, ctypes.c_void_p),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.cast(af.data.ptr, ctypes.c_void_p)
     )
 
     if err != 0:
@@ -130,8 +128,7 @@ def rotation_transform(S_local, C_tensor):
         ctypes.c_int(n_pairs),
         ctypes.cast(S_local.data.ptr, ctypes.c_void_p),
         ctypes.cast(C_tensor.data.ptr, ctypes.c_void_p),
-        ctypes.cast(di.data.ptr, ctypes.c_void_p),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr)
+        ctypes.cast(di.data.ptr, ctypes.c_void_p)
     )
 
     if err != 0:
@@ -210,7 +207,6 @@ def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
         ctypes.cast(bf_in.data.ptr, ctypes.c_void_p),
         ctypes.cast(BINOMIALS_GPU_FLAT.data.ptr, ctypes.c_void_p),
         ctypes.cast(kernel_out.data.ptr, ctypes.c_void_p),
-        ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
     )
 
     if err != 0:

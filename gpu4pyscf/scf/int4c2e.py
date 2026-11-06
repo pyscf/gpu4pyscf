@@ -146,8 +146,7 @@ def _ao2mo_general(vhfopt, mo_coeffs, omega=None):
                 ctypes.cast(pair_loc[kl_id].data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                mol._bas.ctypes,
-                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                mol._bas.ctypes)
             if err != 0:
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 raise RuntimeError(f'fill_int4c2e kernel for {llll} failed')

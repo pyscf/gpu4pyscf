@@ -211,8 +211,7 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
   }
 
   // device_data.copy_from_host(host_data);
-  cudaMemcpyAsync(device_data, host_data, total_size, cudaMemcpyHostToDevice, stream);
-  cudaStreamSynchronize(stream);
+  cudaMemcpy(device_data, host_data, total_size, cudaMemcpyHostToDevice);
 
   cutlass::Status status = grouped_gemm_kernel_run<DeviceKernel>(
       num,
@@ -234,8 +233,8 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
 }
 
 extern "C" {
-// int dgemm(double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups, cudaStream_t stream)
-int grouped_dot(uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, uint8_t *device_data, int num, cudaStream_t stream)
+// int dgemm(cudaStream_t stream, double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups)
+int grouped_dot(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, uint8_t *device_data, int num)
 {
     int compute_capability = get_device_compute_capability();
 

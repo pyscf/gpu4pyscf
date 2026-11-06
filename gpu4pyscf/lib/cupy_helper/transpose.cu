@@ -124,7 +124,7 @@ void _transpose_zsum(double *a, int n, int counts, int hermi)
 }
 
 extern "C" {
-int transpose_dsum(double *a, int n, int counts, int hermi, cudaStream_t stream)
+int transpose_dsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
 {
     int ntile = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);
@@ -138,7 +138,7 @@ int transpose_dsum(double *a, int n, int counts, int hermi, cudaStream_t stream)
     return 0;
 }
 
-int transpose_zsum(double *a, int n, int counts, int hermi, cudaStream_t stream)
+int transpose_zsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
 {
     int ntile = (n + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS, THREADS);

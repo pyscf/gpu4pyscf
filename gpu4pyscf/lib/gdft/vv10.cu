@@ -659,10 +659,11 @@ static void vv10_hess_eval_D_B_in_double_grid_response_offdiagonal_kernel(double
 
 extern "C" {
 __host__
-int VXC_vv10nlc_fock_eval_UWE(double* U, double* W, double* E,
+int VXC_vv10nlc_fock_eval_UWE(const cudaStream_t stream,
+                              double* U, double* W, double* E,
                               const double* grid_coord, const double* rho_weight,
                               const double* omega, const double* kappa,
-                              const int ngrids, const cudaStream_t stream)
+                              const int ngrids)
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -677,9 +678,10 @@ int VXC_vv10nlc_fock_eval_UWE(double* U, double* W, double* E,
 }
 
 __host__
-int VXC_vv10nlc_fock_eval_omega_derivative(double* omega, double* domega_drho, double* domega_dgamma,
+int VXC_vv10nlc_fock_eval_omega_derivative(const cudaStream_t stream,
+                                           double* omega, double* domega_drho, double* domega_dgamma,
                                            const double* rho, const double* gamma, const double C_factor,
-                                           const int ngrids, const cudaStream_t stream)
+                                           const int ngrids)
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -694,11 +696,12 @@ int VXC_vv10nlc_fock_eval_omega_derivative(double* omega, double* domega_drho, d
 }
 
 __host__
-int VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(double* Egr,
+int VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(const cudaStream_t stream,
+                                                      double* Egr,
                                                       const double* grid_coord, const double* rho_weight,
                                                       const double* omega, const double* kappa,
                                                       const int* grid_associated_atom, const int* grid_offsets_of_atom,
-                                                      const int natm, const int i_grid_begin, const int ngrids, const cudaStream_t stream)
+                                                      const int natm, const int i_grid_begin, const int ngrids)
 {
     constexpr int n_grids_per_block = 128;
     auto threads = make_block(n_grids_per_block, 1);
@@ -714,10 +717,11 @@ int VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(double* Egr,
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_UWABCE(double* U, double* W, double* A, double* B, double* C, double* E,
+int VXC_vv10nlc_hess_eval_UWABCE(const cudaStream_t stream,
+                                 double* U, double* W, double* A, double* B, double* C, double* E,
                                  const double* grid_coord, const double* rho_weight,
                                  const double* omega, const double* kappa,
-                                 const int ngrids, const cudaStream_t stream)
+                                 const int ngrids)
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -732,10 +736,11 @@ int VXC_vv10nlc_hess_eval_UWABCE(double* U, double* W, double* A, double* B, dou
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_omega_derivative(double* omega, double* domega_drho, double* domega_dgamma,
+int VXC_vv10nlc_hess_eval_omega_derivative(const cudaStream_t stream,
+                                           double* omega, double* domega_drho, double* domega_dgamma,
                                            double* d2omega_drho2, double* d2omega_dgamma2, double* d2omega_drho_dgamma,
                                            const double* rho, const double* gamma, const double C_factor,
-                                           const int ngrids, const cudaStream_t stream)
+                                           const int ngrids)
 {
     auto threads = make_block(NG_PER_BLOCK);
     auto blocks = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -752,14 +757,15 @@ int VXC_vv10nlc_hess_eval_omega_derivative(double* omega, double* domega_drho, d
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_f_t(double* f_rho_t, double* f_gamma_t,
+int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
+                              double* f_rho_t, double* f_gamma_t,
                               const double* grid_coord, const double* grid_weight,
                               const double* rho, const double* omega, const double* kappa,
                               const double* U, const double* W, const double* A, const double* B, const double* C,
                               const double* domega_drho, const double* domega_dgamma, const double* dkappa_drho,
                               const double* d2omega_drho2, const double* d2omega_dgamma2, const double* d2omega_drho_dgamma, const double* d2kappa_drho2,
                               const double* rho_t, const double* gamma_t,
-                              const int ngrids, const int ntrial, const cudaStream_t stream)
+                              const int ngrids, const int ntrial)
 {
     {
         constexpr int n_trial_per_thread = 6; // Notice: ntrial is likely a multiple of 3
@@ -792,11 +798,12 @@ int VXC_vv10nlc_hess_eval_f_t(double* f_rho_t, double* f_gamma_t,
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(double* Egr, double* Ugr, double* Wgr,
+int VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(const cudaStream_t stream,
+                                                        double* Egr, double* Ugr, double* Wgr,
                                                         const double* grid_coord, const double* rho_weight,
                                                         const double* omega, const double* kappa,
                                                         const int* grid_associated_atom, const int* grid_offsets_of_atom,
-                                                        const int ngrids, const int natm, const cudaStream_t stream)
+                                                        const int ngrids, const int natm)
 {
     constexpr int n_grids_per_block = 128;
     auto threads = make_block(n_grids_per_block, 1);
@@ -812,10 +819,11 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(double* Egr, double* Ugr
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_EUW_with_weight1(double* Ew, double* Uw, double* Ww,
+int VXC_vv10nlc_hess_eval_EUW_with_weight1(const cudaStream_t stream,
+                                           double* Ew, double* Uw, double* Ww,
                                            const double* grid_coord, const double* grid_weight1,
                                            const double* rho, const double* omega, const double* kappa,
-                                           const int ngrids, const int nderivative, const cudaStream_t stream)
+                                           const int ngrids, const int nderivative)
 {
     constexpr int n_derivative_per_thread = 6; // Notice: ntrial is always a multiple of 3
     auto threads = make_block(NG_PER_BLOCK, 1);
@@ -834,11 +842,12 @@ int VXC_vv10nlc_hess_eval_EUW_with_weight1(double* Ew, double* Uw, double* Ww,
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(double* D_B,
+int VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(const cudaStream_t stream,
+                                                      double* D_B,
                                                       const double* grid_coord, const double* rho_weight,
                                                       const double* omega, const double* kappa,
                                                       const int* grid_associated_atom, const int* grid_offsets_of_atom,
-                                                      const int ngrids, const int natm, const cudaStream_t stream)
+                                                      const int ngrids, const int natm)
 {
     constexpr int n_grids_per_block = 128;
     auto threads = make_block(n_grids_per_block, 1);
