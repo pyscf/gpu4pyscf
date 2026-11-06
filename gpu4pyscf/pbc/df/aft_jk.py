@@ -811,7 +811,13 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
     avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
-    Gblksize = max(16, int(avail_mem/(16*nao**2*2)//8*8))
+    # The FT workspace spans the BvK supercell, even for a single k-point.
+    # Also allow for the density-matrix contraction and retained intermediates.
+    bvk_ncells = len(ft_opt.bvkmesh_Ls)
+    unit = nao**2 * (2*bvk_ncells + nset + 2)
+    Gblksize = int(avail_mem/(16*unit))//8*8
+    if Gblksize < 8:
+        raise MemoryError('Insufficient memory for evaluating ft_aopair')
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 

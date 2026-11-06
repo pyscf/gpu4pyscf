@@ -138,6 +138,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -382,6 +383,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -691,6 +693,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -1152,6 +1155,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -1603,6 +1607,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -2262,6 +2267,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -2833,6 +2839,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -3504,6 +3511,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -3812,6 +3820,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -4273,6 +4282,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -4953,6 +4963,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -7872,6 +7883,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -8327,6 +8339,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -11062,6 +11075,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -11640,6 +11654,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -12320,6 +12335,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -12625,6 +12641,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -13083,6 +13100,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -13766,6 +13784,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -16652,6 +16671,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -17108,6 +17128,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -22521,6 +22542,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -25418,6 +25440,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -25867,6 +25890,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -28542,6 +28566,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -29117,6 +29142,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -29789,6 +29815,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -32458,6 +32485,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -33032,6 +33060,7 @@ while (1) {
                     aij_cache[1] = aj_aij;
                     aij_cache[2] = ai * 2;
                 }
+                __syncthreads();
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
