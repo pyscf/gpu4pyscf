@@ -41,10 +41,10 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.lib.memcpy import copy_array
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
-from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
+from gpu4pyscf.pbc.df.aft import AFTDF
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    reset_kpts, fft_matrix, conj_images_in_bvk_cell)
+    reset_kpts, fft_matrix, conj_images_in_bvk_cell, _normalize_kpts)
 from gpu4pyscf.__config__ import num_devices
 
 DEBUG = False
@@ -253,7 +253,7 @@ class GDF(lib.StreamObject):
         if self.is_gamma_point:
             return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
         else:
-            kpts, is_single_kpt = _check_kpts(kpts)
+            kpts, is_single_kpt = _normalize_kpts(kpts)
             if is_single_kpt:
                 return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                     with_k, exxdiv)

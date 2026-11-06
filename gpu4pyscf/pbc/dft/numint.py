@@ -72,6 +72,8 @@ def eval_ao(cell, coords, kpt=np.zeros(3), deriv=0, relativity=0, shls_slice=Non
             depending on the kpt argument.  If kpt is not given (gamma point),
             aoR is a float array.
     '''
+    if kpt is None:
+        kpt = np.zeros(3)
     ao_kpts = eval_ao_kpts(cell, coords, np.reshape(kpt, (-1,3)), deriv,
                            out=out, verbose=verbose, opt=opt)
     return ao_kpts[0]
@@ -82,11 +84,16 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
     '''
     Returns:
         ao_kpts: (nkpts, [comp], ngrids, nao) ndarray
-            AO values at each k-point
+            AO values at each k-point. kpts and the presence of a k-point
+            axis follow the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
     assert deriv <= 2
+    is_single_kpt = kpts is None or kpts.ndim == 1
+    if kpts is not None and kpts.ndim == 1:
+        kpts = kpts.reshape(1, 3)
     if opt is None:
         opt = _GTOvalOpt(cell, kpts, deriv=deriv)
     else:
@@ -122,7 +129,7 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
     if deriv == 0:
         out = out[:,0]
     log.timer_debug2('eval_ao_kpts', *t0)
-    return out
+    return out[0] if is_single_kpt else out
 
 class _GTOvalOpt:
     def __init__(self, cell, kpts=None, bvk_kmesh=None, deriv=0):
@@ -345,8 +352,9 @@ def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
 
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, max_memory=2000, verbose=None):
+    """Integrate XC at Gamma for None, preserving the input density layout."""
     if kpts is None:
-        kpts = np.zeros((1,3))
+        kpts = np.zeros(3) if dm_kpts.ndim == 2 else np.zeros((1,3))
     elif isinstance(kpts, KPoints):
         kpts = kpts.kpts
 
@@ -424,8 +432,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
 def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, max_memory=2000, verbose=None):
+    """Integrate XC at Gamma for None, preserving the input density layout."""
     if kpts is None:
-        kpts = np.zeros((1,3))
+        kpts = np.zeros(3) if dm_kpts.ndim == 3 else np.zeros((1,3))
     elif isinstance(kpts, KPoints):
         kpts = kpts.kpts
 
@@ -654,8 +663,7 @@ def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=Non
         ao_deriv = 0
         nvar = 1
 
-    kpts, is_single_kpt = _check_kpts(kpts)
-    assert not is_single_kpt
+    kpts, _ = _check_kpts(kpts)
     dms = _format_dms(dm, kpts)
     if is_rhf is None:
         is_rhf = len(dms) == 1
@@ -778,7 +786,9 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
             if blksize < ALIGNED:
                 raise RuntimeError('Not enough GPU memory')
 
-        if kpts is not None:
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        else:
             kpts = kpts.reshape(-1, 3)
 
         eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv)

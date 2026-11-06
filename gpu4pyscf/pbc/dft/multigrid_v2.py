@@ -1409,9 +1409,14 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 
 #FIXME: merge to multigrid_v1.get_pp
 def get_nuc(ni, kpts=None):
+    """Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+    """
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1427,10 +1432,13 @@ def get_nuc(ni, kpts=None):
 
 #FIXME: merge to multigrid_v1.get_pp
 def get_pp(ni, kpts=None):
-    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
+    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+    """
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1476,6 +1484,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj : (*, nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
+    input_kpts = kpts
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:
@@ -1499,7 +1508,8 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     xc_for_fock = convert_xc_on_g_mesh_to_fock(ni, coulomb_on_g_mesh, hermi, kpts_band)
     t0 = log.timer("vj", *t0)
-    return _format_jks(xc_for_fock, dm_kpts, input_band, kpts)
+    return _format_jks(xc_for_fock, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
 
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, with_j=False, verbose=None):
@@ -1595,7 +1605,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
+    veff = _format_jks(veff, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1700,7 +1711,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
+    veff = _format_jks(veff, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
