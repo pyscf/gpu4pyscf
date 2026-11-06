@@ -82,7 +82,7 @@ class KnownValues(unittest.TestCase):
         optimized_mol = ci_optimizer.optimize()
         assert abs(mol.atom_coords() - optimized_mol.atom_coords()).max() < 1e-4
 
-    def test_mecp_hf_tda_singlet_geom_check(self):
+    def test_mecp_hf_tda_singlet_geom_check_high_cost(self):
         mff = scf.RHF(mol).to_gpu()
         mff.kernel()
         tdf = mff.TDA()

@@ -361,7 +361,7 @@ class KnownValues(unittest.TestCase):
         mf_scanner = mf.as_scanner()
         _check_vs_finite_diff(dat, mf_scanner)
 
-    def test_gdf_hse_vs_finite_difference(self):
+    def test_gdf_hse_vs_finite_difference_high_cost(self):
         xc = 'hse06'
         mf = cell.RKS(xc=xc).to_gpu().density_fit().run()
         mf_grad = mf.Gradients()

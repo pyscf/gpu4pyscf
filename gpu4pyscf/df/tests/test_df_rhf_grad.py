@@ -339,6 +339,37 @@ class KnownValues(unittest.TestCase):
             e2 = eval_jk(i, x, -disp)
             assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-4
 
+    # issue 754
+    def test_quasi_lindep_auxbasis(self):
+        mol = pyscf.M(atom=[('H', (0, 0, i*.7)) for i in range(4)],
+                      basis='sto-3g', verbose=0)
+        dm = np.eye(4) + .2
+
+        # Use delta=1e-3 as a better-conditioned, approximate reference.
+        delta = 1e-3
+        auxmol_ref = pyscf.df.addons.make_auxmol(mol, {
+            'H': [[0, [.5*(1-delta), 1.]],
+                  [0, [.5*(1+delta), 1.]], [0, [2., 1.]]],
+        })
+        opt_ref = int3c2e.Int3c2eOpt(mol, auxmol_ref).build()
+
+        # At delta=1e-4, forming the inverse metric amplifies roundoff errors.
+        delta = 1e-4
+        auxmol = pyscf.df.addons.make_auxmol(mol, {
+            'H': [[0, [.5*(1-delta), 1.]],
+                  [0, [.5*(1+delta), 1.]], [0, [2., 1.]]],
+        })
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+
+        ref = df_rhf_grad._jk_energy_per_atom(opt_ref, dm, hermi=1)
+        grad = df_rhf_grad._jk_energy_per_atom(opt, dm, hermi=1)
+        assert abs(grad - ref).max() < 1e-8
+
+        dm_uhf = np.array([.6*dm, .4*dm])
+        ref = df_uhf_grad._jk_energy_per_atom(opt_ref, dm_uhf, hermi=1)
+        grad = df_uhf_grad._jk_energy_per_atom(opt, dm_uhf, hermi=1)
+        assert abs(grad - ref).max() < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for DF RHF Gradient")
     unittest.main()

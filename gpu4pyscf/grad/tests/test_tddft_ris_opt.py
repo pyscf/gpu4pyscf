@@ -45,7 +45,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     @unittest.skipIf(num_devices > 1, '')
-    def test_opt_rks_tda_1(self):
+    def test_opt_rks_tda_1_high_cost(self):
         mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()
         assert mf.converged

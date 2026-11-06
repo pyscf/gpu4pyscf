@@ -206,6 +206,6 @@ setup(
         "pytest-coverage==0.0",
     ],
     cmdclass={'build_py': CMakeBuildPy},
-    extras_require={'dispersion': ['pyscf-dispersion']},
+    extras_require={'dispersion': ['pyscf-dispersion>=1.7.0']},
     install_requires=INSTALL_REQUIRES,
 )

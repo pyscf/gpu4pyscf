@@ -405,7 +405,7 @@ __global__ static void evaluate_density_kernel(
 
 #define density_kernel_macro(li, lj)                                           \
   evaluate_density_kernel<KernelType, n_channels, li, lj, is_non_orthogonal>   \
-      <<<block_grid, block_size>>>(                                            \
+      <<<block_grid, block_size, 0, stream>>>(                                 \
           density, density_matrices, non_trivial_pairs, i_shells, j_shells,    \
           n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,       \
           sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,     \
@@ -430,7 +430,7 @@ int evaluate_density_driver(
     const int *image_indices, const double *vectors_to_neighboring_images,
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
-    const int *bas, const double *env) {
+    const int *bas, const double *env, cudaStream_t stream) {
   dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
@@ -826,7 +826,7 @@ __global__ static void evaluate_xc_kernel(
 
 #define xc_kernel_macro(li, lj)                                                \
   evaluate_xc_kernel<KernelType, n_channels, li, lj, is_non_orthogonal>        \
-      <<<block_grid, block_size>>>(                                            \
+      <<<block_grid, block_size, 0, stream>>>(                                 \
           fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells, \
           shell_to_ao_indices, n_i_functions, n_j_functions,                   \
           sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,     \
@@ -851,7 +851,7 @@ int evaluate_xc_driver(
     const int *image_indices, const double *vectors_to_neighboring_images,
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
-    const int *bas, const double *env) {
+    const int *bas, const double *env, cudaStream_t stream) {
   dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
@@ -1299,7 +1299,7 @@ __global__ static void evaluate_density_tau_kernel(
 
 #define density_tau_kernel_macro(li, lj)                                       \
   evaluate_density_tau_kernel<KernelType, n_channels, li, lj,                  \
-                              is_non_orthogonal><<<block_grid, block_size>>>(  \
+                              is_non_orthogonal><<<block_grid, block_size, 0, stream>>>(\
       density, density_matrices, non_trivial_pairs, i_shells, j_shells,        \
       n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,           \
       sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,         \
@@ -1324,7 +1324,7 @@ int evaluate_density_tau_driver(
     const int *image_indices, const double *vectors_to_neighboring_images,
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
-    const int *bas, const double *env) {
+    const int *bas, const double *env, cudaStream_t stream) {
   dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];
@@ -1761,7 +1761,7 @@ __global__ static void evaluate_xc_with_tau_kernel(
 
 #define xc_with_tau_kernel_macro(li, lj)                                       \
   evaluate_xc_with_tau_kernel<KernelType, n_channels, li, lj,                  \
-                              is_non_orthogonal><<<block_grid, block_size>>>(  \
+                              is_non_orthogonal><<<block_grid, block_size, 0, stream>>>(\
       fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells,     \
       shell_to_ao_indices, n_i_functions, n_j_functions,                       \
       sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,         \
@@ -1786,7 +1786,7 @@ int evaluate_xc_with_tau_driver(
     const int *image_indices, const double *vectors_to_neighboring_images,
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
-    const int *bas, const double *env) {
+    const int *bas, const double *env, cudaStream_t stream) {
   dim3 block_size(BLOCK_DIM_XYZ, BLOCK_DIM_XYZ, BLOCK_DIM_XYZ);
   int mesh_a = mesh[0];
   int mesh_b = mesh[1];

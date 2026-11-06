@@ -91,14 +91,14 @@ void delete_cderi(CDERI **pcderi){
     pcderi = NULL;
 }
 
-int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf){
+int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf, cudaStream_t stream){
     int nij = block->nij;
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p2 - p1 + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
     dim3 blocks(blockx, blocky);
 
-    _unpack<<<blocks, threads>>>(*block, nao, p1, buf);
+    _unpack<<<blocks, threads, 0, stream>>>(*block, nao, p1, buf);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -107,12 +107,12 @@ int unpack_block(CDERI_BLOCK *block, int p1, int p2, int nao, double *buf){
     return 0;
 }
 
-int unpack(CDERI **pcderi, int p1, int p2, double *buf){
+int unpack(CDERI **pcderi, int p1, int p2, double *buf, cudaStream_t stream){
     CDERI *cderi = *pcderi;
     int nao = cderi->nao;
     for (int i = 0; i < cderi->nblocks; i++){
         CDERI_BLOCK *block = cderi->blocks + i;
-        int err = unpack_block(block, p1, p2, nao, buf);
+        int err = unpack_block(block, p1, p2, nao, buf, stream);
         if(err != 0){
             return err;
         }

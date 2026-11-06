@@ -16,6 +16,10 @@
 Geometric direct minimization (GDM) SCF solver
 '''
 
+# Attention: The orbital gradient (also called kappa) in GDM implementation refers to the upper right (nocc, nvir)
+# part of the exponential matrix. It is exactly the same as the V_ov matrix defined in the GDM paper.
+# It is the NOT consistent with the orbital gradient definition in SOSCF, they differ by negative transpose.
+
 import numpy as np
 import cupy as cp
 from gpu4pyscf.lib import logger, utils

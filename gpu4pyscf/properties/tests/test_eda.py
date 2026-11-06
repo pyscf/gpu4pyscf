@@ -362,7 +362,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_almo_eda_2_wb97xv_svp_df(self):
+    def test_almo_eda_2_wb97xv_svp_df_high_cost(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
             "total"                   : -52.53194727429772,
@@ -676,7 +676,7 @@ class KnownValues(unittest.TestCase):
         for reference_dft_gradient, test_dft_gradient in zip(reference_dft_gradients, test_dft_gradients):
             assert np.max(np.abs(test_dft_gradient - reference_dft_gradient)) < 1e-6
 
-    def test_almo_eda_2_pbe0_charged_df(self):
+    def test_almo_eda_2_pbe0_charged_df_high_cost(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
             "total"                   : -536.3265135788014,
@@ -849,7 +849,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 2e-7
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_almo_eda_2_customized_dispersion(self):
+    def test_almo_eda_2_customized_dispersion_high_cost(self):
         # ### Q-Chem input difference
         # # METHOD                      PBE0
         # # DFT_D                       D4
@@ -1089,7 +1089,8 @@ class EDAResponse(unittest.TestCase):
         for mol in molecules + [merged]:
             ref = cpu_dft.RKS(mol, xc='PBE0')
             ref.grids.atom_grid = grid
-            ref.conv_tol = conv_tol
+            ref.conv_tol = 1e-12
+            ref.conv_tol_grad = 1e-8
             if mol is merged:
                 # The tight STO-3G charged complex has a small HOMO-LUMO gap. A
                 # small level shift preserves the converged state while making the

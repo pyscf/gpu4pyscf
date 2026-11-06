@@ -157,7 +157,8 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
                     ctypes.c_uint32(len(task.shl_pair_idx)),
                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(workers))
+                    ctypes.c_int(workers),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_rho_orth kernel for l={task.l} failed')
 
@@ -231,7 +232,8 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
                     ctypes.c_uint32(len(task.shl_pair_idx)),
                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(workers))
+                    ctypes.c_int(workers),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_tau_orth kernel for l={task.l} failed')
 
@@ -305,7 +307,8 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
                     ctypes.c_uint32(len(task.shl_pair_idx)),
                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(workers))
+                    ctypes.c_int(workers),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_mat_lda_orth kernel for l={task.l} failed')
 
@@ -382,7 +385,8 @@ def _get_gga_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
                     ctypes.c_uint32(len(task.shl_pair_idx)),
                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(workers))
+                    ctypes.c_int(workers),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_mat_gga_orth kernel for l={task.l} failed')
 
@@ -457,7 +461,8 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
                     ctypes.c_uint32(len(task.shl_pair_idx)),
                     ctypes.cast(task.shl_pair_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(workers))
+                    ctypes.c_int(workers),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 if err != 0:
                     raise RuntimeError(f'MG_eval_mat_tau_orth kernel for l={task.l} failed')
 
@@ -841,7 +846,7 @@ void ''' + fn_name + '''(
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     '''
-    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
     assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
@@ -857,7 +862,7 @@ def get_pp(ni, kpts=None):
     vpp = _get_j_pass2(ni, vpplocG[None,:], kpts=kpts)[0]
     t1 = log.timer_debug1('vpploc', *t0)
 
-    vppnl = get_pp_nl_gpu(cell, kpts)
+    vppnl = get_pp_nl(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl[k].real)
@@ -1003,7 +1008,8 @@ def to_primitive_bas(cell):
             ctypes.cast(prim_bas_gpu.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nbas_p),
             ctypes.cast(prim_env_gpu.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('filter_supmol_bas kernel failed')
 
@@ -1143,7 +1149,8 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
             ctypes.c_int(cell0_nprims),
             ctypes.c_int(supmol_nbas),
             ctypes.c_int(hermi), ctypes.c_int(l_inc),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('ovlp_mask_estimation kernel failed')
         ovlp_mask = ovlp_mask.astype(dtype=bool, copy=False)
@@ -1289,7 +1296,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
     return tasks
 
 def init_constant(cell):
-    err = libmgrid.MG_init_constant(ctypes.c_int(SHM_SIZE))
+    err = libmgrid.MG_init_constant(ctypes.c_int(SHM_SIZE), ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('CUDA kernel initialization')
 

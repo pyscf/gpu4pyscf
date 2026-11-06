@@ -486,7 +486,7 @@ def test_ejk_sr_derivatives_gamma_point():
         return cp.einsum('ij,ji->', vk, dm).real * -.5 * .5
     _check_strain(ek[-3:], cell, eval_ejk, tol=2e-6)
 
-def test_ejk_sr_derivatives_kpts():
+def test_ejk_sr_derivatives_kpts_high_cost():
     cell = pyscf.M(
         atom = '''
         H   1.757    0.    0.4696
@@ -587,7 +587,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     ref *= 2
     assert abs(ejk - ref).max() < 1e-6
 
-def test_ejk_ip1_per_atom_kpts():
+def test_ejk_ip1_per_atom_kpts_high_cost():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -858,6 +858,31 @@ def test_ejk_strain_deriv_gamma_point():
     assert abs(ref - sigma).max() < 2e-5
 
 def test_ejk_strain_deriv_kpts():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.2 1.5 1.8', a=np.eye(3)*4.,
+                   basis=[[0, [.25, 1]], [1, [.3, 1]]], precision=1e-10,
+                   verbose=0)
+    kmesh = [2,1,1]
+    kpts = cell.make_kpts(kmesh)
+    dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    opt = rsjk.PBCJKMatrixOpt(cell).build()
+    deriv = opt._get_ejk_derivatives(dm, kpts=kpts)
+    assert deriv.shape == (cell.natm+3, 3)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_strain_deriv(mydf, dm, kpts=kpts)
+    ref -= .5 * aft_jk.get_ek_strain_deriv(mydf, dm, kpts=kpts)
+    assert abs(ref - deriv[-3:]).max() < 1e-6
+
+    def eval_ejk(displaced):
+        displaced_kpts = displaced.make_kpts(kmesh)
+        vj, vk = fft.FFTDF(displaced, kpts=displaced_kpts).get_jk(
+            dm, hermi=1, kpts=displaced_kpts)
+        return cp.einsum('kij,kji->', vj-.5*vk, dm).real * .5 / len(kpts)
+
+    _check_gradient(deriv[:-3], cell, eval_ejk)
+    _check_strain(deriv[-3:], cell, eval_ejk, tol=1e-6)
+
+
+def test_ejk_strain_deriv_kpts_high_cost():
     from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     cell = pyscf.M(
         atom = '''
@@ -1087,7 +1112,8 @@ def test_sort_pair_ij():
         ctypes.cast(ish.data.ptr, ctypes.c_void_p),
         ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nish), ctypes.c_int(njsh),
-        ctypes.c_int(rsjk.NBAS_MAX), ctypes.c_int(tile))
+        ctypes.c_int(rsjk.NBAS_MAX), ctypes.c_int(tile),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     i, j = divmod(pair_ij, rsjk.NBAS_MAX)
     assert np.array_equal(i.get(), [0,0,0,1,1,1,2,2,2,0,0,1,1,2,2,3,3,3,3,3])
     assert np.array_equal(j.get(), [0,1,2,0,1,2,0,1,2,3,4,3,4,3,4,0,1,2,3,4])

@@ -14,7 +14,7 @@
 
 import unittest
 import numpy as np
-from pyscf import lib, gto, scf
+from pyscf import gto, scf
 from gpu4pyscf.scf import dispersion
 
 class KnownKS(scf.hf.KohnShamDFT):
@@ -38,6 +38,27 @@ class TestDispersionLogic(unittest.TestCase):
             dispersion.parse_dft('wb97x-d4:wb97x-2008'),
             ('wb97x', '', 'd4:wb97x-2008')
         )
+
+    def test_dispersion_mol(self):
+        from pyscf.pbc import gto as pbcgto
+        mol = gto.M(atom='Na 0 0 0; H 0 0 1.9; ghost-H 0 1 0',
+                    basis='lanl2dz', ecp={'Na': 'lanl2dz'}, verbose=0)
+        real_mol, atom_idx = dispersion._get_dispersion_mol(mol)
+        np.testing.assert_array_equal(atom_idx, [0,1])
+        np.testing.assert_array_equal(real_mol.atom_charges(), mol.atom_charges()[:2])
+        self.assertTrue(real_mol.has_ecp())
+        self.assertEqual(mol.natm, 3)
+        self.assertIs(dispersion._get_dispersion_mol(real_mol)[0], real_mol)
+
+        for fractional in [False, True]:
+            cell = pbcgto.M(atom='H 0 0 0; ghost-H 0 2 0; H 0 0 1',
+                           a=np.eye(3)*8, dimension=1, low_dim_ft_type='inf_vacuum', fractional=fractional, verbose=0)
+            real_cell, atom_idx = dispersion._get_dispersion_mol(cell)
+            np.testing.assert_array_equal(atom_idx, [0,2])
+            np.testing.assert_allclose(real_cell.lattice_vectors(), cell.lattice_vectors())
+            np.testing.assert_allclose(real_cell.atom_coords(), cell.atom_coords()[atom_idx])
+            self.assertEqual(real_cell.dimension, cell.dimension)
+            self.assertEqual(cell.natm, 3)
 
     def test_parse_disp_none(self):
         # Case 1: All None
@@ -66,6 +87,7 @@ class TestDispersionLogic(unittest.TestCase):
 
         # wb97x-d3bj -> d3bj
         self.assertEqual(dispersion.parse_disp('wb97x-d3bj'), ('wb97x', 'd3bj', False))
+        self.assertEqual(dispersion.parse_disp('pbe-d3cso'), ('pbe', 'd3cso', False))
 
         # wb97x-d4s -> d4s
         self.assertEqual(dispersion.parse_disp('wb97x-d4s'), ('wb97x', 'd4s', True))

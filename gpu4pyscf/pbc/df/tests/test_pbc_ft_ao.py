@@ -268,7 +268,8 @@ class KnownValues(unittest.TestCase):
             ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.byref(aux_ft_envs),
-            ctypes.c_int(len(Gv)))
+            ctypes.c_int(len(Gv)),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         assert err == 0
 
         grad = grad.get()
