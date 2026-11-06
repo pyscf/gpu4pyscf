@@ -24,6 +24,7 @@ import numpy as np
 import cupy as cp
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import eigh
+from gpu4pyscf.pbc.scf.khf import kpt_pair_reverse_map
 
 GDM_LBFGS_Y_DOT_S_ZERO_THRESHOLD = 1e-12
 
@@ -177,8 +178,7 @@ def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
                 assert isinstance(nocc[k], int) and nocc[k] < nmo
                 assert kappa[k].shape == (nocc[k], nmo - nocc[k])
                 assert mo_coeff.dtype == kappa[k].dtype
-                if conj_k_idx is not None and conj_k_idx[k] >= 0:
-                    assert nocc[k] == nocc[conj_k_idx[k]]
+                if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                     new_mo_coeff[k] = new_mo_coeff[conj_k_idx[k]].conj()
                     continue
                 mocc = mo_coeff[k, :, :nocc[k]]
@@ -206,8 +206,7 @@ def apply_exp_U(mo_coeff, nocc, kappa, nkpts = None, conj_k_idx = None):
                     assert isinstance(nocc_sk, int) and nocc_sk < nmo
                     assert kappa_sk.shape == (nocc_sk, nmo - nocc_sk)
                     assert mo_coeff.dtype == kappa_sk.dtype
-                    if conj_k_idx is not None and conj_k_idx[k] >= 0:
-                        assert nocc_sk == nocc[s][conj_k_idx[k]]
+                    if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                         new_mo_coeff[s, k] = new_mo_coeff[s, conj_k_idx[k]].conj()
                         continue
                     mocc = mo_coeff[s, k, :, :nocc_sk]
@@ -323,8 +322,7 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
             for k in range(nkpts):
                 assert isinstance(nocc[k], int) and nocc[k] < nmo
 
-                if conj_k_idx is not None and conj_k_idx[k] >= 0:
-                    assert nocc[k] == nocc[conj_k_idx[k]]
+                if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                     new_mo_energy[k] = new_mo_energy[conj_k_idx[k]]
                     new_mo_coeff[k] = new_mo_coeff[conj_k_idx[k]].conj()
                     Coo = Cvv = None
@@ -351,7 +349,7 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
                     kappa_k = kappa[k]
                     assert kappa_k.shape == (nocc[k], nmo - nocc[k])
                     assert mo_coeff.dtype == kappa_k.dtype
-                    if conj_k_idx is not None and conj_k_idx[k] >= 0:
+                    if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
                         kappa_k = transformed_kappas[i_kappa][conj_k_idx[k]].conj()
                         assert kappa_k is not None
                     else:
@@ -374,8 +372,7 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
                     nocc_sk = nocc[s][k]
                     assert isinstance(nocc_sk, int) and nocc_sk < nmo
 
-                    if conj_k_idx is not None and conj_k_idx[k] >= 0:
-                        assert nocc_sk == nocc[s][conj_k_idx[k]]
+                    if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                         new_mo_energy[s, k] = new_mo_energy[s, conj_k_idx[k]]
                         new_mo_coeff[s, k] = new_mo_coeff[s, conj_k_idx[k]].conj()
                         Coo = Cvv = None
@@ -404,7 +401,7 @@ def pseudo_canonicalize(fock, mo_coeff, nocc, kappas, nkpts = None, conj_k_idx =
                         kappa_sk = kappa_s[k]
                         assert kappa_sk.shape == (nocc_sk, nmo - nocc_sk)
                         assert mo_coeff.dtype == kappa_sk.dtype
-                        if conj_k_idx is not None and conj_k_idx[k] >= 0:
+                        if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
                             kappa_sk = transformed_kappas[i_kappa][s][conj_k_idx[k]].conj()
                             assert kappa_sk is not None
                         else:
@@ -423,68 +420,136 @@ def packed_pseudo_canonicalize(fock, mo_coeff, nocc, packed_kappas, nkpts = None
     packed_new_kappas = [pack_nocc_nvir_shape_vector(kappa, nocc, nmo, nkpts) for kappa in new_kappas]
     return new_mo_energy, new_mo_coeff, packed_new_kappas
 
-def approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian):
+def approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts = None):
     nmo = mo_energy.shape[-1]
-    if isinstance(nocc, int):
-        assert nocc < nmo
-        assert mo_energy.shape == (nmo,)
+    if nkpts is None:
+        if isinstance(nocc, int):
+            assert nocc < nmo
+            assert mo_energy.shape == (nmo,)
 
-        mo_energy_gap = mo_energy[None, nocc:] - mo_energy[:nocc, None] # (nocc, nvir)
-        # Factor of two explained in kappa_gradient() function
-        mo_energy_gap = cp.maximum(2.0 * (mo_energy_gap + delta_E), minimal_diagonal_hessian)
-        return mo_energy_gap
+            mo_energy_gap = mo_energy[None, nocc:] - mo_energy[:nocc, None] # (nocc, nvir)
+            # Factor of two explained in kappa_gradient() function
+            mo_energy_gap = 2.0 * cp.maximum((mo_energy_gap + delta_E), minimal_diagonal_hessian)
+            return mo_energy_gap
+        else:
+            nocca, noccb = nocc
+            assert isinstance(nocca, int) and isinstance(noccb, int)
+            assert nocca < nmo and noccb < nmo
+            assert mo_energy.shape == (2, nmo)
+
+            mo_energy_gapa = mo_energy[0, nocca:][None, :] - mo_energy[0, :nocca][:, None]
+            mo_energy_gapa = 2.0 * cp.maximum((mo_energy_gapa + delta_E), minimal_diagonal_hessian)
+            mo_energy_gapb = mo_energy[1, noccb:][None, :] - mo_energy[1, :noccb][:, None]
+            mo_energy_gapb = 2.0 * cp.maximum((mo_energy_gapb + delta_E), minimal_diagonal_hessian)
+            return mo_energy_gapa, mo_energy_gapb
     else:
-        nocca, noccb = nocc
-        assert isinstance(nocca, int) and isinstance(noccb, int)
-        assert nocca < nmo and noccb < nmo
-        assert mo_energy.shape == (2, nmo)
+        assert len(nocc) > 0
+        if isinstance(nocc[0], int):
+            assert len(nocc) == nkpts
+            assert mo_energy.shape == (nkpts, nmo)
+            mo_energy_gap = []
+            for k in range(nkpts):
+                assert isinstance(nocc[k], int) and nocc[k] < nmo
+                mo_energy_gap_k = mo_energy[k, nocc[k]:][None, :] - mo_energy[k, :nocc[k]][:, None]
+                mo_energy_gap_k = 2.0 / nkpts * cp.maximum((mo_energy_gap_k + delta_E), minimal_diagonal_hessian)
+                mo_energy_gap.append(mo_energy_gap_k)
+            return mo_energy_gap
+        else:
+            nocca, noccb = nocc
+            assert len(nocca) == nkpts and len(noccb) == nkpts
+            assert mo_energy.shape == (2, nkpts, nmo)
+            mo_energy_gapa = []
+            mo_energy_gapb = []
+            for k in range(nkpts):
+                assert isinstance(nocca[k], int) and nocca[k] < nmo
+                mo_energy_gap_k = mo_energy[0, k, nocca[k]:][None, :] - mo_energy[0, k, :nocca[k]][:, None]
+                mo_energy_gap_k = 2.0 / nkpts * cp.maximum((mo_energy_gap_k + delta_E), minimal_diagonal_hessian)
+                mo_energy_gapa.append(mo_energy_gap_k)
+            for k in range(nkpts):
+                assert isinstance(noccb[k], int) and noccb[k] < nmo
+                mo_energy_gap_k = mo_energy[1, k, noccb[k]:][None, :] - mo_energy[1, k, :noccb[k]][:, None]
+                mo_energy_gap_k = 2.0 / nkpts * cp.maximum((mo_energy_gap_k + delta_E), minimal_diagonal_hessian)
+                mo_energy_gapb.append(mo_energy_gap_k)
+            return mo_energy_gapa, mo_energy_gapb
 
-        mo_energy_gapa = mo_energy[0, nocca:][None, :] - mo_energy[0, :nocca][:, None]
-        mo_energy_gapa = cp.maximum(2.0 * (mo_energy_gapa + delta_E), minimal_diagonal_hessian)
-        mo_energy_gapb = mo_energy[1, noccb:][None, :] - mo_energy[1, :noccb][:, None]
-        mo_energy_gapb = cp.maximum(2.0 * (mo_energy_gapb + delta_E), minimal_diagonal_hessian)
-        return mo_energy_gapa, mo_energy_gapb
-
-def packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian):
+def packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts = None):
     nmo = mo_energy.shape[-1]
-    h = approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian)
-    return pack_nocc_nvir_shape_vector(h, nocc, nmo)
+    h = approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts)
+    return pack_nocc_nvir_shape_vector(h, nocc, nmo, nkpts)
 
-def kappa_gradient(mo_coeff, nocc, fock):
+def kappa_gradient(mo_coeff, nocc, fock, nkpts = None, conj_k_idx = None):
     nmo = mo_coeff.shape[-1]
-    if isinstance(nocc, int):
-        assert nocc < nmo
-        assert mo_coeff.ndim == 2
-        assert fock.ndim == 2
+    if nkpts is None:
+        if isinstance(nocc, int):
+            assert nocc < nmo
+            assert mo_coeff.ndim == 2
+            assert fock.ndim == 2
 
-        mocc = mo_coeff[:, :nocc]
-        mvir = mo_coeff[:, nocc:]
-        Fov = mocc.T @ fock @ mvir
-        # The following factor of -2.0 comes from:
-        # dE(alpha * kappa)/dalpha = - Tr(F_{ov} kappa^T) - Tr(F_{vo} kappa) = -2 Re( Tr(F_{vo} kappa) )
-        g = -2.0 * Fov
-        return g
+            mocc = mo_coeff[:, :nocc]
+            mvir = mo_coeff[:, nocc:]
+            Fov = mocc.conj().T @ fock @ mvir
+            # The following factor of -2.0 comes from:
+            # dE(alpha * kappa)/dalpha = - Tr(F_{ov} kappa^dagger) - Tr(F_{vo} kappa) = -2 Re( Tr(F_{vo} kappa) )
+            g = -2.0 * Fov
+            return g
+        else:
+            nocca, noccb = nocc
+            assert isinstance(nocca, int) and isinstance(noccb, int)
+            assert nocca < nmo and noccb < nmo
+            assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == 2
+            assert fock.ndim == 3 and fock.shape[0] == 2
+
+            mocc = mo_coeff[0, :, :nocca]
+            mvir = mo_coeff[0, :, nocca:]
+            Fov = mocc.conj().T @ fock[0] @ mvir
+            ga = -2.0 * Fov
+            mocc = mo_coeff[1, :, :noccb]
+            mvir = mo_coeff[1, :, noccb:]
+            Fov = mocc.conj().T @ fock[1] @ mvir
+            gb = -2.0 * Fov
+            return ga, gb
     else:
-        nocca, noccb = nocc
-        assert isinstance(nocca, int) and isinstance(noccb, int)
-        assert nocca < nmo and noccb < nmo
-        assert mo_coeff.ndim == 3
-        assert fock.ndim == 3
+        assert len(nocc) > 0
+        if isinstance(nocc[0], int):
+            assert len(nocc) == nkpts
+            assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == nkpts
+            assert fock.ndim == 3 and fock.shape[0] == nkpts
+            g = [ None ] * nkpts
+            for k in range(nkpts):
+                assert isinstance(nocc[k], int) and nocc[k] < nmo
+                if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc[k] == nocc[conj_k_idx[k]]):
+                    g[k] = g[conj_k_idx[k]].conj()
+                    continue
+                mocc = mo_coeff[k, :, :nocc[k]]
+                mvir = mo_coeff[k, :, nocc[k]:]
+                Fov = mocc.conj().T @ fock[k] @ mvir
+                gk = -2.0 / nkpts * Fov
+                g[k] = gk
+            return g
+        else:
+            assert len(nocc) == 2
+            assert mo_coeff.ndim == 4 and mo_coeff.shape[0:2] == (2, nkpts)
+            assert fock.ndim == 4 and fock.shape[0:2] == (2, nkpts)
+            g = ([ None ] * nkpts, [ None ] * nkpts)
+            for s in range(2):
+                assert len(nocc[s]) == nkpts
+                for k in range(nkpts):
+                    nocc_sk = nocc[s][k]
+                    assert isinstance(nocc_sk, int) and nocc_sk < nmo
+                    if (conj_k_idx is not None) and (conj_k_idx[k] >= 0) and (nocc_sk == nocc[s][conj_k_idx[k]]):
+                        g[s][k] = g[s][conj_k_idx[k]].conj()
+                        continue
+                    mocc = mo_coeff[s, k, :, :nocc_sk]
+                    mvir = mo_coeff[s, k, :, nocc_sk:]
+                    Fov = mocc.conj().T @ fock[s, k] @ mvir
+                    gk = -2.0 / nkpts * Fov
+                    g[s][k] = gk
+            return g
 
-        mocc = mo_coeff[0, :, :nocca]
-        mvir = mo_coeff[0, :, nocca:]
-        Fov = mocc.T @ fock[0] @ mvir
-        ga = -2.0 * Fov
-        mocc = mo_coeff[1, :, :noccb]
-        mvir = mo_coeff[1, :, noccb:]
-        Fov = mocc.T @ fock[1] @ mvir
-        gb = -2.0 * Fov
-        return ga, gb
-
-def packed_kappa_gradient(mo_coeff, nocc, fock):
+def packed_kappa_gradient(mo_coeff, nocc, fock, nkpts = None, conj_k_idx = None):
     nmo = mo_coeff.shape[-1]
-    g = kappa_gradient(mo_coeff, nocc, fock)
-    return pack_nocc_nvir_shape_vector(g, nocc, nmo)
+    g = kappa_gradient(mo_coeff, nocc, fock, nkpts, conj_k_idx)
+    return pack_nocc_nvir_shape_vector(g, nocc, nmo, nkpts)
 
 def get_nocc(mo_occ, nkpts = None):
     nmo = mo_occ.shape[-1]
@@ -613,8 +678,22 @@ def _kernel(mf, dm0,
     mo_energy, mo_coeff = mf.eig(fock0, s1e) # The initial density is converted to orbitals by one Roothaan diagonalization.
     del vhf0, fock0
     mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
-    nocc = get_nocc(mo_occ)
     e_tot, fock = get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e)
+
+    from gpu4pyscf.pbc.scf.hf  import RHF as PBC_RHF_NOK
+    from gpu4pyscf.pbc.scf.uhf import UHF as PBC_UHF_NOK
+    if isinstance(mf, PBC_RHF_NOK) or isinstance(mf, PBC_UHF_NOK):
+        raise NotImplementedError("pbc.scf.RHF or pbc.scf.UHF are not supported for GDM. Please use pbc.scf.KRHF or pbc.scf.KUHF with kpts=[[0, 0, 0]] instead.")
+
+    kpts = getattr(mf, 'kpts', None)
+    if kpts is not None:
+        nkpts = len(kpts)
+        kpairs = mf.iter_kpt_pairs()
+        conj_k_idx = kpt_pair_reverse_map(nkpts, kpairs)
+    else:
+        nkpts = None
+        conj_k_idx = None
+    nocc = get_nocc(mo_occ, nkpts)
 
     verbose = mf.verbose
     log = logger.new_logger(mf, verbose)
@@ -622,7 +701,8 @@ def _kernel(mf, dm0,
         mf.conv_tol_grad = mf.conv_tol**0.5
         log.info('Set gradient conv threshold to %g', mf.conv_tol_grad)
 
-    if mo_coeff.ndim == 2:
+    print_spin = hasattr(mf, 'spin_square') and callable(mf.spin_square) and mf.istype('UHF') # Note: for KUHF, mf.istype('UHF') is False
+    if not print_spin:
         log.info(" Cycle               Energy   Gradient Norm    Step")
     else:
         log.info(" Cycle               Energy   Gradient Norm      <S^2>    Step")
@@ -639,7 +719,7 @@ def _kernel(mf, dm0,
         flatten_to_transform = [s_or_y for sy in lbfgs_s_y for s_or_y in sy]
         if previous_gradient is not None and previous_step is not None:
             flatten_to_transform.extend([previous_gradient, previous_step])
-        mo_energy, mo_coeff, flatten_transformed = packed_pseudo_canonicalize(fock, mo_coeff, nocc, flatten_to_transform)
+        mo_energy, mo_coeff, flatten_transformed = packed_pseudo_canonicalize(fock, mo_coeff, nocc, flatten_to_transform, nkpts, conj_k_idx)
         del flatten_to_transform
 
         if previous_gradient is not None and previous_step is not None:
@@ -657,13 +737,14 @@ def _kernel(mf, dm0,
         lbfgs_s_y = transformed_s_y
         del transformed_s_y
 
-        gradient = packed_kappa_gradient(mo_coeff, nocc, fock)
+        gradient = packed_kappa_gradient(mo_coeff, nocc, fock, nkpts, conj_k_idx)
         gradient_norm = float(cp.linalg.norm(gradient))
 
-        if mo_coeff.ndim == 2:
+        if not print_spin:
             spin_text = ""
         else:
             assert len(nocc) == 2
+            assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == 2 # KUHF not supported yet
             ss, _ = mf.spin_square((mo_coeff[0, :, :nocc[0]], mo_coeff[1, :, :nocc[1]]))
             spin_text = f" {ss:10.4f}"
 
@@ -688,7 +769,7 @@ def _kernel(mf, dm0,
                 lbfgs_s_y = lbfgs_s_y[-max_n_lbfgs_record:]
 
         delta_E = 0.0 if previous_e_tot is None else e_tot - previous_e_tot
-        approx_hess_diag = packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian)
+        approx_hess_diag = packed_approximate_optimal_diagonal_hessian(mo_energy, nocc, delta_E, minimal_diagonal_hessian, nkpts)
 
         if len(lbfgs_s_y) < min_n_lbfgs_record:
             step = -gradient / approx_hess_diag
@@ -720,7 +801,7 @@ def _kernel(mf, dm0,
         line_search_scale = line_search_initial_scale
         for i_line_search_attempt in range(max_n_line_search_attempt + 1):
             line_search_step = line_search_scale * step
-            line_search_mo_coeff = packed_apply_exp_U(mo_coeff, nocc, line_search_step)
+            line_search_mo_coeff = packed_apply_exp_U(mo_coeff, nocc, line_search_step, nkpts, conj_k_idx)
             line_search_energy, line_search_fock = get_energy_and_fock(mf, line_search_mo_coeff, mo_occ, h1e, s1e)
             if e_tot - line_search_energy >= -line_search_c * line_search_scale * line_search_slope:
                 line_search_succeed = True
