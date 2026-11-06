@@ -11,7 +11,7 @@ __global__ static
 void rys_ejk_ip2_type12_0000(JKENERGY_KERNEL_ARGS)
 {
     JKENERGY_KERNEL_SETUP();
-    constexpr int nsq_per_block = 256;
+    int nsq_per_block = _nsq_per_block;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -426,7 +426,7 @@ __global__ static
 void rys_ejk_ip2_type12_1000(JKENERGY_KERNEL_ARGS)
 {
     JKENERGY_KERNEL_SETUP();
-    constexpr int nsq_per_block = 256;
+    int nsq_per_block = _nsq_per_block;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -1058,7 +1058,7 @@ __global__ static
 void rys_ejk_ip2_type12_1010(JKENERGY_KERNEL_ARGS)
 {
     JKENERGY_KERNEL_SETUP();
-    constexpr int nsq_per_block = 256;
+    int nsq_per_block = _nsq_per_block;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -4774,7 +4774,7 @@ __global__ static
 void rys_ejk_ip2_type12_1100(JKENERGY_KERNEL_ARGS)
 {
     JKENERGY_KERNEL_SETUP();
-    constexpr int nsq_per_block = 256;
+    int nsq_per_block = _nsq_per_block;
     constexpr int gout_stride = 1;
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
