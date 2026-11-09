@@ -34,13 +34,24 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     '''
     Apply a compensating planar gate and its dipole correction in place.
 
-    The sheet carries qc = -q, where q = cell.charge/nkpts is the charge
-    PER PRIMITIVE CELL. At a single k-point, q = cell.charge. Negative q
-    adds electrons. The gate charge is determined solely by cell.charge
-    and the number of sampled k-points. To fix a target q per primitive
-    cell when changing the k mesh, reset cell.charge = nkpts*q.
-    Build the cell with a consistent charge/spin; KUKS spin counts are totals
-    over the k-points. No electron-count setting is changed by this addon.
+    The sheet carries qc = -q, where q is the slab charge per primitive cell.
+    Negative q adds electrons. Without an explicit cell.nelectron, the legacy
+    convention q = cell.charge/nkpts is retained. To keep q fixed in this mode,
+    set cell.charge = nkpts*q when changing the k mesh.
+
+    For RKS/KRKS with spin=0, explicitly setting cell.nelectron enables real
+    electron counts per primitive cell. In this mode cell.charge is also PER
+    PRIMITIVE CELL, and cell.nelectron + cell.charge must equal the sum of
+    effective ionic charges. For example, after building an 8-valence-electron
+    cell, set cell.charge = .3 and cell.nelectron = 7.7. No input is changed
+    automatically. Fractional charge requires an explicit electron count.
+    Occupations are filled globally at zero temperature, sharing any frontier
+    degeneracy, or obtained with Fermi/Gaussian smearing at fixed electron
+    number. Both orders of applying gate_charge and smearing are supported.
+    Explicit electron counts currently exclude UKS/KUKS, level shifting,
+    fixed chemical potentials, second-order SCF and nuclear gradients.
+    In the legacy mode, build the cell with consistent charge/spin; KUKS spin
+    counts are totals over the k-points.
     The standard 3D Coulomb calculation retains its G=0 convention.
     With A = Omega/L and s = (z-zgate+L/2) % L - L/2, the sheet potential is
 
@@ -118,8 +129,19 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     '''
     from gpu4pyscf.pbc.dft import rks, uks, krks, kuks
     from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
+    from gpu4pyscf.pbc.scf.gateocc import GateFractionalOccupations
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Gate charge requires RKS/UKS/KRKS/KUKS')
+    explicit_nelectron = mf.cell._nelectron is not None
+    if explicit_nelectron:
+        from gpu4pyscf.scf.soscf import _CIAH_SOSCF
+        if not isinstance(mf, (rks.RKS, krks.KRKS)):
+            raise NotImplementedError('Explicit gate electron counts require RKS/KRKS')
+        if isinstance(mf, _CIAH_SOSCF):
+            raise NotImplementedError('Second-order SCF with fractional gate occupations')
+        GateFractionalOccupations._gate_nelectron(mf)
+    elif not np.isfinite(mf.cell.charge) or mf.cell.charge != round(mf.cell.charge):
+        raise ValueError('Set cell.nelectron explicitly for a fractional gate charge')
     length = _slab_length(mf.cell)
     if gate_side not in (-1, 1):
         raise ValueError('gate_side must be -1 or +1')
@@ -155,6 +177,8 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             raise ValueError('Barrier interval must cover the entire dipole return region')
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
+    if explicit_nelectron and not isinstance(mf, GateFractionalOccupations):
+        lib.set_class(mf, (GateFractionalOccupations, mf.__class__))
     mf.gate_side = gate_side
     mf.zgate = zgate
     mf.barrier = barrier

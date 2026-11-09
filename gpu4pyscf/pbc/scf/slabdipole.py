@@ -136,6 +136,9 @@ def _slab_length(cell):
 
 
 def _slab_charge(mf, cell):
+    if hasattr(mf, '_gate_nelectron'):
+        mf._gate_nelectron(cell)
+        return cell.charge
     nkpts = len(mf.kpts) if mf.istype('KSCF') else 1
     return cell.charge / nkpts
 
