@@ -516,6 +516,12 @@ class GradientsBase(lib.StreamObject):
     get_dispersion = get_dispersion
     _hcore_energy = _hcore_energy
 
+    def get_gcp(self, gcp=None, verbose=None):
+        '''Gradient of the gCP/SRB correction. Called only when
+        base.do_gcp() is True, which requires PySCF >= 2.15.'''
+        from pyscf.grad.gcp import get_gcp
+        return get_gcp(self, gcp, verbose)
+
     def get_ovlp(self, mol):
         from gpu4pyscf.pbc.gto.int1e import int1e_ipovlp
         return -int1e_ipovlp(mol)
@@ -545,6 +551,8 @@ class GradientsBase(lib.StreamObject):
             self.de = self.symmetrize(self.de)
         if self.base.do_disp():
             self.de += self.get_dispersion()
+        if self.base.do_gcp():
+            self.de += self.get_gcp()
         # Keep all contributions on the full molecule, then select rows once.
         if atmlst is not None:
             self.de = self.de[list(atmlst)]

@@ -269,6 +269,24 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     return de
 
 
+def scf_geometry_corrections(td_grad, atmlst=None):
+    '''Gradient of the SCF's dispersion and gCP/SRB corrections. They enter
+    the excited-state energy through the SCF energy but are absent from
+    grad_elec and grad_nuc. A function rather than a method because the
+    unrestricted TD gradients borrow Gradients.kernel without inheriting it.'''
+    mf = td_grad.base._scf
+    correction = np.zeros((td_grad.mol.natm, 3))
+    if mf.do_disp() or mf.do_gcp():
+        mf_grad = mf.Gradients()
+        if mf.do_disp():
+            correction += mf_grad.get_dispersion()
+        if mf.do_gcp():
+            correction += mf_grad.get_gcp()
+    if atmlst is not None:
+        correction = correction[atmlst]
+    return correction
+
+
 def as_scanner(td_grad, state=1):
     '''Generating a nuclear gradients scanner/solver (for geometry optimizer).
 
@@ -593,6 +611,7 @@ class Gradients(rhf_grad.GradientsBase):
         self.de = de = de + self.grad_nuc(atmlst=atmlst)
         if self.mol.symmetry:
             self.de = self.symmetrize(self.de, atmlst)
+        self.de += scf_geometry_corrections(self, atmlst)
         self._finalize()
         return self.de
 
