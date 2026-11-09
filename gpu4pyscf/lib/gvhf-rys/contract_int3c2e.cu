@@ -115,7 +115,7 @@ void _store_vj(double *out, double *vj_cache, int li, int lj, size_t nao,
 __global__ static
 void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
                                 RysIntEnvVars envs, int *shl_pair_offsets,
-                                uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                        uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     setup_context();
     SHARED_ARRAY(int, shl_pair0);
@@ -579,13 +579,13 @@ extern "C" {
 int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
                         RysIntEnvVars *envs, int shm_size,
                         int nbas_aux, int nbatches_shl_pair, int *shl_pair_offsets,
-                        uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                        uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     auto blocks = make_grid(nbas_aux, nbatches_shl_pair);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
-        out, dm, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+        out, dm, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
@@ -599,14 +599,14 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             RysIntEnvVars *envs, int shm_size,
                             int nbatches_shl_pair, int nbatches_ksh,
                             int *shl_pair_offsets, int *ksh_offsets,
-                            uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                        uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
         vj, auxvec, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
-        gout_stride_lookup);
+        gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));

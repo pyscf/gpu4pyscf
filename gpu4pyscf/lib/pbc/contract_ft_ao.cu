@@ -60,6 +60,7 @@ void ft_aopair_kernel(double *out, double *vG,
     constexpr int nGv_per_block = 16;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
     constexpr int sp_threads = THREADS / nGv_per_block;
+    constexpr unsigned sp_mask = (1u << sp_threads) - 1;
     KERNEL_SETUP();
 while (1) {
     if (thread_id == 0) {
@@ -127,6 +128,7 @@ while (1) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
         // Serial scan (not a sub-group shuffle): only thread_id < sp_threads
         // lanes hold valid counts, so a shuffle would have partial sub-group
         // participation, which is UB in SYCL. Integer max is bit-identical
@@ -138,6 +140,17 @@ while (1) {
             }
             img_max = count;
         }
+#else
+        if (thread_id < sp_threads) {
+            int count = img_counts[thread_id];
+            for (int offset = sp_threads/2; offset > 0; offset /= 2) {
+                count = max(count, __shfl_down_sync(sp_mask, count, offset));
+            }
+            if (thread_id == 0) {
+                img_max = count;
+            }
+        }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -338,6 +351,7 @@ void ft_pdotp_kernel(double *out, double *vG,
     constexpr int nGv_per_block = 16;
     constexpr unsigned mask = (1u << nGv_per_block) - 1;
     constexpr int sp_threads = THREADS / nGv_per_block;
+    constexpr unsigned sp_mask = (1u << sp_threads) - 1;
     KERNEL_SETUP();
 while (1) {
     if (thread_id == 0) {
@@ -405,6 +419,7 @@ while (1) {
             img_counts[t_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
         // Serial scan (not a sub-group shuffle): only thread_id < sp_threads
         // lanes hold valid counts, so a shuffle would have partial sub-group
         // participation, which is UB in SYCL. Integer max is bit-identical
@@ -416,6 +431,17 @@ while (1) {
             }
             img_max = count;
         }
+#else
+        if (thread_id < sp_threads) {
+            int count = img_counts[thread_id];
+            for (int offset = sp_threads/2; offset > 0; offset /= 2) {
+                count = max(count, __shfl_down_sync(sp_mask, count, offset));
+            }
+            if (thread_id == 0) {
+                img_max = count;
+            }
+        }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -673,18 +699,18 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                        int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                        uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                        int *gout_stride_lookup, double *grids, int ngrids,
-                       int compressing)
+                       int compressing, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
     LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
+        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));
@@ -697,18 +723,18 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
                       int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
                       uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                       int *gout_stride_lookup, double *grids, int ngrids,
-                      int compressing)
+                       int compressing, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ft_pdotp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
     LAUNCH_KERNEL( ft_pdotp_kernel, blocks, threads, shm_size,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
+        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_pdotp_kernel: %s\n", cudaGetErrorString(err));

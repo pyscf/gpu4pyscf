@@ -215,8 +215,8 @@ void grouped_gemm_kernel_launch(uint64_t *out, uint64_t *x, uint64_t *y, int64_t
 }
 
 extern "C" {
-// int dgemm(cudaStream_t stream, double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups)
-int grouped_gemm(cudaStream_t stream, uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num)
+// int dgemm(double **ptr_out, double **ptr_x, double **ptr_y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int64_t *MNKs, int groups, cudaStream_t stream)
+int grouped_gemm(uint64_t *out, uint64_t *x, uint64_t *y, int64_t *Ms, int64_t *Ns, int64_t *Ks, int num, cudaStream_t stream)
 {
     int compute_capability = get_device_compute_capability();
 

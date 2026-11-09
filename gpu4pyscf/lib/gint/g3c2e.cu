@@ -66,7 +66,6 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, const doub
             eri_data += g[ix + ir] * g[iy + ir] * g[iz + ir];
         }
         const int out_idx = (i+i0) + jstride*(j+j0) + kstride*(k+k0);
-        //atomicAdd(&eri.data[out_idx], eri_data);
         eri.data[out_idx] += eri_data;
     }
 }

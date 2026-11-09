@@ -1063,6 +1063,7 @@ __global__ void calc_local_rep_core_kernel(
 // Dense 1D index (0..44) to 2D orbital index (i)
 // `static constexpr` serves both backends: same device-side constant data
 // in CUDA and SYCL, with no cross-TU linkage issues.
+#ifdef USE_SYCL
 static constexpr int DENSE_TO_I[45] = {
     0,
     1, 1,
@@ -1074,8 +1075,22 @@ static constexpr int DENSE_TO_I[45] = {
     7, 7, 7, 7, 7, 7, 7, 7,
     8, 8, 8, 8, 8, 8, 8, 8, 8
 };
+#else
+__device__ const int DENSE_TO_I[45] = {
+    0,
+    1, 1,
+    2, 2, 2,
+    3, 3, 3, 3,
+    4, 4, 4, 4, 4,
+    5, 5, 5, 5, 5, 5,
+    6, 6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7, 7, 7,
+    8, 8, 8, 8, 8, 8, 8, 8, 8
+};
+#endif
 
 // Dense 1D index (0..44) to 2D orbital index (j)
+#ifdef USE_SYCL
 static constexpr int DENSE_TO_J[45] = {
     0,
     0, 1,
@@ -1087,8 +1102,22 @@ static constexpr int DENSE_TO_J[45] = {
     0, 1, 2, 3, 4, 5, 6, 7,
     0, 1, 2, 3, 4, 5, 6, 7, 8
 };
+#else
+__device__ const int DENSE_TO_J[45] = {
+    0,
+    0, 1,
+    0, 1, 2,
+    0, 1, 2, 3,
+    0, 1, 2, 3, 4,
+    0, 1, 2, 3, 4, 5,
+    0, 1, 2, 3, 4, 5, 6,
+    0, 1, 2, 3, 4, 5, 6, 7,
+    0, 1, 2, 3, 4, 5, 6, 7, 8
+};
+#endif
 
 // It is indexd in the mopac
+#ifdef USE_SYCL
 static constexpr int MOPAC_INDEXD[9][9] = {
     { 0,  1,  2,  3,  4,  5,  6,  7,  8},
     { 1,  9, 10, 11, 12, 13, 14, 15, 16},
@@ -1100,6 +1129,19 @@ static constexpr int MOPAC_INDEXD[9][9] = {
     { 7, 15, 22, 28, 33, 37, 40, 42, 43},
     { 8, 16, 23, 29, 34, 38, 41, 43, 44}
 };
+#else
+__device__ const int MOPAC_INDEXD[9][9] = {
+    { 0,  1,  2,  3,  4,  5,  6,  7,  8},
+    { 1,  9, 10, 11, 12, 13, 14, 15, 16},
+    { 2, 10, 17, 18, 19, 20, 21, 22, 23},
+    { 3, 11, 18, 24, 25, 26, 27, 28, 29},
+    { 4, 12, 19, 25, 30, 31, 32, 33, 34},
+    { 5, 13, 20, 26, 31, 35, 36, 37, 38},
+    { 6, 14, 21, 27, 32, 36, 39, 40, 41},
+    { 7, 15, 22, 28, 33, 37, 40, 42, 43},
+    { 8, 16, 23, 29, 34, 38, 41, 43, 44}
+};
+#endif
 
 
 __global__ void global_transform_kernel(
@@ -1265,14 +1307,14 @@ int launch_multipole_eval_kernel_c(
     const double* da_vec,
     const double* db_vec,
     const double* add_vec,
-    double* out_vec
+    double* out_vec, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
     LAUNCH_KERNEL( multipole_eval_kernel, grid, block, 0,
-        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec);
+        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1286,7 +1328,7 @@ int launch_solve_poij_kernel_c(
     const double* d_vec,
     const double* fg_vec,
     double* rho_vec,
-    const double hartree2ev
+    const double hartree2ev, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_atoms + threads_per_block - 1) / threads_per_block;
@@ -1294,7 +1336,7 @@ int launch_solve_poij_kernel_c(
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
     LAUNCH_KERNEL( solve_poij_kernel, grid, block, 0,
-        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev);
+        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1311,7 +1353,7 @@ int launch_test_rijkl_kernel_c(
     const int* ic_vec, const double* r_vec,
     const double* po_tensor, const double* ddp_tensor,
     const double* core_rho, const double* ch,
-    double* out_val
+    double* out_val, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
@@ -1324,7 +1366,7 @@ int launch_test_rijkl_kernel_c(
         li_vec, lj_vec, lk_vec, ll_vec,
         ic_vec, r_vec,
         po_tensor, ddp_tensor, core_rho, ch,
-        out_val);
+        out_val, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1345,7 +1387,7 @@ int launch_calc_local_rep_core_kernel_c(
     const int* task_li, const int* task_lj,
     const int* task_lk, const int* task_ll,
     const double HATREE2EV,
-    double* rep_out, double* core_out, double* gab_out
+    double* rep_out, double* core_out, double* gab_out, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = n_pairs; 
@@ -1360,7 +1402,7 @@ int launch_calc_local_rep_core_kernel_c(
         task_action, task_target, task_ij, task_kl,
         task_li, task_lj, task_lk, task_ll,
         HATREE2EV,
-        rep_out, core_out, gab_out);
+        rep_out, core_out, gab_out, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1376,7 +1418,7 @@ int launch_global_transform_kernel_c(
     const double* tore, const double* xfac, const double* alpb, 
     const double* guess1, const double* guess2, const double* guess3, 
     const double* v_par6, const double BOHR,
-    double* w_out, double* e1b_out, double* e2a_out, double* enuc_out
+    double* w_out, double* e1b_out, double* e2a_out, double* enuc_out, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = n_pairs; 
@@ -1387,7 +1429,7 @@ int launch_global_transform_kernel_c(
         n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
         rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
         tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,
-        w_out, e1b_out, e2a_out, enuc_out);
+        w_out, e1b_out, e2a_out, enuc_out, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

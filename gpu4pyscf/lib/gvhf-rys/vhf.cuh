@@ -203,7 +203,7 @@ static inline unsigned get_smid()
 //  * host pass: kernel bodies are parsed but never run, so the name is a
 //    typed placeholder.
 // Both passes parse the host uploads, so one overload per table turns the
-// upstream call cudaMemcpyToSymbol(c_xxx, ...) into a copy to the
+// upstream call cudaMemcpyToSymbolAsync(c_xxx, ..., stream) into a copy to the
 // device_global.
 extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
 extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
@@ -229,20 +229,20 @@ inline GXYZOffset (&rys_host_gxyz_offset())[256] {
 #define c_i_in_fold3idx (rys_host_fold3idx())
 #define c_gxyz_offset   (rys_host_gxyz_offset())
 #endif
-static inline cudaError_t cudaMemcpyToSymbol(
-        Fold2Index (&)[165], const void *src, size_t count, size_t offset = 0,
-        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
-    return cudaMemcpyToSymbol(s_rys_i_in_fold2idx, src, count, offset, kind);
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        Fold2Index (&)[165], const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_rys_i_in_fold2idx, src, count, offset, kind, stream);
 }
-static inline cudaError_t cudaMemcpyToSymbol(
-        Fold3Index (&)[495], const void *src, size_t count, size_t offset = 0,
-        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
-    return cudaMemcpyToSymbol(s_rys_i_in_fold3idx, src, count, offset, kind);
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        Fold3Index (&)[495], const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_rys_i_in_fold3idx, src, count, offset, kind, stream);
 }
-static inline cudaError_t cudaMemcpyToSymbol(
-        GXYZOffset (&)[256], const void *src, size_t count, size_t offset = 0,
-        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
-    return cudaMemcpyToSymbol(s_rys_gxyz_offset, src, count, offset, kind);
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        GXYZOffset (&)[256], const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_rys_gxyz_offset, src, count, offset, kind, stream);
 }
 
 // rys_constant.cu holds the constant tables (_c_cartesian_lexical_xyz, c_nf,

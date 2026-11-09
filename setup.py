@@ -198,7 +198,12 @@ setup(
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf
     # include *.so *.dat files. They are now placed in MANIFEST.in
     include_package_data=True,  # include everything in source control
-    packages=find_packages(exclude=['*test*', '*examples*', '*docker*']),
+    # The top-level cupy/ and cupyx/ forwarder packages exist only so that
+    # `import cupy` resolves to the SYCL shim when the repo root is on
+    # sys.path (PYTHONPATH). They must never be installed into site-packages,
+    # where they would shadow the real CuPy on CUDA builds.
+    packages=find_packages(exclude=['*test*', '*examples*', '*docker*',
+                                    'cupy', 'cupy.*', 'cupyx', 'cupyx.*']),
     tests_require=[
         "pytest==7.2.0",
         "pytest-cov==4.0.0",

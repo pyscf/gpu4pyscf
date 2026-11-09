@@ -276,7 +276,7 @@ int launch_ss_kernel_c(
     int* ia, int* ib, int* ic, int* id, int* m, int* iab,
     double* af, double* bf,
     double* binom,
-    double* out
+    double* out, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
@@ -284,7 +284,7 @@ int launch_ss_kernel_c(
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
     LAUNCH_KERNEL( ss_summation_kernel, grid, block, 0,
-        n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out);
+        n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -295,14 +295,14 @@ int launch_ss_kernel_c(
 int launch_afn_kernel_c(
     int n_pairs,
     const double* p_vec,
-    double* af_out
+    double* af_out, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
     LAUNCH_KERNEL( afn_kernel, grid, block, 0,
-        n_pairs, p_vec, af_out);
+        n_pairs, p_vec, af_out, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -314,14 +314,14 @@ int launch_bfn_kernel_c(
     int n_pairs,
     const double* x,
     const double* taylor_coeffs,
-    double* bf_out
+    double* bf_out, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
     LAUNCH_KERNEL( bfn_kernel, grid, block, 0,
-        n_pairs, x, taylor_coeffs, bf_out);
+        n_pairs, x, taylor_coeffs, bf_out, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -333,7 +333,7 @@ int launch_rotation_transform_kernel(
     int n_pairs,
     const double* S_local,
     const double* C_tensor,
-    double* di_out
+    double* di_out, cudaStream_t stream
 )
 {
     int threads_per_block = 128;
@@ -341,7 +341,7 @@ int launch_rotation_transform_kernel(
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
     LAUNCH_KERNEL( rotation_transform_kernel, grid, block, 0,
-        n_pairs, S_local, C_tensor, di_out);
+        n_pairs, S_local, C_tensor, di_out, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

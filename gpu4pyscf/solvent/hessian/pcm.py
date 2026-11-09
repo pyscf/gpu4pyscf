@@ -175,7 +175,6 @@ def get_d2Sii(surface, dF, d2F, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_d2f_to_d2sii(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
         ctypes.cast(dF.data.ptr, ctypes.c_void_p),
         ctypes.cast(d2F.data.ptr, ctypes.c_void_p),
@@ -183,6 +182,7 @@ def get_d2Sii(surface, dF, d2F, stream=None):
         ctypes.cast(d2Sii.data.ptr, ctypes.c_void_p),
         ctypes.c_int(natm),
         ctypes.c_int(ngrids),
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('Failed in converting PCM d2F to d2Sii.')
@@ -322,12 +322,12 @@ def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_d2d_d2s(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         d2D_ptr, d2S_ptr,
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n)
+        ctypes.c_int(n),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     if err != 0:
         raise RuntimeError('Failed in generating PCM d2D and d2S matrices.')
@@ -346,7 +346,6 @@ def contract_d2S_offdiagonal(surface, left_vector, right_vector, gridslice, stre
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_contract_d2s_offdiagonal(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(sandwiched_d2S.data.ptr, ctypes.c_void_p),
         ctypes.cast(left_vector.data.ptr, ctypes.c_void_p),
         ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
@@ -355,6 +354,7 @@ def contract_d2S_offdiagonal(surface, left_vector, right_vector, gridslice, stre
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_int(natm),
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('Failed in left_multiply_dS_offdiagonal')
@@ -602,7 +602,6 @@ def get_dS_dot_q_lowmem(dSii, surface, q, atmlst, gridslice, stream = None):
             continue
 
         err = libsolvent.pcm_left_multiply_ds_one_atom(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(qdS.data.ptr, ctypes.c_void_p),
             ctypes.cast(q.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
@@ -610,6 +609,7 @@ def get_dS_dot_q_lowmem(dSii, surface, q, atmlst, gridslice, stream = None):
             ctypes.c_int(ngrids),
             ctypes.c_int(g0),
             ctypes.c_int(g1),
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
         )
         if err != 0:
             raise RuntimeError('Failed in left_multiply_dS_offdiagonal_one_atom')

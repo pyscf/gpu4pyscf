@@ -194,12 +194,12 @@ def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_dd_ds(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         dD_ptr, dS_ptr,
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n)
+        ctypes.c_int(n),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     if err != 0:
         raise RuntimeError('Failed in generating PCM dD and dS matrices.')
@@ -214,12 +214,12 @@ def left_multiply_dS_offdiagonal(surface, right_vector, transpose = False, strea
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_left_multiply_ds(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(output.data.ptr, ctypes.c_void_p),
         ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n)
+        ctypes.c_int(n),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     if err != 0:
         raise RuntimeError('Failed in left_multiply_dS_offdiagonal')
@@ -239,7 +239,6 @@ def left_multiply_dD(surface, right_vector, transpose = False, stream = None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_left_multiply_dd(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(output.data.ptr, ctypes.c_void_p),
         ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
@@ -247,6 +246,7 @@ def left_multiply_dD(surface, right_vector, transpose = False, stream = None):
         ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_bool(transpose),
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('Failed in left_multiply_dD')

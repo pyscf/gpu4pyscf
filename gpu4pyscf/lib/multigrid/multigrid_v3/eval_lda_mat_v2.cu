@@ -256,14 +256,14 @@ extern "C" {
         LAUNCH_KERNEL((eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j>), grids, threads, 0, \
             out, vxc, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            negligible, *envs); \
+            negligible, *envs, stream); \
     } \
     break
 
 int evaluate_lda_mat_v2(double *out, double *vxc, double *placeholder, PBCIntEnvVars *envs,
                      double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
                      float2 *grid_frac_ranges, int *mesh, int npairs,
-                     double negligible)
+                     double negligible, cudaStream_t stream)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

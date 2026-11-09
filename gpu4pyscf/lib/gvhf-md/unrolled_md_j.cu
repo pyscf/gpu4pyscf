@@ -27,7 +27,7 @@
                          ((SHM)+addition_buf)*sizeof(double)); \
     LAUNCH_KERNEL( KERNEL, _blocks, _threads, \
         ((SHM)+addition_buf)*sizeof(double), \
-        *envs, *jk, *bounds, q_cond_ij, q_cond_kl); \
+        *envs, *jk, *bounds, q_cond_ij, q_cond_kl, stream); \
 }
 
 
@@ -4661,7 +4661,7 @@ void md_j_5_0(KERNEL_ARGS)
 }
 
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                  float *q_cond_ij, float *q_cond_kl, double omega)
+                  float *q_cond_ij, float *q_cond_kl, double omega, cudaStream_t stream)
 {
     int li = bounds->li;
     int lj = bounds->lj;

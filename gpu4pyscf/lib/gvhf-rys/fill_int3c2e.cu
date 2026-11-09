@@ -1596,27 +1596,22 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int naux, int reorder_aux,
-                 int to_sph)
+                 int to_sph, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * POOL_SIZE);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( int3c2e_kernel, blocks, threads, shm_size,
         out, *envs, pool, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
-    err = cudaGetLastError();
+        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh, stream);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
         return 1;
@@ -1626,7 +1621,7 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
 
 int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
                      uint32_t *bas_ij_idx, int *out_offsets, int *input_offsets,
-                     int nshl_pair, int naux, int nao_sph, int pair_compressed)
+                     int nshl_pair, int naux, int nao_sph, int pair_compressed, cudaStream_t stream)
 {
     constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
@@ -1634,7 +1629,7 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
     auto thread_block = make_block(threads);
     LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0,
         out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
-        naux, nao_sph, pair_compressed);
+        naux, nao_sph, pair_compressed, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));

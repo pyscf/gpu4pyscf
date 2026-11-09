@@ -307,7 +307,7 @@ void GDFT_make_dR_dao_w_kernel(double *out, double *ket, double *wv,
 
 extern "C"{
 __host__
-int GDFTcontract_rho(cudaStream_t stream, double *rho, const double *bra, const double *ket, int ngrids, int nao)
+int GDFTcontract_rho(double *rho, const double *bra, const double *ket, int ngrids, int nao, cudaStream_t stream)
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -321,7 +321,7 @@ int GDFTcontract_rho(cudaStream_t stream, double *rho, const double *bra, const 
     return 0;
 }
 
-int GDFTcontract_rho4(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao, int count)
+int GDFTcontract_rho4(double *rho, double *bra, double *ket, int ngrids, int nao, int count, cudaStream_t stream)
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -335,7 +335,7 @@ int GDFTcontract_rho4(cudaStream_t stream, double *rho, double *bra, double *ket
     return 0;
 }
 
-int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
+int GDFTcontract_rho_gga(double *rho, double *bra, double *ket, int ngrids, int nao, cudaStream_t stream)
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -349,7 +349,7 @@ int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *
     return 0;
 }
 
-int GDFTcontract_rho_mgga(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
+int GDFTcontract_rho_mgga(double *rho, double *bra, double *ket, int ngrids, int nao, cudaStream_t stream)
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -363,8 +363,8 @@ int GDFTcontract_rho_mgga(cudaStream_t stream, double *rho, double *bra, double 
     return 0;
 }
 
-int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv,
-                 int ngrids, int nao)
+int GDFT_make_dR_dao_w(double *out, double *ket, double *wv,
+                 int ngrids, int nao, cudaStream_t stream)
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
@@ -379,16 +379,16 @@ int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv
 }
 
 int GDFTscale_ao(double *out, double *ket, double *wv,
-                 int ngrids, int nao, int nvar, int is_real)
+                 int ngrids, int nao, int nvar, int is_real, cudaStream_t stream)
 {
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
     if (is_real) {
         LAUNCH_KERNEL( dscale_ao_kernel, blocks, threads, 0,
-                        out, ket, wv, ngrids, nao, nvar);
+                        out, ket, wv, ngrids, nao, nvar, stream);
     } else {
         LAUNCH_KERNEL( zscale_ao_kernel, blocks, threads, 0,
-                        out, ket, wv, ngrids, nao, nvar);
+                        out, ket, wv, ngrids, nao, nvar, stream);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

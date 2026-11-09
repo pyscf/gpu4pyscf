@@ -38,7 +38,7 @@
 __global__ static
 void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
                              uint32_t *bas_ij_idx, float *diffuse_exps,
-                             float *diffuse_ctr_coef, int npairs, double omega)
+                     float *diffuse_ctr_coef, int npairs, double omega)
 {
     setup_context();
     uint32_t sp_block_id = blockIdx_x;
@@ -98,7 +98,7 @@ void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
 static __global__
 void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
                         int *shl_pair_offsets, int *gout_stride_lookup,
-                        double omega, double lr_factor, double sr_factor)
+                          double omega, double lr_factor, double sr_factor)
 {
     setup_context();
     int sp_block_id = blockIdx_x;
@@ -408,13 +408,13 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
 extern "C" {
 int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                      uint32_t *bas_ij_idx, float *diffuse_exps,
-                     float *diffuse_ctr_coef, int npairs, double omega)
+                     float *diffuse_ctr_coef, int npairs, double omega, cudaStream_t stream)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( fill_s_estimator_kernel, blocks, threads, 0,
-        s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega);
+        s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_s_estimator_kernel %s\n", cudaGetErrorString(err));
@@ -426,7 +426,7 @@ int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, uint32_t *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
-                          double omega, double lr_factor, double sr_factor)
+                          double omega, double lr_factor, double sr_factor, cudaStream_t stream)
 {
     // NOTE: was 2D in SYCL (threads(1,THREADS)) because rys_roots_for_k()
     // queried get_nd_item<2>; those helpers now use setup_context(), so a
@@ -435,7 +435,7 @@ int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( int2e_qcond_kernel, blocks, threads, shm_size,
         q_out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-        omega, lr_factor, sr_factor);
+        omega, lr_factor, sr_factor, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2e_qcond_kernel: %s\n", cudaGetErrorString(err));

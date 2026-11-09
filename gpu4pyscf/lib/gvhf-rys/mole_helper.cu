@@ -49,13 +49,13 @@
 #define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
     auto _blocks = make_grid(nbatch_col_, nbas_, counts_); \
     auto _threads = make_block(THREADS); \
-    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__, stream); \
 }
 
 #define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
     auto _blocks = make_grid((nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas_+TILE_X-1)/TILE_X); \
     auto _threads = make_block(TILE_X, TILE_Y); \
-    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__, stream); \
 }
 
 static __global__
@@ -1007,7 +1007,7 @@ void ket_to_sorted_kernel(double *out, double *input, double *recontract_coef,
 static __global__
 void ket_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
                            int *recontract_bas, int *pbas_idx_recontraction,
-                           int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
 {
     constexpr int BLKSIZE = 4;
     double cval[BLKSIZE];
@@ -1409,7 +1409,7 @@ void ket_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
 static __global__
 void ket_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
                            int *recontract_bas, int *pbas_idx_recontraction,
-                           int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
 {
     constexpr int BLKSIZE = 8;
     double cval[BLKSIZE];
@@ -1738,7 +1738,7 @@ extern "C" {
 int bra_from_sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
                     int *c_ao_loc, int *p_ao_loc,
-                    int nbas, int npbas, int ncol, int counts, int cart)
+                    int nbas, int npbas, int ncol, int counts, int cart, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     LAUNCH_BRA_KERNEL(bra_from_sorted_kernel, counts, nbas, nbatch_col,
@@ -1754,17 +1754,17 @@ int bra_from_sorted(double *out, double *input, double *recontract_coef,
 
 int bra_sorted2cart(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
     return bra_from_sorted(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1);
+            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1, stream);
 }
 
 int bra_to_sorted(double *out, double *input, double *recontract_coef,
                   int *recontract_bas, int *pbas_idx_recontraction,
                   int *c_ao_loc, int *p_ao_loc,
-                  int nbas, int npbas, int ncol, int counts, int cart)
+                    int nbas, int npbas, int ncol, int counts, int cart, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     LAUNCH_BRA_KERNEL(bra_to_sorted_kernel, counts, nbas, nbatch_col,
@@ -1780,16 +1780,16 @@ int bra_to_sorted(double *out, double *input, double *recontract_coef,
 
 int bra_cart2sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
     return bra_to_sorted(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1);
+            c_ao_loc, p_ao_loc, nbas, npbas, ncol, counts, 1, stream);
 }
 
 int bra_sorted2sph(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     LAUNCH_BRA_KERNEL(bra_sorted2sph_kernel, counts, nbas, nbatch_col,
@@ -1805,7 +1805,7 @@ int bra_sorted2sph(double *out, double *input, double *recontract_coef,
 
 int bra_sph2sorted(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int ncol, int counts, cudaStream_t stream)
 {
     int nbatch_col = (ncol + COL_BLKSIZE-1) / COL_BLKSIZE;
     LAUNCH_BRA_KERNEL(bra_sph2sorted_kernel, counts, nbas, nbatch_col,
@@ -1821,7 +1821,7 @@ int bra_sph2sorted(double *out, double *input, double *recontract_coef,
 
 int ket_from_sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart, cudaStream_t stream)
 {
     LAUNCH_KET_KERNEL(ket_from_sorted_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
@@ -1836,16 +1836,16 @@ int ket_from_sorted(double *out, double *input, double *recontract_coef,
 
 int ket_sorted2cart(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
     return ket_from_sorted(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1);
+            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1, stream);
 }
 
 int ket_to_sorted(double *out, double *input, double *recontract_coef,
                   int *recontract_bas, int *pbas_idx_recontraction,
-                  int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, int cart, cudaStream_t stream)
 {
     LAUNCH_KET_KERNEL(ket_to_sorted_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
@@ -1860,16 +1860,16 @@ int ket_to_sorted(double *out, double *input, double *recontract_coef,
 
 int ket_cart2sorted(double *out, double *input, double *recontract_coef,
                     int *recontract_bas, int *pbas_idx_recontraction,
-                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
     return ket_to_sorted(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
-            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1);
+            c_ao_loc, p_ao_loc, nbas, npbas, nrow, 1, stream);
 }
 
 int ket_sorted2sph(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
     LAUNCH_KET_KERNEL(ket_sorted2sph_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
@@ -1884,7 +1884,7 @@ int ket_sorted2sph(double *out, double *input, double *recontract_coef,
 
 int ket_sph2sorted(double *out, double *input, double *recontract_coef,
                    int *recontract_bas, int *pbas_idx_recontraction,
-                   int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow)
+                    int *c_ao_loc, int *p_ao_loc, int nbas, int npbas, int nrow, cudaStream_t stream)
 {
     LAUNCH_KET_KERNEL(ket_sph2sorted_kernel, nbas, nrow,
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,

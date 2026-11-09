@@ -803,7 +803,7 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
                         RysIntEnvVars *envs, int shm_size,
                         int nbatches_shl_pair, int nksh,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                        int *pair_ij_loc, int *nsp_lookup, double omega)
+                        int *pair_ij_loc, int *nsp_lookup, double omega, cudaStream_t stream)
 {
     assert(n_dm == 1);
     JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
@@ -811,7 +811,7 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     auto threads = make_block(THREADS, 1);
     auto blocks = make_grid(nksh, nbatches_shl_pair);
     LAUNCH_KERNEL( contract_int3c2e_kernel, blocks, threads, shm_size,
-                        *envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
+                        *envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm, error message = %s\n", cudaGetErrorString(err));
@@ -826,7 +826,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             int nbatches_shl_pair, int nbatches_ksh,
                             int *shl_pair_offsets, int *ksh_offsets,
                             uint32_t *bas_ij_idx, int *pair_ij_loc, int *aux_loc,
-                            int *nsp_lookup, double omega)
+                            int *nsp_lookup, double omega, cudaStream_t stream)
 {
     assert(n_dm == 1);
     JKMatrix jk = {vj, NULL, auxvec, n_dm, 0, omega};
@@ -835,7 +835,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     LAUNCH_KERNEL( contract_auxvec_kernel, blocks, threads, shm_size,
                         *envs, jk, shl_pair_offsets, ksh_offsets, bas_ij_idx, pair_ij_loc,
-                        aux_loc, nsp_lookup);
+                        aux_loc, nsp_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec, error message = %s\n", cudaGetErrorString(err));

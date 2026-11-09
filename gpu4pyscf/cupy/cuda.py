@@ -91,31 +91,7 @@ _DEFERRED_FREE_THRESHOLD = int(
     os.environ.get("GPU4PYSCF_DEFERRED_FREE_THRESHOLD", "256")
 )
 
-# Layer 4: queue-ordered deferred free of dpnp USM buffers.
-#
-# dpctl frees device USM EAGERLY on GC (synchronous sycl::free, not
-# queue-ordered). gpu4pyscf launches raw SYCL kernels (lib/*/*.cu under
-# USE_SYCL) fire-and-forget on the singleton in-order queue that read
-# those buffers; an eager free of a still-in-use buffer -> GPU page
-# fault (use-after-free). To match CUDA's stream-ordered free semantics
-# we intercept dpnp array creation and, when the array is garbage
-# collected, defer the actual release behind a host task gated on a
-# queue barrier event, so the free happens only after all pending
-# kernels complete.
-#
-# Set GPU4PYSCF_DEFER_FREE=0 to disable (falls back to eager free).
 _DEFER_FREE_ENABLED = os.environ.get("GPU4PYSCF_DEFER_FREE", "1") != "0"
-# Only defer allocations at least this many bytes. 0 = defer everything.
-#
-# This defaults to 0 (defer everything). It previously defaulted to 4096 on the
-# rationale that "tiny scalar buffers are rarely the ones handed to raw
-# kernels" -- that rationale is FALSE. The DF path hands several sub-4KB index
-# arrays straight to raw SYCL kernels as borrowed pointers, e.g. in
-# gpu4pyscf/df/int3c2e_bdiv.py: gout_stride (256 B), ksh_offsets_gpu (1 KB),
-# shl_pair_offsets (2 KB). Under a 4096 B threshold all three were freed
-# EAGERLY (synchronous sycl::free, not queue-ordered) while kernels reading
-# them could still be in flight. CuPy frees every allocation stream-ordered
-# regardless of size; matching that is the whole point of Layer 4.
 _DEFER_FREE_MIN_BYTES = int(
     os.environ.get("GPU4PYSCF_DEFER_FREE_MIN_BYTES", "0")
 )
@@ -130,18 +106,6 @@ _DEFER_FREE_BATCH = max(1, int(
 _DEFER_FREE_FLUSH_STRIDE = max(1, int(
     os.environ.get("GPU4PYSCF_DEFER_FREE_FLUSH_STRIDE", "128")
 ))
-# Confine Layer 4's SYCL scheduler operations (submit_barrier / queue.wait)
-# to the thread that imported this module. Guards against a reader/writer
-# deadlock inside libsycl's Scheduler -- see _on_scheduler_safe_thread().
-# Set to 0 ONLY to reproduce the pre-fix deadlock for debugging.
-# FUTURE (upstream fix available): this deadlock is intel/llvm#22943
-# (https://github.com/intel/llvm/issues/22943), fixed by
-# https://github.com/intel/llvm/pull/22993. Verified ABSENT from both the
-# stock Aurora DPC++ 2026.1.0 and oneapi 2026.2.0 (reproducer still hangs
-# ~10%, fix symbol missing from libsycl). When a compiler carrying the
-# fix lands (try 2026.3.0), re-run the issue's reproducer ~30x
-# (expect 0/30 hangs vs 3/30 here), then re-run the hang repros and try
-# deleting _drain_then / the barrier gating.
 _DEFER_FREE_MAIN_THREAD_ONLY = (
     os.environ.get("GPU4PYSCF_DEFER_FREE_MAIN_THREAD_ONLY", "1") != "0"
 )
@@ -488,53 +452,6 @@ _DPNP_CREATION = (
 )
 
 
-# =====================================================================
-# Layer 4 -- queue-ordered deferred free of dpnp USM buffers
-# =====================================================================
-#
-# Why this exists
-# ---------------
-# dpctl frees device USM EAGERLY on GC (synchronous sycl::free in
-# _Memory.__dealloc__, NOT queue-ordered). gpu4pyscf launches raw SYCL
-# kernels (lib/*/*.cu under USE_SYCL) fire-and-forget on the singleton
-# in-order queue that read those buffers; the C++ kernel wrappers only
-# receive BORROWED raw pointers and cannot own/keep the buffers alive.
-# So an eager free of a still-in-use buffer -> GPU page fault.
-#
-# How ordering is achieved WITHOUT a keep-alive host task
-# ---------------------------------------------------------
-# The fix keeps the freed buffer's owning dpctl _Memory alive, submits a
-# BARRIER on the master queue, and retains the (event, batch) pair on the
-# Python side. A later call to _reap_completed_locked() blocks on a REAL
-# `.wait()` -- on each tagged barrier event, falling back to draining the
-# whole master queue if any event is missing or unusable -- before dropping
-# any tagged batch, so the real sycl::free happens strictly after the
-# kernels that read those buffers. `.wait()` releases the GIL while
-# blocking, so this does not reintroduce the async_dec_ref/PyGILState_Ensure
-# deadlock described below -- that required a SYCL WORKER THREAD to need the
-# GIL back while the calling thread held it; here the calling thread gives up
-# the GIL itself before blocking.
-#
-# Why NOT a keep-alive host task
-# ------------------------------
-# The previous design handed the batch to SyclQueue._submit_keep_args_alive(),
-# enqueueing dpctl's async_dec_ref host task, which calls PyGILState_Ensure()
-# when it runs. That DEADLOCKS on a shared in-order queue: an in-order queue
-# serializes ENQUEUE, so a Python thread submitting work while holding the GIL
-# blocks in SYCL's scheduler behind the un-run host task, which can then never
-# acquire the GIL. Polling an event needs no callback and never touches the
-# GIL from a SYCL worker thread. (execution_status is a cheap status query and
-# is safe on a barrier event even when the queue was idle at submit time --
-# unlike .wait(), which the Event class below documents as unreliable there.)
-#
-# Cost control: batching
-# ----------------------
-# Each barrier is itself an enqueued command, so submitting one per freed
-# array would be expensive under high allocation churn. We instead COALESCE
-# freed _Memory objects and tag a whole batch with a SINGLE barrier event,
-# amortizing the cost to ~1 barrier per _DEFER_FREE_BATCH frees.
-
-
 def _flush_deferred_frees_locked():
     """Tag the pending batch with a barrier event and retain it.
 
@@ -675,21 +592,6 @@ def _reap_completed_locked():
     # wait to the owning thread. See _on_scheduler_safe_thread.
     if not _on_scheduler_safe_thread():
         return
-    # Release _defer_free_lock across the actual blocking wait. The SYCL
-    # host-task thread this wait drains runs Python DECREFs (dropping the
-    # tagged batch's dpnp arrays); if one of those DECREFs collects another
-    # usm_ndarray, its finalizer re-enters _deferred_release(), which needs
-    # this SAME lock to append to "batch". Holding the lock through the wait
-    # self-deadlocks: this (owning) thread parks in the wait for the host
-    # task to finish, while the host task blocks acquiring a lock this
-    # thread still holds. Confirmed via gdb on the real hang: main thread
-    # inside DPCTLQueue_Wait -> Scheduler::waitForEvent, a SYCL ThreadPool
-    # worker inside a DispatchHostTask DECREF chain blocked in
-    # PyThread_acquire_lock_timed. Dropping the lock here is safe -- only
-    # the owning thread ever reaches this function or _flush_deferred_frees_
-    # locked (both gated on _on_scheduler_safe_thread), so nothing else can
-    # touch "tagged" while we wait; off-thread callers only ever append to
-    # "batch", which is unaffected by releasing this lock.
     _defer_free_lock.release()
     try:
         for ev, _batch in tagged:
@@ -722,15 +624,6 @@ def _deferred_release(mem):
         batch = _pending_frees.setdefault("batch", [])
         batch.append(mem)
         if len(batch) >= _DEFER_FREE_BATCH:
-            # No-op off the owning thread (scheduler deadlock guard). The
-            # batch then keeps growing until a main-thread free/alloc flushes
-            # it, which is the common case -- but a long run of purely
-            # off-thread frees with no intervening main-thread activity would
-            # pin memory without bound. Cap it: past the safety limit, release
-            # the overflow eagerly rather than grow forever. Eager release is
-            # the pre-Layer-4 behavior (a correctness risk only if that exact
-            # buffer is being read by a raw kernel right now), which is
-            # strictly better than an unbounded hold.
             if _on_scheduler_safe_thread():
                 _flush_deferred_frees_locked()
             elif len(batch) >= _DEFER_FREE_OFFTHREAD_CAP:
@@ -778,12 +671,6 @@ def _register_deferred_free(arr):
     return arr
 
 
-# Names of dpnp_array methods/operators whose result is a NEW device
-# allocation that Layer 3's creation-API wrapping does not cover. Arithmetic
-# results and dtype conversions are the important ones: before this, `a * 2`
-# and `a.astype(...)` produced buffers that were freed EAGERLY no matter how
-# large, because only the creation APIs registered a finalizer. CuPy is
-# stream-ordered for every array however it was produced; this closes the gap.
 _DPNP_ARRAY_PRODUCERS = (
     # binary arithmetic (and their reflected forms)
     "__add__", "__radd__", "__sub__", "__rsub__",
@@ -794,48 +681,13 @@ _DPNP_ARRAY_PRODUCERS = (
     "__neg__", "__pos__", "__abs__",
     # dtype / layout conversions that allocate
     "astype", "conj", "conjugate",
-    # linear algebra / manipulation methods that allocate a fresh buffer.
-    # `.dot` is the 2026-10-12 crash: DIIS (`lib/diis.py update -> dt.conj()
-    # .dot(dti)`) left the gemm result unregistered; its GC-freed buffer was
-    # read by in-flight kernels during the DF-RKS SCF of
-    # test_rks_df_against_qchem -> GPU page fault -> NEO background-thread
-    # abort (6/6 deterministic; gone under ZE_SERIALIZE=2). OneMKL/gemm
-    # outputs are created inside dpnp C++ and escape every other Layer.
     "dot", "matmul", "copy", "flatten", "ravel", "repeat",
     "diagonal", "trace",
-    # reductions / accumulation methods (2026-10-12 crash class 2: the
-    # ECP `get_ecp_ipip(...).sum(axis=0)` pattern and df
-    # `_jk_energy_per_atom` sums left the reduction output unregistered;
-    # `del result` ran eager sycl::free while the reduction kernel was
-    # still writing it -> GPU "Write to NotPresent" fault from a NEO
-    # background thread, layout/timing-gated). Module-level dpnp.sum etc.
-    # were already wrapped (Layer 4c); these are the METHOD forms.
     "sum", "mean", "prod", "cumsum", "cumprod",
     "max", "min", "var", "std",
 )
 
 
-# Module-level dpnp functions that ALLOCATE a new device buffer but are
-# neither creation APIs (Layer 3 / _DPNP_CREATION) nor ndarray dunders
-# (Layer 4b / _DPNP_ARRAY_PRODUCERS). Before Layer 4c these escaped deferred
-# free entirely: dpctl released them via the eager, NON-queue-ordered
-# sycl::free in _Memory.__dealloc__ the moment the last Python reference
-# dropped -- even with raw kernels still reading the buffer.
-#
-# This is not hypothetical. In `_VHFOpt.get_jk` with hermi==0 (the default,
-# and what test_j_engine_integral_screen exercises):
-#     dms = cp.vstack([dms, dms.transpose(0,2,1)])
-# `dms` -- the density matrix whose RAW POINTER is handed to all 28
-# RYS_build_jk launches -- was produced by `vstack` and therefore had no
-# deferred-free finalizer. The Level Zero loader trace (UR_L0_DEBUG) shows
-# exactly one zeMemFree during compute, firing 1 ms after the final kernel
-# launch while that kernel's event still reported ZE_RESULT_NOT_READY, with
-# the GPU page fault landing 226 ms later INSIDE dm[0] (offsets 1.34-1.81 MB
-# of the 2.70 MB slab). See DEFECT5_free_and_device_global_audit.md.
-#
-# CuPy has no equivalent bug because cudaFree() implicitly synchronizes the
-# device; sycl::free() does not. Layer 4 exists to close precisely that gap,
-# and this list closes the part of it Layers 3 and 4b did not reach.
 _DPNP_ALLOCATING_FUNCS = (
     # shape / joining -- these produce the buffers most likely to be handed
     # to a raw kernel as a borrowed pointer
@@ -848,8 +700,7 @@ _DPNP_ALLOCATING_FUNCS = (
     "multiply", "add", "subtract", "divide",
     # selection / construction
     "where", "take", "tril", "triu", "unique",
-    # linear algebra / contractions producing fresh buffers (same 2026-10-12
-    # crash family as the .dot producer hole -- oneMKL/einsum outputs are
+    # linear algebra / contractions producing fresh buffers (same # crash family as the .dot producer hole -- oneMKL/einsum outputs are
     # allocated inside dpnp C++ and escaped registration)
     "dot", "matmul", "vdot", "inner", "tensordot", "einsum", "kron",
     "cross", "ascontiguousarray",
@@ -939,7 +790,7 @@ def _wrap_linalg_allocating_funcs():
     `dpnp.linalg.foo(...)`, which the `cupy.linalg` facade aliases directly.
     Cholesky in df.DF.build, solve/eigh in DIIS and SOSCF paths all hand
     these buffers to raw kernels; an eager free of one of them is the
-    2026-10-12 GPU-page-fault crash family. Idempotent; missing names are
+    GPU-page-fault crash family. Idempotent; missing names are
     skipped.
     """
     try:
@@ -1008,54 +859,6 @@ def _wrap_with_master_queue(mod, names):
         wrapper.__wrapped__ = orig
         setattr(mod, name, wrapper)
 
-# =====================================================================
-# Layer 5: drain the queue before dpnp's blocking native math calls.
-#
-# Workaround for intel/llvm#22943 -- "[SYCL][UR] Hangs when using
-# `in-order` and SYCL `host_task` under multi-threading" (open as of
-# 2026-08-14; reproduced on PVC 1550 with both Level-Zero and OpenCL,
-# not seen on CUDA/HIP). An in-order queue plus a host task that takes a
-# lock deadlocks; out-of-order queues do not.
-#
-# Here the lock is the GIL. dpnp's BLAS/LAPACK pybind11 extensions call
-# into oneMKL, which blocks on sycl::event::wait() internally and does
-# NOT release the GIL while it does so. On the in-order master queue
-# that wait transitively covers every command submitted earlier --
-# including the keep-alive host tasks dpctl attaches to Python operands.
-# Such a host task runs on a SYCL worker thread and needs the GIL to
-# DECREF, but the caller blocked inside oneMKL is still holding it.
-# Permanent deadlock.
-#
-# The workaround the issue recommends -- switch to an out-of-order queue
-# -- is not available to us: libgint/libgvhf/libgdft are handed the raw
-# sycl::queue* and launch kernels on it with no event plumbing across
-# the ctypes boundary, and the deferred-free reaper below tags batches
-# with barriers on the assumption of in-order semantics. So we instead
-# make sure no GIL-needing host task is ever pending when oneMKL blocks.
-#
-# Two live instances were diagnosed with gdb/py-spy:
-#   df.DF.build() -> cholesky()  ->  mkl::lapack::potrf_dispatch
-#                                    -> event_impl::waitInternal   [holds GIL]
-#                                    vs ThreadPool worker in take_gil
-#   int3c2e.get_j_int3c2e_pass1() -> coeff @ dm0  -> bi._gemm      [same shape]
-#
-# The wait has to happen at the *native* boundary, not at the public
-# dpnp.linalg/dpnp.matmul entry point: those first make copies and
-# temporaries, each of which registers a fresh keep-alive host task, so
-# a drain performed before them is already stale by the time oneMKL is
-# reached. dpctl's SyclQueue.wait() is declared `with nogil`, so the
-# drain lets any pending host task retire first.
-#
-# Measured cost of the added drain: none (0.240 vs 0.250 ms per 512x512
-# matmul). dpnp is already effectively synchronous per operation on an
-# in-order queue with host-task keep-alives, so there is no pipelining
-# to lose.
-# =====================================================================
-# NOTE 2026-10-27 (Claude Opus 5.5, claude-opus-5-5): _DPNP_NATIVE_BLOCKING
-# and _wrap_blocking_lapack() are dead code. Nothing calls
-# _wrap_blocking_lapack() since 9e0295c8, because dpnp #3027 (7a2714ba747)
-# releases the GIL around the blocking oneMKL calls. Still without the GIL
-# release in dpnp: gemv, syrk, getrs, getrs_batch, getri_batch.
 _DPNP_NATIVE_BLOCKING = {
     "dpnp.backend.extensions.blas._blas_impl": (
         "_dot", "_dotc", "_dotu", "_gemm", "_gemm_batch", "_gemv", "_syrk",
@@ -1083,27 +886,6 @@ def _drain_then(orig):
     wrapper.__gil_drained__ = True
     wrapper.__wrapped__ = orig
     return wrapper
-
-
-# DISABLED 2026-10-28 (Claude Opus 5.5, claude-opus-5-5): Layer 5 setitem
-# drain, commented out together with its _bootstrap() call. 3-pass sweep on
-# PVC with it off: scf/dft/tdscf/hessian/grad/df/pbc 1392 passed, 0 failed,
-# 0 hangs per pass (sweep3_results/RESULTS.md). Uncomment to restore.
-# def _wrap_blocking_setitem():
-#     """Same treatment for dpnp's `arr[idx] = value` (intel/llvm#22943).
-#
-#     `usm_ndarray.__setitem__` enqueues the copy then blocks on
-#     `event_impl::wait()` in `dpnp/tensor/_tensor_impl`; on the in-order queue
-#     that reaches `Scheduler::GraphProcessor::waitForEvent`, which blocks while
-#     holding the graph read lock, so an in-flight host task can never be
-#     enqueued. Caught with gdb on a hung test_df_int3c2e.py::test_int3c2e_rsh.
-#     Overhead ~7-10% per setitem; accepted because the alternative is a hang.
-#     """
-#     from dpnp.dpnp_array import dpnp_array as _arr
-#     orig = _arr.__setitem__
-#     if getattr(orig, "__gil_drained__", False):
-#         return
-#     _arr.__setitem__ = _drain_then(orig)
 
 
 def _wrap_blocking_lapack():
@@ -1134,73 +916,6 @@ def _wrap_blocking_lapack():
                     RuntimeWarning)
 
 
-# DISABLED 2026-10-28 (Claude Opus 5.5, claude-opus-5-5): Layer 6
-# order-manager pin, commented out together with its _bootstrap() call.
-# Same 3-pass sweep evidence as the Layer 5 setitem drain above.
-# # =====================================================================
-# # Layer 6: keep dpctl's order managers alive.
-# #
-# # Second face of intel/llvm#22943. dpctl keeps its
-# # `_SequentialOrderManager` instances in a **thread-local** map
-# # (`SyclQueueToOrderManagerMap._get_map`), and the manager's `__del__`
-# # does
-# #
-# #     SyclEvent.wait_for(_local.get_submitted_events())
-# #     SyclEvent.wait_for(_local.get_host_task_events())
-# #
-# # So when *any* worker thread exits, its thread-local dict is torn down
-# # and a blocking SYCL event wait runs from inside a garbage-collection
-# # finalizer. That wait enters
-# # `Scheduler::GraphProcessor::waitForEvent`, which blocks while holding
-# # the graph read lock; if a host task is in flight it can never be
-# # enqueued, and the process wedges. Captured with gdb on a hung
-# # `dft/tests/test_numint.py`:
-# #
-# #   Thread 9 : slot_tp_finalize -> SyclEvent.wait_for -> DPCTLEvent_Wait
-# #              -> Scheduler::waitForEvent -> enqueueCommand(BLOCKING)
-# #              -> event_impl::waitInternal      [holds GraphReadLock]
-# #   Thread 3 : DispatchHostTask::waitForEvents -> urEventWait
-# #   Thread 1 : blocked on a Python lock held by thread 9
-# #
-# # Pinning every manager with a process-lifetime strong reference means
-# # `__del__` never runs before interpreter shutdown, where dpctl's own
-# # `sys.is_finalizing()` guard already short-circuits the waits. Nothing
-# # else changes: the managers stay functional and keep ordering work
-# # exactly as before. Cost is a few small objects per thread.
-# # =====================================================================
-# _pinned_order_managers = _state.setdefault("pinned_order_managers", [])
-#
-#
-# def _pin_order_managers():
-#     try:
-#         from dpctl.utils import _order_manager as _om
-#     except Exception as e:
-#         warnings.warn(
-#             f"Layer 6: could not import dpctl.utils._order_manager; the "
-#             f"finalizer-driven variant of intel/llvm#22943 remains "
-#             f"reachable: {e}", RuntimeWarning)
-#         return
-#
-#     cls = getattr(_om, "_SequentialOrderManager", None)
-#     if cls is None or getattr(cls, "__gpu4pyscf_pinned__", False):
-#         return
-#
-#     _orig_init = cls.__init__
-#
-#     @functools.wraps(_orig_init)
-#     def __init__(self, *args, **kwargs):
-#         _orig_init(self, *args, **kwargs)
-#         # Strong reference -> never finalized mid-run.
-#         _pinned_order_managers.append(self)
-#
-#     cls.__init__ = __init__
-#     cls.__gpu4pyscf_pinned__ = True
-
-
-# =====================================================================
-# Bootstrap -- install layers 1-3. Guarded by _state["bootstrapped"]
-# so a second execution of this file is a no-op.
-# =====================================================================
 def _bootstrap():
     if _state["bootstrapped"]:
         return
@@ -1248,7 +963,7 @@ def _bootstrap():
     # Layer 4d: dpnp.linalg outputs (cholesky/solve/eigh/...). Same gap
     # family as 4c -- oneMKL results allocated inside dpnp C++.
     _wrap_linalg_allocating_funcs()
-    # Layer 4e SAFETY NET (2026-10-13): wrong-type (numpy-into-dpnp)
+    # Layer 4e SAFETY NET ): wrong-type (numpy-into-dpnp)
     # usage is fixed at the gpu4pyscf call sites — this shim is a dormant
     # backstop so a missed site fails soft instead of crashing a run.
     # 4e: CuPy's ndarray implements __array__ as an implicit device-to-host
@@ -1264,13 +979,6 @@ def _bootstrap():
             _dpnp_arr_cls.__array__ = _dpnp_shim_array
     except Exception:
         pass
-    # Layer 4g: index()-normalize slice components on dpnp getitem.
-    # NumPy (and hence CuPy upstream code) accepts np.float64 slice ends
-    # because NumPy calls __index__ on them; dpnp's Cython slicer does not
-    # ("slice indices must be integers...", hit by df/hessian/rhf.py:1408
-    # `v[:,0,:,:nocca]` where nocca comes from `mo_occ.sum(axis=1).get()`).
-    # Patch dpnp_array.__getitem__ to convert integral float / 0-d-array
-    # slice bounds via __index__, matching NumPy semantics.
     try:
         import operator as _op
 
@@ -1368,7 +1076,7 @@ def _bootstrap():
                 # it were still in flight -> GPU "Read (NotPresent)" page
                 # fault -> NEO background-thread abort (the df
                 # `_jk_energy_per_atom` dm_aux[aux_sorting[:,None],
-                # aux_sorting] crash family, 2026-10-13). Basic-slice views
+                # aux_sorting] crash family, ). Basic-slice views
                 # share self's USM pointer -- registering those would stack
                 # duplicate finalizers on the same usm_ndarray with no
                 # lifetime benefit, so only distinct-pointer results are
@@ -1384,25 +1092,6 @@ def _bootstrap():
                 return res
             _dpnp_shim_getitem.__cupy_shim_getitem__ = True
             dpnp.ndarray.__getitem__ = _dpnp_shim_getitem
-        # Layer 4h: numpy-ufunc fallback for SCALAR dpnp operands. dpnp
-        # sets __array_ufunc__ = None, so 3rd-party numpy code applying
-        # numpy ufuncs to GPU results raises "operand 'dpnp_array' does
-        # not support ufuncs" (geomeTRIC's optimizer: np.abs(del_E) with
-        # a dpnp 0-d energy). On CUDA those values arrive as plain
-        # floats. Convert ONLY scalar-like (0-d / size-1) dpnp operands
-        # to host and let numpy run; larger arrays keep the raise — a
-        # broad conversion silently D2H-copies matrices and derails
-        # downstream device code (observed: soscf g_orb + hdxi TypeError
-        # in multi-file runs when an upstream np-ufunc host-converted a
-        # whole matrix).
-        # The host-conversion version (2026-10-13) broke multi-file runs:
-        # it turned device data into numpy behind the caller's back.
-        # What CuPy actually does (NEP-13) is dispatch: a numpy ufunc
-        # called with a device operand runs the same-named device ufunc and
-        # returns a device array; host-array inputs or out= still raise.
-        # Mirror that exactly, never converting to host. Covers
-        # geomeTRIC's np.abs(del_E) and pyscf helpers that apply np.log
-        # etc. to gpu4pyscf results.
         def _dpnp_array_ufunc(self, ufunc, method, *inputs, **kwargs):
             if method != '__call__':
                 return NotImplemented
@@ -1481,19 +1170,6 @@ def _bootstrap():
         _ewc.DPNPBinaryFunc.at = _ufunc_at
     except Exception:
         pass
-    # DISABLED 2026-10-27 (Claude Opus 5.5, claude-opus-5-5): Layer 5
-    # setitem drain and Layer 6 order-manager pin. A/B on PVC with both off:
-    # original repro files (test_df_int3c2e, test_numint, test_soscf) 18/18
-    # clean, scf/dft/df/grad/hessian sweep 87/87 files clean (699 passed,
-    # 0 failed, 0 hangs). The hangs they targeted share the libsycl
-    # read-lock/write-lock inversion that the Layer 4 main-thread gating
-    # (_on_scheduler_safe_thread) already prevents; with gating off the hang
-    # reproduces 6/6 regardless. Re-enable by uncommenting.
-    # _wrap_blocking_setitem()
-    # Layer 6: stop dpctl's thread-local order managers from running a
-    # blocking event wait inside a finalizer when a worker thread exits.
-    # _pin_order_managers()
-
     _state["bootstrapped"] = True
 
 
@@ -1653,6 +1329,18 @@ class Stream:
     @property
     def ptr(self):
         return self._ptr
+
+    def __eq__(self, other):
+        if isinstance(other, Stream):
+            return self._ptr == other._ptr
+        # CUDA's default/legacy stream is the null pointer (0); the shim has a
+        # single in-order master queue, which plays that role.
+        if isinstance(other, int) and other == 0:
+            return True
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(self._ptr)
 
     @property
     def sycl_queue(self):
@@ -2001,8 +1689,7 @@ class _Runtime:
         # explicit-copy fallbacks. dpnp/dpctl reject any op whose operands
         # live on different queues ("Execution queue is not compatible with
         # allocation queues", ExecutionPlacementError) even with Level Zero
-        # peer access enabled; verified on PVC tiles 2026-10-27 (Claude Opus
-        # 5.5, claude-opus-5-5). cudaDeviceCanAccessPeer(d, d) is 0 as well.
+        # peer access enabled; verified on PVC tiles . cudaDeviceCanAccessPeer(d, d) is 0 as well.
         return False
 
 
@@ -2046,14 +1733,6 @@ def alloc_pinned_memory(nbytes, flags=None):
     return _PinnedMemoryPointer(dpmem.MemoryUSMHost(max(nbytes, 1), queue=q))
 
 
-# =====================================================================
-# cupy.cuda.using_allocator (CuPy >= 13 API)
-#
-# Callers use `with cp.cuda.using_allocator(...):` to give allocations a
-# distinct boundary. There is no pluggable allocator on the dpnp backend;
-# honor the boundary intent by draining the deferred-free pool on entry
-# and exit, then run the block with the default allocation path.
-# =====================================================================
 @contextlib.contextmanager
 def using_allocator(allocator=None):
     release_deferred_frees()

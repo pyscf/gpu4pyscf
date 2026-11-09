@@ -31,7 +31,7 @@ extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gint_bpcache;
 //  * host pass: kernel bodies are parsed but never run, so c_bpcache is a
 //    typed placeholder.
 // Both passes parse the host uploads, so one overload turns the upstream call
-// cudaMemcpyToSymbol(c_bpcache, ...) into a copy to the device_global.
+// cudaMemcpyToSymbolAsync(c_bpcache, ..., stream) into a copy to the device_global.
 #ifdef __SYCL_DEVICE_ONLY__
 #define c_bpcache (::s_gint_bpcache.get())
 #else
@@ -41,10 +41,10 @@ inline BasisProdCache &gint_host_bpcache() {
 }
 #define c_bpcache (gint_host_bpcache())
 #endif
-static inline cudaError_t cudaMemcpyToSymbol(
-        BasisProdCache &, const void *src, size_t count, size_t offset = 0,
-        cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
-    return cudaMemcpyToSymbol(s_gint_bpcache, src, count, offset, kind);
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        BasisProdCache &, const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_gint_bpcache, src, count, offset, kind, stream);
 }
 
 // Generated with GINTinit_index1d_xyz

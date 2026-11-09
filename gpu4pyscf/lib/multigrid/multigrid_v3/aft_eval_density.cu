@@ -224,7 +224,7 @@ int orth_contract_aopair_dm(double *outR, double *outI,
                             PBCIntEnvVars *envs, int *shl_pair_offsets,
                             int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                             int *mesh_cum, int *nimgs_cum, int *mesh,
-                            int nbatches_shl_pair, double factor)
+                            int nbatches_shl_pair, double factor, cudaStream_t stream)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -237,7 +237,7 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     auto grids = make_grid(ntiles*nbatches_shl_pair);
     LAUNCH_KERNEL( orth_aopair_dm_kernel, grids, threads, 0,
                     outR, outI, dm, shl_pair_offsets, bas_ij_idx, G_bases,
-                    L_bases, mesh_cum, nimgs_cum, ntiles, factor, *envs);
+                    L_bases, mesh_cum, nimgs_cum, ntiles, factor, *envs, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_aopair_dm_kernel: %s\n", cudaGetErrorString(err));

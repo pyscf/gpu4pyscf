@@ -199,14 +199,14 @@ extern "C" {
 int fill_int2c2e(double *out, PBCIntEnvVars *envs,
                  double omega, double lr_factor, double sr_factor, int shm_size,
                  int nbatches_shl_pair, int *shl_pair_offsets,
-                 uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                 uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( pbc_int2c2e_kernel, blocks, threads, shm_size,
             out, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));

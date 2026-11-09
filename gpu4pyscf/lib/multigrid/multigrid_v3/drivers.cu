@@ -85,17 +85,17 @@ void fft_takebak_kernel(double2* __restrict__ out, double2* __restrict__ in,
 
 extern "C" {
 void update_lattice_vectors(double *lattice_vectors,
-                            double *reciprocal_lattice_vectors)
+                            double *reciprocal_lattice_vectors, cudaStream_t stream)
 {
-    cudaMemcpyToSymbol(c_lattice_vectors, lattice_vectors, 9 * sizeof(double));
-    cudaMemcpyToSymbol(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double));
+    cudaMemcpyToSymbolAsync(c_lattice_vectors, lattice_vectors, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
+    cudaMemcpyToSymbolAsync(c_reciprocal_lattice_vectors, reciprocal_lattice_vectors, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
 }
 
-void update_dxyz_dabc(double *dxyz_dabc) {
-    cudaMemcpyToSymbol(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double));
+void update_dxyz_dabc(double *dxyz_dabc, cudaStream_t stream) {
+    cudaMemcpyToSymbolAsync(c_dxyz_dabc, dxyz_dabc, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
 }
 
-int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts)
+int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts, cudaStream_t stream)
 {
     int mx = out_shape[0];
     int my = out_shape[1];
@@ -104,7 +104,7 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     auto threads = make_block(32, 16);
     auto grids = make_grid(mx, (my+15)/16);
     LAUNCH_KERNEL( fft_take_kernel, grids, threads, 0,
-                    out, in, mx, my, mz, nx, ny, nz, counts);
+                    out, in, mx, my, mz, nx, ny, nz, counts, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_take kernel: %s\n", cudaGetErrorString(err));
@@ -113,7 +113,7 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     return 0;
 }
 
-int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts)
+int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int counts, cudaStream_t stream)
 {
     int mx = in_shape[0];
     int my = in_shape[1];
@@ -122,7 +122,7 @@ int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int co
     auto threads = make_block(32, 16);
     auto grids = make_grid(mx, (my+15)/16);
     LAUNCH_KERNEL( fft_takebak_kernel, grids, threads, 0,
-                    out, in, mx, my, mz, nx, ny, nz, counts);
+                    out, in, mx, my, mz, nx, ny, nz, counts, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_takebak kernel: %s\n", cudaGetErrorString(err));

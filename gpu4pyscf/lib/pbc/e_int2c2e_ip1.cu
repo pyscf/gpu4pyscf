@@ -248,14 +248,14 @@ extern "C" {
 int int2c2e_deriv(double *grad, double *sigma, double *dm, PBCIntEnvVars *envs,
                   double omega, double lr_factor, double sr_factor, int shm_size,
                   int nbatches_shl_pair, int *shl_pair_offsets,
-                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(int2c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_KERNEL( int2c2e_deriv_kernel, blocks, threads, shm_size,
             grad, sigma, dm, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_deriv kernel: %s\n", cudaGetErrorString(err));

@@ -54,5 +54,5 @@
         _rys_envs, _rys_kmat, _rys_bounds, \
         pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
         nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
-        s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); \
+        s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head, stream); \
   }

@@ -324,7 +324,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float *qd_ij_max, float *qd_kl_max,
                 float *q_cond_ij, float *q_cond_kl, float cutoff,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -387,7 +387,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
             LAUNCH_KERNEL( pbc_md_j_kernel, blocks, threads, buflen,
                                 *envs, jmat, bounds, q_cond_ij, q_cond_kl,
                                 threads_ij, threads_kl, tilex, tiley,
-                                rt2_off, efg_off);
+                                rt2_off, efg_off, stream);
         }
     }
     cudaError_t err = cudaGetLastError();

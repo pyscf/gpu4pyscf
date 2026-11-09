@@ -401,7 +401,7 @@ extern "C" {
         LAUNCH_KERNEL((eval_mgga_grad_kernel<li,lj,slice_i,slice_j>), grids, threads, 0, \
             grad, strain, dm, vxc, tau, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            factor, negligible, *envs); \
+            factor, negligible, *envs, stream); \
     } \
     break
 
@@ -409,7 +409,7 @@ int evaluate_mgga_grad(double *grad, double *strain, double *dm,
                        double *vxc, double *tau, PBCIntEnvVars *envs,
                        double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
                        float2 *grid_frac_ranges, int *mesh, int npairs,
-                       double factor, double negligible)
+                       double factor, double negligible, cudaStream_t stream)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

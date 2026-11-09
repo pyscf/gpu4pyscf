@@ -24,7 +24,7 @@
 
 __global__ static
 void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars envs,
-                              float *exps, float *coef, int npairs, float log_cutoff)
+                      float *exps, float *coef, int npairs, float log_cutoff)
 {
     setup_context();
     int pair_id = blockIdx_x * blockDim_x + threadIdx_x;
@@ -85,12 +85,12 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
 
 extern "C" {
 int estimate_aft_Ecut1(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
-                      float *exps, float *coef, int npairs, float log_cutoff)
+                      float *exps, float *coef, int npairs, float log_cutoff, cudaStream_t stream)
 {
     auto blocks = make_grid((npairs + THREADS-1)/THREADS);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL(estimate_aft_Ecut_kernel, blocks, threads, 0,
-        Ecut, bas_ij_idx, *envs, exps, coef, npairs, log_cutoff);
+        Ecut, bas_ij_idx, *envs, exps, coef, npairs, log_cutoff, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in estimate_aft_Ecut_kernel: %s\n", cudaGetErrorString(err));

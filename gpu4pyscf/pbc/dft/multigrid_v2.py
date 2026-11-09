@@ -29,7 +29,7 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.gto.mole import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
-from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from pyscf.pbc.lib.kpts_helper import is_gamma_point
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import numint
@@ -218,6 +218,7 @@ def count_non_trivial_pairs(
         cast_to_pointer(bas),
         cast_to_pointer(env),
         ctypes.c_double(threshold_in_log),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
     )
     if err != 0:
         raise RuntimeError(f'count_non_trivial_pairs for li={i_angular} lj={j_angular} failed')
@@ -274,6 +275,7 @@ def screen_gaussian_pairs(
         cast_to_pointer(bas),
         cast_to_pointer(env),
         ctypes.c_double(threshold_in_log),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
     )
     if err != 0:
         raise RuntimeError(f'screen_gaussian_pairs for li={i_angular} lj={j_angular} failed')
@@ -304,6 +306,7 @@ def assign_pairs_to_blocks(
     n_blocks = np.prod(n_blocks_abc)
     n_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype=cp.int32)
     n_unstable_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype = cp.int32)
+    stream = cp.cuda.get_current_stream()
     err = libgpbc.count_pairs_on_blocks(
         cast_to_pointer(n_pairs_on_blocks),
         cast_to_pointer(n_unstable_pairs_on_blocks),
@@ -321,7 +324,8 @@ def assign_pairs_to_blocks(
         cast_to_pointer(mesh),
         cast_to_pointer(atm),
         cast_to_pointer(bas),
-        cast_to_pointer(env)
+        cast_to_pointer(env),
+        ctypes.c_void_p(stream.ptr)
     )
     has_unstable_pairs = (n_unstable_pairs_on_blocks[-1] > 0)
     if not has_warned_instability and has_unstable_pairs:
@@ -360,7 +364,8 @@ def assign_pairs_to_blocks(
         cast_to_pointer(mesh),
         cast_to_pointer(atm),
         cast_to_pointer(bas),
-        cast_to_pointer(env)
+        cast_to_pointer(env),
+        ctypes.c_void_p(stream.ptr)
     )
 
     return (
@@ -644,10 +649,12 @@ def sort_gaussian_pairs(mydf, xc_type="LDA", gamma_point=False, unrestricted=Fal
     reciprocal_lattice_vectors = np.asarray(np.linalg.inv(lattice_vectors.T), order="C")
 
     reciprocal_norms = np.linalg.norm(reciprocal_lattice_vectors, axis=1)
+    stream = cp.cuda.get_current_stream()
     libgpbc.update_lattice_vectors(
         lattice_vectors.ctypes,
         reciprocal_lattice_vectors.ctypes,
-        reciprocal_norms.ctypes
+        reciprocal_norms.ctypes,
+        ctypes.c_void_p(stream.ptr)
     )
 
     tasks = getattr(mydf, "tasks", None)
@@ -674,7 +681,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA", gamma_point=False, unrestricted=Fal
         )
 
         dxyz_dabc = lattice_vectors / mesh[:,None]
-        libgpbc.update_dxyz_dabc(dxyz_dabc.ctypes)
+        libgpbc.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
         n_blocks_abc = np.asarray(np.ceil(mesh / block_size), dtype=cp.int32)
         equivalent_cell_in_localized, coeff_in_localized = (
             subcell_in_localized_region.decontract_basis(to_cart=True, aggregate=True)
@@ -938,6 +945,7 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
             ctypes.c_int(n_channels),
             ctypes.c_int(pairs_info["is_non_orthogonal"]),
             use_float_precision,
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
         )
         if err != 0:
             raise RuntimeError(f'evaluate_density_driver for li={i_angular} lj={j_angular} failed')
@@ -1006,7 +1014,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
             pairs["concatenated_coeff"],
         )
 
-        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
+        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         density = (
@@ -1113,6 +1121,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
             ctypes.c_int(n_channels),
             ctypes.c_int(pairs_info["is_non_orthogonal"]),
             use_float_precision,
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
         )
         if err != 0:
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
@@ -1192,7 +1201,7 @@ def convert_xc_on_g_mesh_to_fock(
         interpolated_xc = cp.asarray(ifft_in_place(interpolated_xc).real, order="C")
 
         n_ao_in_localized = len(pairs["ao_indices_in_localized"])
-        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
+        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase, with_tau=with_tau)
         fock_slice = contract("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
@@ -1313,6 +1322,7 @@ def evaluate_xc_gradient_wrapper(
             ctypes.c_int(n_channels),
             ctypes.c_int(pairs_info["is_non_orthogonal"]),
             use_float_precision,
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr),
         )
         if err != 0:
             raise RuntimeError(f'evaluate_xc_gradient_driver for li={i_angular} lj={j_angular} failed')
@@ -1382,7 +1392,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             pairs["concatenated_coeff"],
         )
 
-        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
+        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes, ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
 
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         evaluate_xc_gradient_wrapper(
@@ -1435,7 +1445,7 @@ def get_pp(ni, kpts=None):
     vpp = convert_xc_on_g_mesh_to_fock(ni, vpplocG, hermi=1, kpts=kpts)[0]
     t1 = log.timer_debug1("vpploc", *t0)
 
-    vppnl = get_pp_nl_gpu(cell, kpts)
+    vppnl = get_pp_nl(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_single_kpt:
             vpp[k] += cp.asarray(vppnl[k].real)

@@ -87,7 +87,6 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
 
             grids_slice = grids[p0:p1, :]
             err = libgint.GINTfill_int3c1e_ip(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(grids_slice.data.ptr, ctypes.c_void_p),
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -98,7 +97,8 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
                 ctypes.c_int(nbins),
                 ctypes.c_int(cp_ij_id),
-                ctypes.c_double(omega))
+                ctypes.c_double(omega),
+                ctypes.cast(stream.ptr, ctypes.c_void_p))
 
             if err != 0:
                 raise RuntimeError('GINTfill_int3c1e failed')
@@ -175,7 +175,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
         int1e_angular_slice = cp.zeros([3, j1-j0, i1-i0], order='C')
 
         err = libgint.GINTfill_int3c1e_ip1_charge_contracted(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(grids.data.ptr, ctypes.c_void_p),
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -187,7 +186,8 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
             ctypes.c_int(nbins),
             ctypes.c_int(cp_ij_id),
             ctypes.c_double(omega),
-            ctypes.c_int(n_charge_sum_per_thread))
+            ctypes.c_int(n_charge_sum_per_thread),
+            ctypes.cast(stream.ptr, ctypes.c_void_p))
 
         if err != 0:
             raise RuntimeError('GINTfill_int3c1e_charge_contracted failed')
@@ -245,7 +245,6 @@ def get_int3c1e_ip1_density_contracted(mol, grids, charge_exponents, dm, intopt)
             charge_exponents_pointer = charge_exponents.data.ptr
 
         err = libgint.GINTfill_int3c1e_ip1_density_contracted(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(grids.data.ptr, ctypes.c_void_p),
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -257,7 +256,8 @@ def get_int3c1e_ip1_density_contracted(mol, grids, charge_exponents, dm, intopt)
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.cast(i_atom_of_each_shell.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nao),
-            ctypes.c_double(omega))
+            ctypes.c_double(omega),
+            ctypes.cast(stream.ptr, ctypes.c_void_p))
 
         if err != 0:
             raise RuntimeError('GINTfill_int3c1e_charge_contracted failed')
@@ -341,7 +341,6 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
             n_pair_sum_per_thread = nao_cart
 
             err = libgint.GINTfill_int3c1e_ip2_density_contracted(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(grids_slice.data.ptr, ctypes.c_void_p),
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -353,7 +352,8 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
                 ctypes.c_int(nbins),
                 ctypes.c_int(cp_ij_id),
                 ctypes.c_double(omega),
-                ctypes.c_int(n_pair_sum_per_thread))
+                ctypes.c_int(n_pair_sum_per_thread),
+                ctypes.cast(stream.ptr, ctypes.c_void_p))
 
             if err != 0:
                 raise RuntimeError('GINTfill_int3c1e_density_contracted failed')
@@ -416,7 +416,6 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
         int1e_angular_slice = cp.zeros([n_atom, 3, j1-j0, i1-i0], order='C')
 
         err = libgint.GINTfill_int3c1e_ip2_charge_contracted(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(grids.data.ptr, ctypes.c_void_p),
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -428,7 +427,8 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
             ctypes.c_int(nbins),
             ctypes.c_int(cp_ij_id),
             ctypes.cast(i_atom_of_each_charge.data.ptr, ctypes.c_void_p),
-            ctypes.c_double(omega))
+            ctypes.c_double(omega),
+            ctypes.cast(stream.ptr, ctypes.c_void_p))
 
         if err != 0:
             raise RuntimeError('GINTfill_int3c1e_charge_contracted failed')

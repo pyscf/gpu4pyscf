@@ -53,7 +53,7 @@
     LAUNCH_KERNEL( KERNEL, _rys_blocks, _rys_threads, \
         (buflen)*sizeof(double), \
         _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
-        dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); \
+        dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, stream); \
   }
 
 #define JKENERGY_KERNEL_ARGS \
@@ -66,6 +66,7 @@
     setup_context(); \
     int sq_id = threadIdx_x; \
     int gout_id = threadIdx_y; \
+    int _nsq_per_block = blockDim_x; \
     int worker_id = blockIdx_x; \
     SHARED_ARRAY(int, ntasks); \
     SHARED_ARRAY(int, pair_ij); \
@@ -86,5 +87,5 @@
         (buflen)*sizeof(double), \
         _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
         dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, \
-        dd_pool, head); \
+        dd_pool, head, stream); \
   }

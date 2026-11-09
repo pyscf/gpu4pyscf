@@ -167,7 +167,7 @@ else:
     # mat.flags.c_contiguous and aborts the test otherwise. Normalise here so
     # every caller sees the layout it would get on the CUDA backend.
     def _einsum(*args, **kwargs):
-        # SAFETY NET (2026-10-13): CuPy's einsum uploads host operands;
+        # SAFETY NET: CuPy's einsum uploads host operands;
         # wrong-type call sites are fixed at source, this converts any
         # numpy stragglers so they fail soft. Plus the contiguity fix.
         import numpy as _np

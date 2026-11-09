@@ -31,7 +31,7 @@ void ejk_int3c2e_ipip_kernel(double *ejk, double *dm, double *density_auxvec,
                              double omega, double lr_factor, double sr_factor,
                              RysIntEnvVars envs, int *shl_pair_offsets,
                              uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
-                             int *ao_pair_loc, int aux_offset, int naux)
+                    int *ao_pair_loc, int aux_offset, int naux)
 {
     setup_context();
     SHARED_ARRAY(int, shl_pair0);
@@ -508,7 +508,7 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int aux_offset, int naux)
+                    int *ao_pair_loc, int aux_offset, int naux, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ejk_int3c2e_ipip_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
@@ -516,7 +516,7 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
     LAUNCH_KERNEL( ejk_int3c2e_ipip_kernel, blocks, threads, shm_size,
         ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
-        gout_stride_lookup, ao_pair_loc, aux_offset, naux);
+        gout_stride_lookup, ao_pair_loc, aux_offset, naux, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip2: %s\n", cudaGetErrorString(err));

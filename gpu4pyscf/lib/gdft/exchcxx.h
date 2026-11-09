@@ -230,18 +230,15 @@ int   xc_number_of_functionals(void);
 void  xc_available_functional_numbers(int *list);
   
 /* ---- Device entry points used by Python (unchanged ABI) ---- */
-int GDFT_xc_lda (void* stream,
-  const xc_func_type *func, int np, const double *rho,
-  xc_lda_out_params *out, xc_lda_out_params *buf);
+int GDFT_xc_lda (const xc_func_type *func, int np, const double *rho,
+  xc_lda_out_params *out, xc_lda_out_params *buf, void* stream);
 
-int GDFT_xc_gga (void* stream,
-  const xc_func_type *func, int np, const double *rho, const double *sigma,
-  xc_gga_out_params *out, xc_gga_out_params *buf);
+int GDFT_xc_gga (const xc_func_type *func, int np, const double *rho, const double *sigma,
+  xc_gga_out_params *out, xc_gga_out_params *buf, void* stream);
 
-int GDFT_xc_mgga(void* stream,
-  const xc_func_type *func, int np,
+int GDFT_xc_mgga(const xc_func_type *func, int np,
   const double *rho, const double *sigma, const double *lapl, const double *tau,
-  xc_mgga_out_params *out, xc_mgga_out_params *buf);
+  xc_mgga_out_params *out, xc_mgga_out_params *buf, void* stream);
 
 #ifdef __cplusplus
 }

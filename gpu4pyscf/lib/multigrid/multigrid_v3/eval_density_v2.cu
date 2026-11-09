@@ -266,7 +266,7 @@ extern "C" {
         LAUNCH_KERNEL( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
             rho_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
                         atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
-                        da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
+                        da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible, stream); \
     } \
     break
 
@@ -275,7 +275,7 @@ int evaluate_density_v2(double *rho_c, double *placeholder, double *dm,
                      int i_angular, int j_angular,
                      int *shl_pair_offsets, int64_t *bas_ij_idx,
                      float2 *atom_frac_ranges, int nseg, int *atom_mesh,
-                     int *mesh, double factor, double negligible)
+                     int *mesh, double factor, double negligible, cudaStream_t stream)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

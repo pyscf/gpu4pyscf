@@ -33,7 +33,7 @@
 // blocks/threads are MAKE_RANGE_3D values in scope at each call site.
 // TAG is kept for call-site compatibility; kernel names are inferred.
 #define LAUNCH_KERNEL_3D(TAG, KERNEL, ...) \
-    LAUNCH_KERNEL( KERNEL, blocks, threads, 0, __VA_ARGS__)
+    LAUNCH_KERNEL( KERNEL, blocks, threads, 0, __VA_ARGS__, stream)
 
 #define KERNEL_PROLOGUE_3D_DM() \
     setup_context(); \
@@ -52,7 +52,7 @@
 __global__
 static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
                        int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
-                       uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
+                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
     KERNEL_PROLOGUE_3D_DM();
     SHARED_ARRAY(double, s_ao, [THREADSX*THREADSY]);
@@ -123,7 +123,7 @@ static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
 __global__
 static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
                         int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
-                        uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
+                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
     KERNEL_PROLOGUE_3D_DM();
     SHARED_ARRAY(double, s_ao, [THREADSX*THREADSY]);
@@ -235,10 +235,7 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                 double s2 = ket[j*Ngrids+grid_id];
                 double s = abs(s1 * s2);
                 if (s > 1e-3 && si+sj < nbins){
-                    // #ifdef USE_SYCL
-                    // #else
                     printf("%f %f %f %d %d %d %d %d %d %d %d\n", s, s1, s2, si, sj, si+sj, grid_id, ish0, jsh0, i, j);
-                    // #endif
                 }
             }
             __syncthreads();
@@ -426,17 +423,18 @@ extern "C" {
 __host__
 int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
                          int ngrids, int nbas, int nbins, int nsegs, int *seg_loc,
-                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
+                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc, cudaStream_t stream)
 {
     int err_code = 0;
     int grid_blocks = (ngrids + THREADSX - 1) / THREADSX;
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     int nao = ao_loc[nbas];
-    checkCudaErrors(cudaMemset(out, 0, sizeof(double)*ngrids*nao));
+    checkCudaErrors(cudaMemsetAsync(out, 0, sizeof(double)*ngrids*nao, stream));
     DEVICE_INIT(uint8_t, d_sindex, screen_index, grid_blocks * bas_blocks);
     DEVICE_INIT(uint8_t, d_pair_mask, pair_mask, bas_blocks * bas_blocks);
     DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
     DEVICE_INIT(int, d_seg_loc, seg_loc, (nsegs + 1));
+    checkCudaErrors(cudaStreamSynchronize(stream));
 
     for (int seg = 0; seg < nsegs; seg++) {
         int ish0 = seg_loc[seg];
@@ -478,7 +476,7 @@ __host__
 int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
                           int ngrids, int nbas, int nbins, int npair_segs,
                           int *bas_pairs_locs, int *bas_pair2shls,
-                          uint8_t *screen_index, int *ao_loc)
+                          uint8_t *screen_index, int *ao_loc, cudaStream_t stream)
 {
     int err_code = 0;
     int grid_blocks = (ngrids + THREADSX - 1) / THREADSX;
@@ -491,6 +489,7 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
     DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
     int *d_pair2ket = d_pair2bra + tot_pairs;
     //DEVICE_INIT(double, d_wv, wv, ngrids);
+    checkCudaErrors(cudaStreamSynchronize(stream));
 
     for (int seg = 0; seg < npair_segs; seg++) {
         int task0 = bas_pairs_locs[seg];
@@ -527,7 +526,7 @@ __host__
 int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
                           int ngrids, int nbas, int nbins, int npair_segs,
                           int *bas_pairs_locs, int *bas_pair2shls,
-                          uint8_t *screen_index, int *ao_loc)
+                          uint8_t *screen_index, int *ao_loc, cudaStream_t stream)
 {
     int err_code = 0;
     int grid_blocks = (ngrids + THREADSX - 1) / THREADSX;
@@ -539,7 +538,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
     DEVICE_INIT(int, d_pair2bra, bas_pair2shls, tot_pairs * 2);
     DEVICE_INIT(int, d_ao_loc, ao_loc, (nbas + 1));
     int *d_pair2ket = d_pair2bra + tot_pairs;
-
+    checkCudaErrors(cudaStreamSynchronize(stream));
     for (int seg = 0; seg < npair_segs; seg++) {
         int task0 = bas_pairs_locs[seg];
         int task1 = bas_pairs_locs[seg+1];

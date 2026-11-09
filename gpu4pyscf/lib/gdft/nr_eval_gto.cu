@@ -64,7 +64,7 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 __global__
 static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
                           double *coords, int ngrids, int block_size,
-                          int *atm, int natm, int *bas, int nbas, double *env)
+                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     setup_context();
     SHARED_ARRAY(double, gridx_cache, [NG_PER_BLOCK*3]);
@@ -1787,13 +1787,13 @@ inline double CINTcommon_fac_sp(int l)
         }
 }
 
-int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
+int GDFTeval_gto(double *ao, int deriv, int cart,
                  double *grids, int ngrids,
                  int *bas_indices,
                  int *ao_loc, int nao,
                  int *ctr_offsets, int nctr,
                  int *local_ctr_offsets,
-                 int *bas, GTOValEnvVars *gto_envs)
+                 int *bas, GTOValEnvVars *gto_envs, cudaStream_t stream)
 {
     BasOffsets offsets;
     //DEVICE_INIT(double, d_grids, grids, ngrids * 3);
@@ -1971,9 +1971,9 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     return 0;
 }
 
-int GDFTscreen_index(cudaStream_t stream, int8_t *non0shl_mask, double log_cutoff,
+int GDFTscreen_index(int8_t *non0shl_mask, double log_cutoff,
                  double *grids, int ngrids, int block_size,
-                 int *atm, int natm, int *bas, int nbas, double *env)
+                 int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     auto threads = MAKE_RANGE_2D(NG_PER_BLOCK, 1);
     auto blocks  = MAKE_RANGE_2D((ngrids+block_size-1)/block_size,
@@ -1990,9 +1990,9 @@ int GDFTscreen_index(cudaStream_t stream, int8_t *non0shl_mask, double log_cutof
     return 0;
 }
 
-int GDFTscreen_index_legacy(cudaStream_t stream, int *non0shl_idx, double cutoff,
+int GDFTscreen_index_legacy(int *non0shl_idx, double cutoff,
                  double *grids, int ngrids, int *ctr_offsets, int nctr, int *bas,
-                 GTOValEnvVars *gto_envs)
+                 GTOValEnvVars *gto_envs, cudaStream_t stream)
 {
     auto threads = MAKE_RANGE_2D(NG_PER_BLOCK, 1);
     auto blocks  = MAKE_RANGE_2D((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK, 1);

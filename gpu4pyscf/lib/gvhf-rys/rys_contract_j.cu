@@ -837,7 +837,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 int npairs_ij, int npairs_kl, uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                uint32_t *pool, int *bas, double *env, int nao_pairs)
+                uint32_t *pool, int *bas, double *env, int nao_pairs, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -904,10 +904,10 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                     return 1;
                 }
             }
-            cudaMemset(head, 0, sizeof(int));
+            cudaMemsetAsync(head, 0, sizeof(int), stream);
             LAUNCH_KERNEL( rys_j_with_gout_kernel, blocks, threads, buflen,
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+                s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size, stream);
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
             int reserved_shm_size = buflen;
@@ -930,10 +930,10 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
             for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
                 jk1.dm = dm + (size_t)i_dm * nao_pairs;
                 jk1.vj = vj + (size_t)i_dm * nao_pairs;
-                cudaMemset(head, 0, sizeof(int));
+                cudaMemsetAsync(head, 0, sizeof(int), stream);
                 LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
                     *envs, jk1, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                    s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
+                    s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size, stream);
             }
         }
     }
@@ -950,7 +950,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
     return 0;
 }
 
-int RYS_init_rysj_constant()
+int RYS_init_rysj_constant(cudaStream_t stream)
 {
     Fold2Index i_in_fold2idx[165];
     Fold3Index i_in_fold3idx[495];
@@ -970,8 +970,9 @@ int RYS_init_rysj_constant()
             }
         } }
     }
-    cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
-    cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
+    cudaMemcpyToSymbolAsync(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index), 0, cudaMemcpyHostToDevice, stream);
+    cudaMemcpyToSymbolAsync(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index), 0, cudaMemcpyHostToDevice, stream);
+    cudaStreamSynchronize(stream);
     return 0;
 }
 }

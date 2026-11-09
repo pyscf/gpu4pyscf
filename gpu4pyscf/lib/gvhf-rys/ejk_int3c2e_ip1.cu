@@ -773,22 +773,17 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset,
-                    int nao, int npairs, int naux, int natm)
+                    int nao, int npairs, int naux, int natm, cudaStream_t stream)
 {
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     LAUNCH_KERNEL( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
         ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
         omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-        ao_pair_loc, aux_offset, naux);
-    err = cudaGetLastError();
+        ao_pair_loc, aux_offset, naux, stream);
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;
@@ -803,16 +798,11 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset,
-                    int nao, int npairs, int naux, int natm)
+                    int nao, int npairs, int naux, int natm, cudaStream_t stream)
 {
     size_t nao2 = nao * nao;
 
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
@@ -821,7 +811,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
             dm, density_auxvec, n_dm-n,
             omega, lr_factor, sr_factor, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offset, npairs, naux);
+            ao_pair_loc, aux_offset, npairs, naux, stream);
         if (density_auxvec == NULL) { // for exchange
             dm += DM_BLOCK * (size_t)npairs * naux;
         } else {
@@ -829,7 +819,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
             density_auxvec += DM_BLOCK * naux;
         }
     }
-    err = cudaGetLastError();
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
         return 1;

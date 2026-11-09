@@ -27,7 +27,7 @@
                          ((SHM)+addition_buf)*sizeof(double)); \
     LAUNCH_KERNEL( KERNEL, _blocks, _threads, \
         ((SHM)+addition_buf)*sizeof(double), \
-        *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_size); \
+        *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_size, stream); \
 }
 
 
@@ -11001,7 +11001,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
 } }
 
 int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                      float *q_cond_ij, float *q_cond_kl, double omega, int dm_size)
+                      float *q_cond_ij, float *q_cond_kl, double omega, int dm_size, cudaStream_t stream)
 {
     int li = bounds->li;
     int lj = bounds->lj;

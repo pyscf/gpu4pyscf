@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <cstddef>
@@ -250,6 +266,25 @@ static inline void cudaMemset(void* ptr, int val, size_t size) {
   sycl_get_queue()->memset(ptr, static_cast<unsigned char>(val), size);
 }
 
+// Async variant: on SYCL the queue is in-order, so submitting on the given
+// stream has exactly CUDA's async-on-stream ordering semantics.
+static inline cudaError_t cudaMemsetAsync(void* ptr, int val, size_t size,
+                                          cudaStream_t stream) {
+  stream.memset(ptr, static_cast<unsigned char>(val), size);
+  return cudaSuccess;
+}
+static inline cudaError_t cudaMemsetAsync(void* ptr, int val, size_t size) {
+  return cudaMemsetAsync(ptr, val, size, *sycl_get_queue());
+}
+
+static inline cudaError_t cudaStreamSynchronize(cudaStream_t stream) {
+  stream.wait();
+  return cudaSuccess;
+}
+static inline cudaError_t cudaStreamSynchronize() {
+  return cudaStreamSynchronize(*sycl_get_queue());
+}
+
 // --- CUDA-compat 2D memcpy + zero-copy helpers ---
 // Same names and signatures as the CUDA runtime, so .cu files call the
 // plain CUDA API with no ifdefs and no invented wrapper names.
@@ -281,6 +316,20 @@ static inline cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch,
                            *sycl_get_queue());
 }
 
+// 1D async copy: enqueued on the given stream (in-order queue => ordered
+// with respect to everything else on that queue), returns immediately.
+static inline cudaError_t cudaMemcpyAsync(void* dst, const void* src,
+                                          size_t count, cudaMemcpyKind kind,
+                                          cudaStream_t stream) {
+  (void)kind; // USM pointers: direction is implicit in the addresses
+  stream.memcpy(dst, src, count);
+  return cudaSuccess;
+}
+static inline cudaError_t cudaMemcpyAsync(void* dst, const void* src,
+                                          size_t count, cudaMemcpyKind kind) {
+  return cudaMemcpyAsync(dst, src, count, kind, *sycl_get_queue());
+}
+
 static inline cudaError_t cudaHostGetDevicePointer(void **pDevice, void *hHost,
                                                    unsigned int /*flags*/) {
   // Host USM allocations are directly device-accessible; no mapping needed.
@@ -303,6 +352,27 @@ static inline cudaError_t cudaMemcpyToSymbol(sycl_device_global<T> &symbol,
   (void)kind;
   sycl_get_queue()->memcpy(symbol, src, count, offset).wait();
   return cudaSuccess;
+}
+
+// Async variant: enqueued on the given stream, not waited on (in-order queue
+// keeps it ordered with respect to later work on the same queue).
+template <class T>
+static inline cudaError_t cudaMemcpyToSymbolAsync(sycl_device_global<T> &symbol,
+                                                   const void *src, size_t count,
+                                                   size_t offset,
+                                                   cudaMemcpyKind kind,
+                                                   cudaStream_t stream) {
+  (void)kind;
+  stream.memcpy(symbol, src, count, offset);
+  return cudaSuccess;
+}
+template <class T>
+static inline cudaError_t cudaMemcpyToSymbolAsync(sycl_device_global<T> &symbol,
+                                                   const void *src, size_t count,
+                                                   size_t offset = 0,
+                                                   cudaMemcpyKind kind = cudaMemcpyHostToDevice) {
+  return cudaMemcpyToSymbolAsync(symbol, src, count, offset, kind,
+                                 *sycl_get_queue());
 }
 
 static inline cudaError_t cudaDeviceSynchronize() {

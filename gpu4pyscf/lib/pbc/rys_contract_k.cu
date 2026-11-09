@@ -20,6 +20,9 @@
 #include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
+#ifndef USE_SYCL
+#include "gvhf-rys/gxyz_offset.cuh"
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -339,6 +342,7 @@ while (1) {
 
 // Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
 // at (4,4,4,4), and the launcher copies it out in chunks of 256.
+#ifdef USE_SYCL
 void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
 {
 /*
@@ -377,6 +381,7 @@ void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
         }
     }
 }
+#endif
 
 void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                           int shm_size, int gout_stride_max)
@@ -447,7 +452,7 @@ extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bo
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    float dm_penalty, int64_t *pool, int *head, int workers);
+                    float dm_penalty, int64_t *pool, int *head, int workers, cudaStream_t stream);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -457,7 +462,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                int64_t *pool, int nbas_cell0, int *bas, double omega)
+                int64_t *pool, int nbas_cell0, int *bas, double omega, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -500,14 +505,18 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int)*3);
+    cudaMemsetAsync(head, 0, sizeof(int)*3, stream);
 
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
-                           diffuse_exps, dm_penalty, pool, head, workers)) {
+                           diffuse_exps, dm_penalty, pool, head, workers, stream)) {
+#ifdef USE_SYCL
         GXYZOffset gxyz_offset[256*3];
         RYS_make_gxyz_offset(gxyz_offset, bounds);
+#else
+        const GXYZOffset *gxyz_offset = RYS_get_gxyz_offset(li, lj, lk, ll);
+#endif
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
@@ -516,9 +525,9 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
         auto launch = [&](auto offset, int tile_chunk) {
             checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
+                cudaMemcpyToSymbolAsync(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
+                                   0, cudaMemcpyHostToDevice, stream));
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
@@ -539,7 +548,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 dm_penalty, pool, head + offset/256,
-                gout_pattern, reserved_shm_size);
+                gout_pattern, reserved_shm_size, stream);
         };
 
         launch(0, 256);

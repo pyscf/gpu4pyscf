@@ -617,7 +617,7 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
 
 extern "C" {
 int PBC_ft_ao_deriv(double *grad, double *sigma, double *auxvec, double2 *dm_auxG,
-                    double *GvT, RysIntEnvVars *envs, int ngrids)
+                    double *GvT, RysIntEnvVars *envs, int ngrids, cudaStream_t stream)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
@@ -625,7 +625,7 @@ int PBC_ft_ao_deriv(double *grad, double *sigma, double *auxvec, double2 *dm_aux
     auto threads = make_block(NG_PER_BLOCK, nsh_per_block);
     auto blocks = make_grid(nbatches_grids, nbatches_shls);
     LAUNCH_KERNEL( ft_ao_deriv_kernel, blocks, threads, 0,
-            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids);
+            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_deriv: %s\n", cudaGetErrorString(err));
@@ -638,7 +638,7 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
                          double2 *vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int permutation_symmetry)
+                         int permutation_symmetry, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || ngrids == 0) {
         return 0;
@@ -649,7 +649,7 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
     LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_deriv: %s\n", cudaGetErrorString(err));
@@ -662,7 +662,7 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
                          double2 *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int permutation_symmetry)
+                         int permutation_symmetry, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || ngrids == 0) {
         return 0;
@@ -673,7 +673,7 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
     LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
             out, sigma, nullptr, dm_vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_deriv: %s\n", cudaGetErrorString(err));

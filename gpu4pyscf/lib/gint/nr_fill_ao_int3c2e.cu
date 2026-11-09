@@ -36,8 +36,8 @@
 
 #define GINT_CAT_(a, b) a##b
 #define GINT_CAT(a, b)  GINT_CAT_(a, b)
-#define GINT_LAUNCH_KERNEL(...) \
-    LAUNCH_KERNEL((__VA_ARGS__), blocks, threads, 0, stream, *envs, *eri, *offsets);
+#define GINT_LAUNCH_KERNEL(KERNEL, ...) \
+    LAUNCH_KERNEL(KERNEL, blocks, threads, 0, __VA_ARGS__, *envs, *eri, *offsets);
 
 static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
@@ -54,36 +54,36 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
     const int type_ijkl = li * 100 + lj * 10 + lk;
     switch (type_ijkl) {
         // nroots = 1
-        case 0: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0000) break;
-        case 1: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0010) break;
-        case 10: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0100) break;
-        case 100: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel1000) break;
+        case 0: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0000, stream) break;
+        case 1: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0010, stream) break;
+        case 10: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0100, stream) break;
+        case 100: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel1000, stream) break;
         // nroots = 2
-        case 2: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel0020) break;
-        case 3: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel0030) break;
-        case 101: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1010) break;
-        case 102: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1020) break;
-        case 110: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1100) break;
-        case 111: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1110) break;
-        case 200: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2000) break;
-        case 201: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2010) break;
-        case 210: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2100) break;
-        case 300: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3000) break;
+        case 2: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel0020, stream) break;
+        case 3: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel0030, stream) break;
+        case 101: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1010, stream) break;
+        case 102: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1020, stream) break;
+        case 110: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1100, stream) break;
+        case 111: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1110, stream) break;
+        case 200: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2000, stream) break;
+        case 201: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2010, stream) break;
+        case 210: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2100, stream) break;
+        case 300: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3000, stream) break;
         // nroots = 3
-        case 103: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1030) break;
-        case 112: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1120) break;
-        case 113: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1130) break;
-        case 202: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2020) break;
-        case 203: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2030) break;
-        case 211: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2110) break;
-        case 212: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2120) break;
-        case 220: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2200) break;
-        case 221: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2210) break;
-        case 301: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3010) break;
-        case 302: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3020) break;
-        case 310: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3100) break;
-        case 311: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3110) break;
-        case 320: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3200) break;
+        case 103: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1030, stream) break;
+        case 112: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1120, stream) break;
+        case 113: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1130, stream) break;
+        case 202: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2020, stream) break;
+        case 203: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2030, stream) break;
+        case 211: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2110, stream) break;
+        case 212: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2120, stream) break;
+        case 220: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2200, stream) break;
+        case 221: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2210, stream) break;
+        case 301: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3010, stream) break;
+        case 302: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3020, stream) break;
+        case 310: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3100, stream) break;
+        case 311: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3110, stream) break;
+        case 320: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3200, stream) break;
         default: {
             const int gsize = 3*nrys_roots*(li+1)*(lj+1)*(lk+1);
             const int shm_size = gsize*sizeof(double);
@@ -98,7 +98,7 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
             auto threads = make_block(THREADSX*THREADSY);
             auto blocks = make_grid(ntasks_ij, ntasks_kl);
             LAUNCH_KERNEL( GINTfill_int3c2e_kernel, blocks, threads, shm_size,
-                *envs, *eri, *offsets);
+                *envs, *eri, *offsets, stream);
         }
     }
 
@@ -111,10 +111,10 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
 }
 
 extern "C" {
-int GINTfill_int3c2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, int nao,
+int GINTfill_int3c2e(BasisProdCache *bpcache, double *eri, int nao,
                    int *strides, int *ao_offsets,
                    int *bins_locs_ij, int *bins_locs_kl, int nbins,
-                   int cp_ij_id, int cp_kl_id, double omega)
+                   int cp_ij_id, int cp_kl_id, double omega, cudaStream_t stream)
 {
     ContractionProdType *cp_ij = bpcache->cptype + cp_ij_id;
     ContractionProdType *cp_kl = bpcache->cptype + cp_kl_id;
@@ -130,7 +130,8 @@ int GINTfill_int3c2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, 
 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
-    checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    checkCudaErrors(cudaMemcpyToSymbolAsync(c_bpcache, bpcache, sizeof(BasisProdCache), 0, cudaMemcpyHostToDevice, stream));
+    cudaStreamSynchronize(stream);
 
     ERITensor eritensor;
     eritensor.stride_j = strides[1];

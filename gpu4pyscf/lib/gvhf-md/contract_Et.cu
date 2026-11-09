@@ -315,7 +315,7 @@ void Rt_to_dm_kernel(double *dm, double *Rt, int n_dm, RysIntEnvVars envs,
 
 __global__ static
 void aux_to_Rt_kernel(double *out, double *aux, RysIntEnvVars envs,
-                      int *aux_loc, int *aux_xyz_loc, int nbas_aux)
+              int *aux_loc, int *aux_xyz_loc, int nbas_aux)
 {
     setup_context();
     int ksh = global_x;
@@ -486,12 +486,12 @@ void aux_to_Rt_kernel(double *out, double *aux, RysIntEnvVars envs,
 
 extern "C" {
 int dm_to_Rt(double *out, double *dm, int n_dm, RysIntEnvVars *envs,
-             uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc)
+             uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc, cudaStream_t stream)
 {
     int blocks = (npairs + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL(dm_to_Rt_kernel, grid, threads, 0, out, dm, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
+    LAUNCH_KERNEL(dm_to_Rt_kernel, grid, threads, 0, out, dm, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in dm_to_Rt_kernel: %s\n", cudaGetErrorString(err));
@@ -501,12 +501,12 @@ int dm_to_Rt(double *out, double *dm, int n_dm, RysIntEnvVars *envs,
 }
 
 int Rt_to_dm(double *dm, double *Rt, int n_dm, RysIntEnvVars *envs,
-             uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc)
+             uint32_t *bas_ij_idx, int *pair_loc, int npairs, int *ao_loc, cudaStream_t stream)
 {
     int blocks = (npairs + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL(Rt_to_dm_kernel, grid, threads, 0, dm, Rt, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc);
+    LAUNCH_KERNEL(Rt_to_dm_kernel, grid, threads, 0, dm, Rt, n_dm, *envs, bas_ij_idx, pair_loc, npairs, ao_loc, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in Rt_to_dm_kernel: %s\n", cudaGetErrorString(err));
@@ -516,12 +516,12 @@ int Rt_to_dm(double *dm, double *Rt, int n_dm, RysIntEnvVars *envs,
 }
 
 int aux_to_Rt(double *out, double *aux, RysIntEnvVars *envs,
-              int *aux_loc, int *aux_xyz_loc, int nbas_aux)
+              int *aux_loc, int *aux_xyz_loc, int nbas_aux, cudaStream_t stream)
 {
     int blocks = (nbas_aux + THREADS - 1) / THREADS;
     auto threads = make_block(THREADS);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL(aux_to_Rt_kernel, grid, threads, 0, out, aux, *envs, aux_loc, aux_xyz_loc, nbas_aux);
+    LAUNCH_KERNEL(aux_to_Rt_kernel, grid, threads, 0, out, aux, *envs, aux_loc, aux_xyz_loc, nbas_aux, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in aux_to_Rt_kernel: %s\n", cudaGetErrorString(err));

@@ -982,7 +982,7 @@ while (1) {
 __global__ static
 void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
                             float *exps, float *log_coef, float log_cutoff,
-                            int permutation_symmetry)
+                        int permutation_symmetry)
 {
     setup_context();
     int bas_ij = global_x;
@@ -1122,7 +1122,7 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
                            int *gout_stride_lookup, int *ao_pair_loc,
                            int ao_pair_offset, int aux_offset,
                            int nauxbas, int naux, int to_sph,
-                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
         return 0;
@@ -1131,7 +1131,7 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( pbc_int3c2e_latsum23_kernel, blocks, threads, shm_size,
@@ -1140,7 +1140,7 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
             gout_stride_lookup, ao_pair_loc,
             ao_pair_offset, aux_offset, nauxbas, naux, to_sph,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, nbatches_shl_pair, nbatches_ksh);
+            head, nbatches_shl_pair, nbatches_ksh, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
@@ -1151,7 +1151,7 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
 
 int bvk_ovlp_img_counts(int *img_counts, PBCIntEnvVars *envs,
                         float *exps, float *log_coef, float log_cutoff,
-                        int permutation_symmetry)
+                        int permutation_symmetry, cudaStream_t stream)
 {
     constexpr int threads = 512;
     int bvk_nbas = envs->nbas * envs->bvk_ncells;
@@ -1159,7 +1159,7 @@ int bvk_ovlp_img_counts(int *img_counts, PBCIntEnvVars *envs,
     auto blocks = make_grid(nbatches);
     auto thread_block = make_block(threads);
     LAUNCH_KERNEL( ovlp_img_counts_kernel, blocks, thread_block, 0,
-            img_counts, *envs, exps, log_coef, log_cutoff, permutation_symmetry);
+            img_counts, *envs, exps, log_coef, log_cutoff, permutation_symmetry, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_img_counts: %s\n", cudaGetErrorString(err));
@@ -1169,14 +1169,14 @@ int bvk_ovlp_img_counts(int *img_counts, PBCIntEnvVars *envs,
 }
 
 int bvk_ovlp_img_idx(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx, int npairs,
-                     PBCIntEnvVars *envs, float *exps, float *log_coef, float log_cutoff)
+                     PBCIntEnvVars *envs, float *exps, float *log_coef, float log_cutoff, cudaStream_t stream)
 {
     constexpr int threads = 512;
     int blocks = (npairs + threads-1) / threads;
     auto grid = make_grid(blocks);
     auto thread_block = make_block(threads);
     LAUNCH_KERNEL( ovlp_img_idx_kernel, grid, thread_block, 0,
-        img_idx, img_offsets, bas_ij_idx, npairs, *envs, exps, log_coef, log_cutoff);
+        img_idx, img_offsets, bas_ij_idx, npairs, *envs, exps, log_coef, log_cutoff, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_img_idx: %s\n", cudaGetErrorString(err));

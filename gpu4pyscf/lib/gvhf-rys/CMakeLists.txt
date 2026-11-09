@@ -31,9 +31,7 @@ if (USE_SYCL)
   # rys_k_0000 .. rys_k_3200 with different bodies. SYCL derives the kernel
   # identity from the name-class type, whose host-side registry symbols are
   # vague-linkage and collapse at link time -- both launch sites would then
-  # dispatch to the same body, silently, with no diagnostic. (Verified
-  # 2026-10-12: the jk dispatch ran the K-only bodies -- K was computed
-  # correctly in get_jk results while vj came back all-zero.)
+  # dispatch to the same body, silently, with no diagnostic.
   #
   # The .cu files are auto-generated upstream and must stay byte-identical
   # to upstream/master, so the per-TU disambiguation is done with object-like

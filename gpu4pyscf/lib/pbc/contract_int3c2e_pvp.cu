@@ -341,20 +341,20 @@ int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, double omega, PB
                                    int shm_size, int npairs, int nbatches_ksh, int nauxbas,
                                    uint32_t *bas_ij_idx, int *ksh_offsets,
                                    int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
-                                   float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                                   float *diffuse_exps, float *diffuse_coefs, float log_cutoff, cudaStream_t stream)
 {
     cudaFuncSetAttribute(contract_int3c2e_pvp_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( contract_int3c2e_pvp_auxvec_kernel, blocks, threads, shm_size,
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, npairs, nbatches_ksh);
+            head, npairs, nbatches_ksh, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_pvp_auxvec: %s\n", cudaGetErrorString(err));

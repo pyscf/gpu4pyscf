@@ -122,7 +122,7 @@ int launch_rsc_kernel_c(
     const int* nd, const double* ed,
     const double* fx_table,
     const double* b_table,
-    double* out_val
+    double* out_val, cudaStream_t stream
 ) {
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
@@ -131,7 +131,7 @@ int launch_rsc_kernel_c(
     LAUNCH_KERNEL( rsc_kernel, grid, block, 0,
         n_tasks, hartree2ev, k_vec,
         na, ea, nb, eb, nc, ec, nd, ed,
-        fx_table, b_table, out_val);
+        fx_table, b_table, out_val, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

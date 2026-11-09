@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <string>
 #include "sycl_device.hpp"
 
@@ -78,42 +94,6 @@ GPU4PYSCF_EXPORT void sycl_set_device(int device_id) {
     }
     g_current_device.store(device_id, std::memory_order_relaxed);
 }
-
-// GPU4PYSCF_EXPORT void sycl_queue_synchronize(void* queue_ptr) {
-//     auto* q = static_cast<sycl::queue*>(queue_ptr);
-//     q->wait();
-// }
-
-// GPU4PYSCF_EXPORT void* sycl_record_event() {
-//     auto* q = static_cast<sycl::queue*>(sycl_get_queue_ptr());
-//     auto ev = std::make_shared<sycl::event>(q->ext_oneapi_submit_barrier());
-
-//     void* handle = static_cast<void*>(ev.get());
-//     {
-//         std::lock_guard<std::mutex> lock(g_event_mutex);
-//         g_event_map[handle] = ev;
-//     }
-//     return handle;
-// }
-
-// GPU4PYSCF_EXPORT void sycl_wait_event(void* handle) {
-//     std::shared_ptr<sycl::event> ev;
-//     {
-//         std::lock_guard<std::mutex> lock(g_event_mutex);
-//         auto it = g_event_map.find(handle);
-//         if (it != g_event_map.end()) {
-//             ev = it->second;
-//             g_event_map.erase(it);
-//         }
-//     }
-//     if (ev) {
-//         try {
-//             ev->wait();
-//         } catch (...) {
-//             // Swallow — may happen during shutdown
-//         }
-//     }
-// }
 
 GPU4PYSCF_EXPORT size_t sycl_get_total_memory() {
     auto* q = static_cast<sycl::queue*>(sycl_get_queue_ptr());

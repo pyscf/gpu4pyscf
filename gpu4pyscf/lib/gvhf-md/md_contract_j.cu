@@ -928,9 +928,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 }
 
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                  float *q_cond_ij, float *q_cond_kl, double omega);
+                  float *q_cond_ij, float *q_cond_kl, double omega, cudaStream_t stream);
 int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                  float *q_cond_ij, float *q_cond_kl, double omega, int dm_size);
+                  float *q_cond_ij, float *q_cond_kl, double omega, int dm_size, cudaStream_t stream);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
@@ -940,7 +940,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float *qd_ij_max, float *qd_kl_max,
                 float *q_cond_ij, float *q_cond_kl, float cutoff,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -987,7 +987,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     const int rt2_off = offset_for_Rt2_idx(lij, lkl);
     const int efg_off = offset_for_Rt2_idx(0, lkl);
     if (n_dm == 1) {
-        if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega)) {
+        if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, stream)) {
             cudaFuncSetAttribute(md_j_1dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
@@ -1000,10 +1000,10 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
             LAUNCH_KERNEL( md_j_1dm_kernel, blocks, threads, buflen,
                                 *envs, jk, bounds, q_cond_ij, q_cond_kl,
                                 threads_ij, threads_kl, tilex, tiley,
-                                rt2_off, efg_off);
+                                rt2_off, efg_off, stream);
         }
     } else {
-        if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size)) {
+        if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size, stream)) {
             cudaFuncSetAttribute(md_j_4dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
@@ -1020,7 +1020,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 LAUNCH_KERNEL( md_j_4dm_kernel, blocks, threads, buflen,
                                     *envs, jk, bounds, q_cond_ij, q_cond_kl,
                                     threads_ij, threads_kl, tilex, tiley, dm_size,
-                                    rt2_off, efg_off);
+                                    rt2_off, efg_off, stream);
             }
         }
     }

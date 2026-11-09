@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,11 +33,6 @@
 #include <atomic>
 #include <mutex>
 #include "exchcxx.h"                     // ABI structs
-
-// Verbose tracing of functional construction and of every GGA evaluation.
-// Off by default: the GGA dump copies np doubles device->host per call, so
-// leaving it on would dominate the runtime of any real SCF.
-// Build with -DGDFT_EXCHCXX_TRACE=1 to enable.
 #ifndef GDFT_EXCHCXX_TRACE
 #define GDFT_EXCHCXX_TRACE 0
 #endif
@@ -37,8 +48,6 @@ namespace detail {
     for(auto &c : s) c = char(std::toupper(unsigned(c)));
     return s;
   }
-
-  // Fast path: look up by canonical ExchCXX functional name (already in functional_map)
   inline std::optional<ExchCXX::Functional>
   functional_from_string(std::string_view s) {
     const auto key = to_upper(std::string{s});
@@ -48,8 +57,6 @@ namespace detail {
       return std::nullopt;                         // not present
     }
   }
-
-  // Minimal alias map: LibXC “family labels” → ExchCXX canonical name
   static const std::unordered_map<std::string,std::string> kLibXCAliases = {
     // Hybrids / composites
     {"HYB_GGA_XC_B3LYP",   "B3LYP"}, // this is an issue since B3LYP uses VWN5 varient, but looks like pyscf 2.3.0> uses B3LYP VWN_RPA version
@@ -61,8 +68,6 @@ namespace detail {
     {"HYB_GGA_XC_B3PW91",  "B3PW91"}, // ok
     {"HYB_GGA_XC_BHANDH",  "BHANDH"},
     {"HYB_GGA_XC_O3LYP",   "O3LYP"}, // ok
-
-    // Pure composites
     {"GGA_XC_PBE",         "PBE"},
     {"GGA_XC_REVPBE",      "REVPBE"},
     {"GGA_XC_BLYP",        "BLYP"}, // needs checking
@@ -73,15 +78,11 @@ namespace detail {
     {"GGA_XC_XLYP",        "XLYP"},
     {"GGA_XC_OPBE",        "OPBE"}, // incorrect
     {"GGA_XC_OLYP",        "OLYP"}, // incorrect
-
-    // mGGA composites
     {"MGGA_XC_SCAN",       "SCAN"},
     {"MGGA_XC_R2SCAN",     "R2SCAN"},
     {"MGGA_XC_TPSS",       "TPSS"},
     {"MGGA_XC_REVTPSS",    "REVTPSS"},
     {"MGGA_XC_M06_L",      "M06L"},
-
-    // LDA packs
     {"LDA_XC_VWN",         "SPW92"}, // LibXC’s “VWN” combo equals Slater + VWN
     {"LDA_XC_SVWN",        "SVWN5"}, // Many LibXC builds alias SVWN→SVWN5
     {"LDA_XC_SVWN3",       "SVWN3"},
@@ -89,46 +90,27 @@ namespace detail {
     // {"LDA_XC_LDA",         "LDA"},
   };
 
-  // Robust LibXC → ExchCXX functional resolution.
-  // 1) Direct hit in alias table
-  // 2) Heuristics for common pairs (e.g. GGA_X_PBE + GGA_C_PBE ⇒ PBE) can be handled
-  //    by your caller if it sees both half-labels; for single labels use the alias table.
   inline std::optional<ExchCXX::Functional>
   libxc_name_to_functional(std::string_view libxc_name) {
     GDFT_TRACE("[gdft] libxc_name_to_functional(): %s\n",
                std::string(libxc_name).c_str());
     auto key = to_upper(std::string{libxc_name});
-
-    // 1) Exact alias → canonical functional name
     if (auto it = kLibXCAliases.find(key); it != kLibXCAliases.end()) {
       if (auto f = functional_from_string(it->second)) return f;
     }
-
-    // 2) Loose pattern matches for families (cheap and safe)
-    // CAM-B3LYP spellings vary a bit across LibXC versions
     if (key.find("CAM") != std::string::npos && key.find("B3LYP") != std::string::npos) {
       if (auto f = functional_from_string("CAMB3LYP")) return f;
     }
-    // LRC-ωPBE family: exact names only. ExchCXX builtins bake ω in, so a
-    // family member with a different ω/α (LC_WPBE, *_WHS: ω=0.4) has no
-    // builtin and must fail, not fall back to a relative. The former
-    // substring test matched the 'H' of the "HYB_" prefix and silently
-    // evaluated every member as LRC-ωPBEh (ω=0.2): 9 Ha off for
-    // HYB_GGA_XC_LC_WPBE_WHS while K still used ω=0.4.
     if (key == "HYB_GGA_XC_LRC_WPBE") {
       if (auto f = functional_from_string("LRCWPBE"))  return f;
     }
     if (key == "HYB_GGA_XC_LRC_WPBEH") {
       if (auto f = functional_from_string("LRCWPBEH")) return f;
     }
-
-    // 3) Already a canonical ExchCXX name? (users sometimes pass that)
     if (auto f = functional_from_string(key)) return f;
 
     return std::nullopt;
   }
-
-  // The following map is from https://github.com/wavefunction91/ExchCXX/blob/master/src/libxc.cxx#L73
   std::unordered_map< ExchCXX::Kernel, std::string > libxc_kernel_map {
     // LDA Functionals
     { ExchCXX::Kernel::SlaterExchange, "LDA_X"             },
@@ -140,8 +122,6 @@ namespace detail {
     { ExchCXX::Kernel::PW91_LDA,       "LDA_C_PW"          },
     { ExchCXX::Kernel::PW91_LDA_MOD,   "LDA_C_PW_MOD"      },
     { ExchCXX::Kernel::PW91_LDA_RPA,   "LDA_C_PW_RPA"      },
-
-    // GGA Functionals
     { ExchCXX::Kernel::PBE_X,          "GGA_X_PBE"         },
     { ExchCXX::Kernel::PBE_C,          "GGA_C_PBE"         },
     { ExchCXX::Kernel::revPBE_X,       "GGA_X_PBE_R"       },
@@ -170,8 +150,6 @@ namespace detail {
     { ExchCXX::Kernel::wB97X_D3_XC,    "HYB_GGA_XC_WB97X_D3"},
     { ExchCXX::Kernel::HJS_PBE_X,      "GGA_X_HJS_PBE" },
     { ExchCXX::Kernel::wPBEh_X_default0, "GGA_X_WPBEH" },
-
-    // MGGA Functionals
     { ExchCXX::Kernel::SCAN_C,         "MGGA_C_SCAN"       },
     { ExchCXX::Kernel::SCAN_X,         "MGGA_X_SCAN"       },
     { ExchCXX::Kernel::SCANL_C,        "MGGA_C_SCANL"      },
@@ -224,8 +202,6 @@ namespace detail {
     { ExchCXX::Kernel::M11_X,          "HYB_MGGA_X_M11"    },
     { ExchCXX::Kernel::M05_X,          "HYB_MGGA_X_M05"    },
     { ExchCXX::Kernel::M05_2X_X,       "HYB_MGGA_X_M05_2X" },
-
-    // KEDFs
     { ExchCXX::Kernel::PC07_K,         "MGGA_K_PC07"       },
     { ExchCXX::Kernel::PC07OPT_K,      "MGGA_K_PC07_OPT"   },
   };
@@ -234,14 +210,9 @@ namespace detail {
 
   inline void ensure_exchcxx_initialized(ExchCXX::Spin spin) {
     std::call_once(g_exchcxx_init_once, [spin]{ ExchCXX::initialize(spin); });
-    //g_exchcxx_users.fetch_add(1, std::memory_order_relaxed);
   }
 
   inline void maybe_finalize_exchcxx() {
-    // Usually safer to never finalize until process exit.
-    // If you do want refcounted finalize, uncomment:
-    // if(g_exchcxx_users.fetch_sub(1, std::memory_order_relaxed) == 1)
-    //   ExchCXX::finalize();
   }
 
   static bool is_composite_or_hybrid_name(const std::string& s_upper){
@@ -259,8 +230,6 @@ namespace detail {
     if(s_upper.find("CAM")   != std::string::npos) return true;
     return false;
   }
-
-  // case-insensitive equality
   static bool iequals(const std::string& a, const std::string& b){
     if(a.size() != b.size()) return false;
     for(size_t i=0;i<a.size();++i){
@@ -268,8 +237,6 @@ namespace detail {
     }
     return true;
   }
-
-  // Invert your libxc_kernel_map: LibXC name -> Kernel (case-insensitive match)
   static std::optional<ExchCXX::Kernel>
   kernel_from_libxc_name(const std::string& libxc_name){
     for(const auto& kv : libxc_kernel_map){
@@ -277,16 +244,12 @@ namespace detail {
     }
     return std::nullopt;
   }
-
-  // True for Laplacian-requiring single-kernel variants (SCANL, R2SCANL, etc.)
   static bool libxc_name_needs_lapl(const std::string& libxc_name_upper){
     return (libxc_name_upper.find("_R2SCANL") != std::string::npos) ||
       (libxc_name_upper.find("_SCANL")   != std::string::npos);
   }
 
 } // namespace detail
-
-
 /* ---------------- Version / reference ---------------- */
 static const char* kRef   = "ExchCXX GPU shim (libxc ABI)";
 static const char* kDOI   = "";
@@ -300,8 +263,6 @@ const char *xc_reference_key(void)  { return kKey; }
 void xc_version(int *maj,int *min,int *mic){ if(maj) *maj=1; if(min)*min=0; if(mic)*mic=0; }
 const char *xc_version_string(void) { return kVers; }
 }
-
-
 static const std::map<int, std::string> libxc_id_to_name = {
   // --- LDA Exchange ---
   {1,   "LDA_X"},
@@ -313,8 +274,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {532, "LDA_X_REL"},
   {692, "LDA_X_SLOC"},
   {641, "LDA_X_YUKAWA"},
-
-  // --- LDA Correlation ---
   {18,  "LDA_C_1D_CSC"},
   {26,  "LDA_C_1D_LOOS"},
   {15,  "LDA_C_2D_AMGB"},
@@ -361,8 +320,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {317, "LDA_C_W20"},
   {2,   "LDA_C_WIGNER"},
   {6,   "LDA_C_XALPHA"},
-
-  // --- LDA Exchange–Correlation ---
   {536, "LDA_XC_1D_EHWLRG_1"},
   {537, "LDA_XC_1D_EHWLRG_2"},
   {538, "LDA_XC_1D_EHWLRG_3"},
@@ -374,22 +331,14 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {20,  "LDA_XC_TETER93"},
   {599, "LDA_XC_TIH"},
   {43,  "LDA_XC_ZLP"},
-
-  // --- LDA kinetic ---
   {51,  "LDA_K_LP"},
   {580, "LDA_K_LP96"},
   {50,  "LDA_K_TF"},
   {550, "LDA_K_ZLP"},
-
-  // --- Hybrid LDA exchange ---
   {653, "HYB_LDA_X_ERF"},
-
-  // --- Hybrid LDA exchange-correlation ---
   {588, "HYB_LDA_XC_BN05"},
   {178, "HYB_LDA_XC_CAM_LDA0"},
   {177, "HYB_LDA_XC_LDA0"},
-
-  // --- GGA exchange ---
   {128, "GGA_X_2D_B86"},
   {124, "GGA_X_2D_B86_MGC"},
   {127, "GGA_X_2D_B88"},
@@ -498,8 +447,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {118, "GGA_X_WC"},
   {524, "GGA_X_WPBEH"},
   {123, "GGA_X_XPBE"},
-
-  // --- GGA correlation ---
   {39,  "GGA_C_ACGGA"},
   {176, "GGA_C_ACGGAP"},
   {135, "GGA_C_AM05"},
@@ -564,8 +511,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {557, "GGA_C_ZVPBEINT"},
   {606, "GGA_C_ZVPBELOC"},
   {558, "GGA_C_ZVPBESOL"},
-
-  // --- GGA exchange–correlation ---
   {327, "GGA_XC_B97_3C"},
   {170, "GGA_XC_B97_D"},
   {96,  "GGA_XC_B97_GGA1"},
@@ -601,8 +546,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {196, "GGA_XC_TH_FL"},
   {255, "GGA_XC_VV10"},
   {166, "GGA_XC_XLYP"},
-
-  // --- GGA kinetic ---
   {506, "GGA_K_ABSP1"},
   {507, "GGA_K_ABSP2"},
   {277, "GGA_K_ABSP3"},
@@ -654,16 +597,12 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {619, "GGA_K_VT84F"},
   {500, "GGA_K_VW"},
   {503, "GGA_K_YT65"},
-
-  // --- HYB_GGA exchange ---
   {646, "HYB_GGA_X_CAM_S12G"},
   {647, "HYB_GGA_X_CAM_S12H"},
   {81,  "HYB_GGA_X_N12_SX"},
   {656, "HYB_GGA_X_PBE_ERF_GWS"},
   {496, "HYB_GGA_X_S12H"},
   {426, "HYB_GGA_X_SOGGA11_X"},
-
-  // --- HYB_GGA exchange–correlation ---
   {607, "HYB_GGA_XC_APBE0"},
   {409, "HYB_GGA_XC_APF"},
   {416, "HYB_GGA_XC_B1LYP"},
@@ -771,8 +710,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {615, "HYB_GGA_XC_WHPBE0"},
   {612, "HYB_GGA_XC_WP04"},
   {411, "HYB_GGA_XC_X3LYP"},
-
-  // --- MGGA exchange ---
   {609, "MGGA_X_2D_JS17"},
   {210, "MGGA_X_2D_PRHG07"},
   {211, "MGGA_X_2D_PRHG07_PRP10"},
@@ -882,8 +819,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {202, "MGGA_X_TPSS"},
   {651, "MGGA_X_VCML"},
   {541, "MGGA_X_VT84"},
-
-  // --- MGGA correlation ---
   {571, "MGGA_C_B88"},
   {397, "MGGA_C_B94"},
   {240, "MGGA_C_BC95"},
@@ -936,8 +871,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {323, "MGGA_C_TPSS_GAUSSIAN"},
   {247, "MGGA_C_TPSSLOC"},
   {232, "MGGA_C_VSXC"},
-
-  // --- MGGA exchange-correlation ---
   {254, "MGGA_XC_B97M_V"},
   {229, "MGGA_XC_CC06"},
   {288, "MGGA_XC_HLE17"},
@@ -946,8 +879,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {242, "MGGA_XC_TPSSLYP1W"},
   {652, "MGGA_XC_VCML_RVV10"},
   {42,  "MGGA_XC_ZLP"},
-
-  // --- MGGA kinetic ---
   {629, "MGGA_K_CSK1"},
   {630, "MGGA_K_CSK4"},
   {631, "MGGA_K_CSK_LOC1"},
@@ -960,8 +891,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {634, "MGGA_K_PC07_OPT"},
   {220, "MGGA_K_PGSL025"},
   {621, "MGGA_K_RDA"},
-
-  // --- HYB MGGA Exchange / XC ---
   {279, "HYB_MGGA_X_BMK"},
   {340, "HYB_MGGA_X_CF22D"},
   {36,  "HYB_MGGA_X_DLDF"},
@@ -985,8 +914,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {583, "HYB_MGGA_X_REVSCAN0"},
   {264, "HYB_MGGA_X_SCAN0"},
   {282, "HYB_MGGA_X_TAU_HCTH"},
-
-  // --- HYB MGGA XC ---
   {563, "HYB_MGGA_XC_B0KCIS"},
   {441, "HYB_MGGA_XC_B86B95"},
   {440, "HYB_MGGA_XC_B88B95"},
@@ -1016,10 +943,6 @@ static const std::map<int, std::string> libxc_id_to_name = {
   {447, "HYB_MGGA_XC_X1B95"},
   {448, "HYB_MGGA_XC_XB1K"}
 };
-
-
-// ----- shared helpers -----
-
 static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
                                           int* family_out,
                                           bool* needs_lapl_out)
@@ -1038,8 +961,6 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
 
     if(family_out) *family_out = fam;
   };
-
-  // 1) Normalize input
   std::string s  = in;
   std::string su = to_upper(s);
 
@@ -1048,8 +969,6 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
     if(needs_lapl_out) *needs_lapl_out = false;
     throw std::invalid_argument("Empty functional name/id");
   }
-
-  // 2) If user passed a numeric LibXC id, translate it to a LibXC name
   bool is_numeric = std::all_of(su.begin(), su.end(), [](unsigned char c){ return std::isdigit(c); });
   if(is_numeric){
     int id = 0;
@@ -1065,8 +984,6 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
       throw std::invalid_argument(oss.str());
     }
   }
-
-  // 3) Reject obvious composite/hybrid-XC combos (this shim is for single kernels)
   if(is_composite_or_hybrid_name(su)){
     if(family_out) *family_out = -1;
     if(needs_lapl_out) *needs_lapl_out = false;
@@ -1074,8 +991,6 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
     oss << "Composite/Hybrid-XC label not supported as single kernel: " << su;
     throw std::invalid_argument(oss.str());
   }
-
-  // 4) Resolve LibXC name -> ExchCXX::Kernel using your libxc_kernel_map
   auto optk = kernel_from_libxc_name(su);
   if(!optk){
     if(family_out) *family_out = -1;
@@ -1084,8 +999,6 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
     oss << "No ExchCXX::Kernel mapping for LibXC name: " << su;
     throw std::invalid_argument(oss.str());
   }
-
-  // 5) Fill outs
   set_family(su);
   if(needs_lapl_out) *needs_lapl_out = libxc_name_needs_lapl(su);
 
@@ -1102,8 +1015,6 @@ extern "C" int xc_functional_get_number(const char *name) {
   if(!name) return 0;
   int family=0; bool need_lapl=false;
   auto k = map_name_to_kernel(name, &family, &need_lapl);
-  // You can’t encode need_lapl separately in this 16+16 scheme unless you dedicate a bit.
-  // If you need it later, recompute from the kernel at init time.
   return (family << 16) | static_cast<int>(k);
 }
 extern "C" const char *xc_functional_get_name(int number) {
@@ -1114,16 +1025,6 @@ extern "C" const char *xc_functional_get_name(int number) {
   }
   return nullptr;  // LibXC ID not found
 }
-// LibXC IDs this shim can actually evaluate on the device.
-//
-// libxc_id_to_name is a full LibXC ID->name table, but ExchCXX's builtin
-// backend implements only a subset of those functionals. Advertising the
-// whole table makes gpu4pyscf/dft/libxc.py set XCfun.on_gpu = True for every
-// functional; xc_func_init then returns 3 ("caller should fall back") and
-// that caller raises RuntimeError instead, so the CPU path in
-// numint.eval_xc_eff() is never reached. Reporting only the resolvable IDs
-// keeps on_gpu honest, and everything else transparently uses PySCF's CPU
-// libxc.
 static const std::vector<int>& supported_libxc_ids() {
   static const std::vector<int> ids = [] {
     std::vector<int> v;
@@ -1139,13 +1040,6 @@ static const std::vector<int>& supported_libxc_ids() {
   return ids;
 }
 
-// Highest derivative order the device path implements.
-//
-// GDFT_xc_lda/gga/mgga all evaluate up to fxc (order 2); kxc (order 3) has no
-// ExchCXX device entry point. Without a way to ask, gpu4pyscf/dft/libxc.py
-// requests order 3, gets a nonzero return, and raises RuntimeError. Exposing
-// the limit lets the caller route those requests to PySCF's CPU libxc, the
-// same way it already does for functionals this shim cannot evaluate.
 extern "C" int xc_device_max_deriv_order(void) { return 2; }
 
 extern "C" int xc_number_of_functionals(void) {
@@ -1159,9 +1053,6 @@ extern "C" void xc_available_functional_numbers(int* list) {
   }
 }
 
-// libxc >= 6 ext-params ABI (bound unconditionally by gpu4pyscf/dft/libxc.py).
-// ExchCXX builtins bake range-separation parameters (omega) in at
-// construction; nothing is tunable at runtime, so report zero parameters.
 extern "C" int xc_func_info_get_n_ext_params(const xc_func_info_type *info) {
   (void)info;
   return 0;
@@ -1197,8 +1088,6 @@ struct ShimImpl {
   ExchCXX::Spin spin{};
   int  family = -1;
   bool needs_lapl = false;
-
-  // exactly one of these will be non-null
   std::unique_ptr<ExchCXX::XCKernel>     k;
   std::unique_ptr<ExchCXX::XCFunctional> f;
   bool is_functional() const noexcept { return bool(f); }
@@ -1216,8 +1105,6 @@ static int with_xc(const xc_func_type* f, Fn&& fn) {
   return 1; // nothing to call
 }
 static inline int bad_args(...) { return 1; }
-
-
 static void fill_dimensions(xc_dimensions* d, int family, int nspin, bool needs_lapl) {
   std::memset(d, 0, sizeof(*d));
 
@@ -1226,34 +1113,22 @@ static void fill_dimensions(xc_dimensions* d, int family, int nspin, bool needs_
   const int  sig_dim = unpol ? 1 : 3;   // (aa, ab, bb) for pol
   const int  lap_dim = rho_dim;
   const int  tau_dim = rho_dim;
-
-  // Inputs
   d->rho   = rho_dim;
   d->sigma = sig_dim;
   d->lapl  = lap_dim;
   d->tau   = tau_dim;
-
-  // 0th order
   d->zk    = 1;
-
-  // 1st order
   d->vrho  = rho_dim;
   if (family >= XC_FAMILY_GGA)  d->vsigma = sig_dim;
   if (family >= XC_FAMILY_MGGA) {
     d->vtau  = tau_dim;
     d->vlapl = needs_lapl ? lap_dim : 0;
   }
-
-  // 2nd order - LDA
   d->v2rho2 = unpol ? 1 : 3;  // symmetric
-
-  // 2nd order - GGA
   if (family >= XC_FAMILY_GGA) {
     d->v2rhosigma = rho_dim * sig_dim;    // 2*3=6 for pol
     d->v2sigma2   = unpol ? 1 : 6;        // symmetric 3x3
   }
-
-  // 2nd order - mGGA
   if (family >= XC_FAMILY_MGGA) {
     d->v2rholapl   = needs_lapl ? (rho_dim * lap_dim) : 0;  // 2*2=4
     d->v2rhotau    = rho_dim * tau_dim;                      // 2*2=4
@@ -1283,17 +1158,13 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
   impl->spin = (nspin == XC_UNPOLARIZED)
                  ? ExchCXX::Spin::Unpolarized
                  : ExchCXX::Spin::Polarized;
-  GDFT_TRACE("[DEBUG] GDFT_xc_gga: nspin=%d, spin=%d\n",
+  GDFT_TRACE("[gdft] GDFT_xc_gga: nspin=%d, spin=%d\n",
                (impl->spin == ExchCXX::Spin::Polarized) ? 2 : 1,
                int(impl->spin));
-
-  // Detect our packed form: (family<<16 | kernel_enum)
   const int hi = (functional >> 16) & 0xFFFF;
   const int lo =  functional        & 0xFFFF;
   const bool looks_packed =
       (hi == XC_FAMILY_LDA || hi == XC_FAMILY_GGA || hi == XC_FAMILY_MGGA);
-
-  // If not packed, translate LibXC id -> name once
   std::string libxc_name;
   std::string name_upper;
 
@@ -1309,8 +1180,6 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
     }
     libxc_name = it_id->second;
     name_upper = to_upper(libxc_name);
-
-    // If this label is a composite/hybrid XC functional, use XCFunctional path
     auto fopt = libxc_name_to_functional(name_upper);
     if (fopt) {
       path = Path::FunctionalByName;
@@ -1318,8 +1187,6 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
       path = Path::KernelByName;
     }
   }
-
-  // Initialize ExchCXX device layer (spin-aware) before building kernels/functionals
   detail::ensure_exchcxx_initialized(impl->spin);
 
   auto finalize = [&](int family, bool needs_lapl) {
@@ -1335,49 +1202,9 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
   try {
     bool needs_lapl = false;
     int  family     = XC_FAMILY_GGA; // corrected below
-
-    // // ---- Custom hybrid override: B3LYP family ----
-    // // Handle HYB_GGA_XC_B3LYP and its variants explicitly to control VWN flavor
-    // if (name_upper == "HYB_GGA_XC_B3LYP" || name_upper == "HYB_GGA_XC_B3LYP3" || name_upper == "HYB_GGA_XC_B3LYP5") {
-    //   auto make_b3lyp_with = [&](ExchCXX::Kernel vwn_kernel) {
-    //     ExchCXX::Backend backend = ExchCXX::Backend::builtin;
-    //     ExchCXX::Spin spin = impl->spin;
-
-    //     const ExchCXX::HybCoeffs hyb_coefs = {0.20, 0.0, 0.0};
-    //     std::vector<std::pair<double, ExchCXX::XCKernel>> terms = {
-    //       {0.08, ExchCXX::XCKernel(backend, ExchCXX::Kernel::SlaterExchange, spin)},
-    //       {0.72, ExchCXX::XCKernel(backend, ExchCXX::Kernel::B88,           spin)},
-    //       {0.19, ExchCXX::XCKernel(backend, vwn_kernel,                     spin)},
-    //       {0.81, ExchCXX::XCKernel(backend, ExchCXX::Kernel::LYP,           spin)}
-    //     };
-    //     return std::make_unique<ExchCXX::XCFunctional>(terms, hyb_coefs);
-    //   };
-
-    //   // Map label → kernel flavor
-    //   if (name_upper == "HYB_GGA_XC_B3LYP3") {
-    //     std::cout << "exchcxx: kernel == VWN3 \n";
-    //     impl->f = make_b3lyp_with(ExchCXX::Kernel::VWN3);
-    //   } else {
-    //     // PySCF ≥ 2.3 default: VWN-RPA = VWN5 in this ExchCXX
-    //     // LibXC's HYB_GGA_XC_B3LYP uses LDA_C_VWN_RPA (ID 8) = ExchCXX::Kernel::VWN5
-    //     std::cout << "exchcxx: kernel == VWN5 \n";
-    //     impl->f = make_b3lyp_with(ExchCXX::Kernel::VWN5);
-    //   }
-
-    //   needs_lapl  = false;
-    //   family      = XC_FAMILY_GGA;
-    //   std::fprintf(stderr, "[gdft] Built XCFunctional (custom B3LYP) for '%s' (VWN5==RPA)\n",
-    //                name_upper.c_str());
-
-    //   return finalize(XC_FAMILY_GGA, needs_lapl);
-    // }
-
-
     if (path == Path::KernelPacked) {
       // Build from packed kernel enum
       const auto kenum = static_cast<ExchCXX::Kernel>(lo);
-
-      // Heuristic laplacian flag from LibXC name if we can map back
       auto it = detail::libxc_kernel_map.find(kenum);
       if (it != detail::libxc_kernel_map.end())
         needs_lapl = libxc_name_needs_lapl(to_upper(it->second));
@@ -1438,8 +1265,6 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
       GDFT_TRACE("[gdft] 3. is_lda=%d is_gga=%d is_mgga=%d\n",
                    impl->k->is_lda(), impl->k->is_gga(), impl->k->is_mgga());
     }
-
-    // Stash and finalize libxc-style handle
     return finalize(family, needs_lapl);
 
   } catch (const std::exception& e) {
@@ -1458,9 +1283,6 @@ extern "C" void xc_func_end(xc_func_type *p) {
 }
 
 extern "C" void xc_func_free(xc_func_type *p) {
-  // if(!p) return;
-  // xc_func_end(p);
-  // std::free(p);
 }
 
 template<typename T>
@@ -1507,9 +1329,9 @@ static inline void zero_gga_out(
 }
 
 extern "C" int GDFT_xc_lda(
-  void* stream_v,
   const xc_func_type *func, int np, const double *rho,
-  xc_lda_out_params *out, xc_lda_out_params* /*buf*/
+  xc_lda_out_params *out, xc_lda_out_params* /*buf*/,
+  void* stream_v
 ){
   if(!func || !rho || !out || np <= 0) return bad_args();
 
@@ -1524,8 +1346,6 @@ extern "C" int GDFT_xc_lda(
   double* eps    = out->zk;
   double* vrho   = out->vrho;
   double* v2rho2 = out->v2rho2;
-
-  // 1) Derivatives first (some backends also write eps here; that’s fine, we’ll overwrite later)
   if(order >= 1){
     int err = with_xc(func, [&](auto& xc){
       xc.eval_exc_vxc_device(np, rho, eps, vrho, stream);
@@ -1538,8 +1358,6 @@ extern "C" int GDFT_xc_lda(
     });
     if(err) return err;
   }
-
-  // 2) Energy last — this is the authoritative value Python expects to match CPU
   if(eps){
     int err = with_xc(func, [&](auto& xc){
       xc.eval_exc_device(np, rho, eps, stream);
@@ -1549,176 +1367,6 @@ extern "C" int GDFT_xc_lda(
 
   return 0;
 }
-
-
-// extern "C" int GDFT_xc_gga(
-//   void* stream_v,
-//   const xc_func_type *func, int np, const double *rho, const double *sigma,
-//   xc_gga_out_params *out, xc_gga_out_params* /*buf*/
-// ){
-//   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
-
-//   const int order = detect_order(out);
-//   if(order < 0) return 0;
-//   if(order > 2){
-//     std::fprintf(stderr, "ExchCXX device: GGA order %d not implemented\n", order);
-//     return 2;
-//   }
-
-//   auto* stream = reinterpret_cast<sycl::queue*>(stream_v);
-//   double* eps    = out->zk;
-//   double* vrho   = out->vrho;
-//   double* vsigma = out->vsigma;
-//   double* v2rho2 = out->v2rho2;
-//   double* v2rs   = out->v2rhosigma;
-//   double* v2s2   = out->v2sigma2;
-
-//   zero_gga_out(*stream, func, out, np, order);
-
-//   // Step 2: Single evaluation — no redundant overwrites
-//   if(order == 0){
-//     // Just energy
-//     int err = with_xc(func, [&](auto& xc){
-//       xc.eval_exc_device(np, rho, sigma, eps, stream);
-//     });
-//     if(err) return err;
-
-//   } else if(order == 1){
-//     // Energy + 1st derivatives — ONE call, no overwrite
-//     int err = with_xc(func, [&](auto& xc){
-//       xc.eval_exc_vxc_device(np, rho, sigma, eps, vrho, vsigma, stream);
-//     });
-//     if(err) return err;
-
-//   } else if(order == 2){
-//     // Energy + 1st derivatives
-//     int err = with_xc(func, [&](auto& xc){
-//       xc.eval_exc_vxc_device(np, rho, sigma, eps, vrho, vsigma, stream);
-//     });
-//     if(err) return err;
-
-//     // 2nd derivatives ONLY — does NOT touch eps/vrho/vsigma
-//     err = with_xc(func, [&](auto& xc){
-//       xc.eval_fxc_device(np, rho, sigma, v2rho2, v2rs, v2s2, stream);
-//     });
-//     if(err) return err;
-//   }
-
-//   return 0;
-// }
-
-// extern "C" int GDFT_xc_gga(
-//   void* stream_v,
-//   const xc_func_type *func, int np,
-//   const double *rho, const double *sigma,
-//   xc_gga_out_params *out, xc_gga_out_params *buf /* workspace for mix */
-// ){
-//   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
-
-//   const int order = detect_order(out);
-//   if(order < 0) return 0;
-//   if(order > 2){
-//     std::fprintf(stderr, "ExchCXX device: GGA order %d not implemented\n", order);
-//     return 2;
-//   }
-
-//   auto* qptr = reinterpret_cast<sycl::queue*>(stream_v);
-//   auto&  q   = *qptr;
-//   const auto& dim = func->dim;
-
-//   // ---------- Direct (non-mixed) path ----------
-//   if(func->info && func->info->gga && !func->mix_coef){
-//     // Zero outputs with correct sizes
-//     zero_gga_out(q, func, out, np, order);
-
-//     // Derivatives first (these may write eps too; we’ll overwrite eps after)
-//     if(order >= 1){
-//       int err = with_xc(func, [&](auto& xc){
-//         return xc.eval_exc_vxc_device(np, rho, sigma,
-//                                       /*eps=*/out->zk,
-//                                       out->vrho, out->vsigma, qptr);
-//       });
-//       if(err) return err;
-//     }
-//     if(order >= 2){
-//       int err = with_xc(func, [&](auto& xc){
-//         return xc.eval_vxc_fxc_device(np, rho, sigma,
-//                                       out->vrho, out->vsigma,
-//                                       out->v2rho2, out->v2rhosigma, out->v2sigma2,
-//                                       qptr);
-//       });
-//       if(err) return err;
-//     }
-//     // Energy last — authoritative
-//     if(out->zk){
-//       int err = with_xc(func, [&](auto& xc){
-//         return xc.eval_exc_device(np, rho, sigma, out->zk, qptr);
-//       });
-//       if(err) return err;
-//     }
-//     q.wait(); // ensure all kernels complete before returning
-//     return 0;
-//   }
-
-//   // ---------- Mixed / hybrid path (e.g., B3LYP) ----------
-//   if(!func->mix_coef){
-//     // Defensive: libxc-like mixes should have mix_coef; if not, nothing to do
-//     // (CUDA code returns ierr=0 here)
-//     return 0;
-//   }
-
-//   if(!buf){
-//     std::fprintf(stderr,
-//       "ExchCXX device: GGA mix path requires 'buf' workspace (np=%d). "
-//       "Caller must provide a device-resident scratch buffer.\n", np);
-//     return 2;
-//   }
-
-//   // 1) Zero the final accumulator
-//   zero_gga_out(q, func, out, np, order);
-
-//   // 2) Loop over components, compute into buf, then out += coef * buf
-//   for(int i = 0; i < func->n_func_aux; ++i){
-//     const double coef = func->mix_coef[i];
-//     const xc_func_type* aux = func->func_aux[i];
-
-//     // Stage: clear buf for this component
-//     zero_gga_out(q, func, buf, np, order);
-
-//     // Evaluate this component into buf
-//     if(order >= 1){
-//       int err = with_xc(aux, [&](auto& xc){
-//         return xc.eval_exc_vxc_device(np, rho, sigma,
-//                                       /*eps=*/buf->zk,
-//                                       buf->vrho, buf->vsigma, qptr);
-//       });
-//       if(err) return err;
-//     }
-//     if(order >= 2){
-//       int err = with_xc(aux, [&](auto& xc){
-//         return xc.eval_vxc_fxc_device(np, rho, sigma,
-//                                       buf->vrho, buf->vsigma,
-//                                       buf->v2rho2, buf->v2rhosigma, buf->v2sigma2,
-//                                       qptr);
-//       });
-//       if(err) return err;
-//     }
-//     // Energy last for this component
-//     if(buf->zk){
-//       int err = with_xc(aux, [&](auto& xc){
-//         return xc.eval_exc_device(np, rho, sigma, buf->zk, qptr);
-//       });
-//       if(err) return err;
-//     }
-
-//     // out += coef * buf  (per-field AXPY with correct dimensions)
-//     axpy_gga_out(q, dim, out, buf, coef, order, static_cast<std::size_t>(np));
-//   }
-
-//   //q.wait(); // ensure accumulations are done
-//   return 0;
-// }
-
 #if GDFT_EXCHCXX_TRACE
 static void debug_dump_gga(sycl::queue* stream, const char* tag,
                            int np, const double* rho, const double* sigma,
@@ -1743,8 +1391,6 @@ static void debug_dump_gga(sycl::queue* stream, const char* tag,
                  vrho   ? h_vrho[i] : 0.0,
                  vsigma ? h_vsig[i] : 0.0);
   }
-
-  // Also print sums (copy all np values)
   std::vector<double> all_eps(np), all_vrho(np), all_vsig(np);
   if(eps)    { stream->memcpy(all_eps.data(),  eps,    np*sizeof(double)); }
   if(vrho)   { stream->memcpy(all_vrho.data(), vrho,   np*sizeof(double)); }
@@ -1763,9 +1409,9 @@ static void debug_dump_gga(sycl::queue* stream, const char* tag,
 #endif // GDFT_EXCHCXX_TRACE
 
 extern "C" int GDFT_xc_gga(
-  void* stream_v,
   const xc_func_type *func, int np, const double *rho, const double *sigma,
-  xc_gga_out_params *out, xc_gga_out_params* /*buf*/
+  xc_gga_out_params *out, xc_gga_out_params* /*buf*/,
+  void* stream_v
 ){
   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
 
@@ -1790,8 +1436,6 @@ extern "C" int GDFT_xc_gga(
 #if GDFT_EXCHCXX_TRACE
   debug_dump_gga(stream, "EXCHCXX-INPUT", np, rho, sigma, nullptr, nullptr, nullptr);
 #endif
-
-
   if(order >= 1){
     GDFT_TRACE("[gdft] GDFT_xc_gga: eval_exc_vxc_device (order >= 1)\n");
     int err = with_xc(func, [&](auto& xc){
@@ -1823,10 +1467,10 @@ extern "C" int GDFT_xc_gga(
 }
 
 extern "C" int GDFT_xc_mgga(
-  void* stream_v,
   const xc_func_type *func, int np,
   const double *rho, const double *sigma, const double *lapl, const double *tau,
-  xc_mgga_out_params *out, xc_mgga_out_params* /*buf*/
+  xc_mgga_out_params *out, xc_mgga_out_params* /*buf*/,
+  void* stream_v
 ){
   if(!func || !rho || !sigma || !tau || !out || np <= 0) return bad_args();
 
@@ -1839,21 +1483,15 @@ extern "C" int GDFT_xc_mgga(
 
   auto* impl = get_impl(func);
   if(!impl) return 1;
-
-  // If this functional doesn't need the Laplacian, pass nullptr for lapl and skip vlapl/its Hessians
   const bool need_lapl = impl->needs_lapl;
   const double* lapl_in = need_lapl ? lapl : nullptr;
 
   auto* stream = reinterpret_cast<sycl::queue*>(stream_v);
-
-  // 1st-order outputs
   double* eps    = out->zk;
   double* vrho   = out->vrho;
   double* vsigma = out->vsigma;
   double* vlapl  = need_lapl ? out->vlapl : nullptr;
   double* vtau   = out->vtau;
-
-  // 2nd-order outputs
   double* v2rho2      = out->v2rho2;
   double* v2rhosigma  = out->v2rhosigma;
   double* v2rholapl   = need_lapl ? out->v2rholapl  : nullptr;

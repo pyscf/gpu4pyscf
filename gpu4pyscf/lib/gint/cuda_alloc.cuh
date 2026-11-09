@@ -43,11 +43,12 @@ int check(T result, char const *const func, const char *const file,
     checkCudaErrors(cudaFree(var))
 
 #define MEMSET(addr, val, size) \
-    checkCudaErrors(cudaMemset(addr, val, size))
+    checkCudaErrors(cudaMemsetAsync(addr, val, size, stream))
 
+// The caller must synchronize stream before releasing or modifying src.
 #define DEVICE_INIT(type, dst, src, size) \
     MALLOC(type, dst, size); \
-    checkCudaErrors(cudaMemcpy(dst, src, sizeof(type) * (size), cudaMemcpyHostToDevice))
+    checkCudaErrors(cudaMemcpyAsync(dst, src, sizeof(type) * (size), cudaMemcpyHostToDevice, stream))
 
 #else // !USE_SYCL
 

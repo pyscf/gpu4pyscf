@@ -51,7 +51,7 @@
 __global__ static
 void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            int *shl_pair_offsets, int *gout_stride_lookup,
-                           int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -197,7 +197,7 @@ void int1e_r2_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 __global__ static
 void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                            int *shl_pair_offsets, int *gout_stride_lookup,
-                           int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -348,7 +348,7 @@ void int1e_r4_origi_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 __global__ static
 void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                int *shl_pair_offsets, int *gout_stride_lookup,
-                               int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -519,7 +519,7 @@ void int1e_r2_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 __global__ static
 void int1e_r4_origi_ip2_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                                int *shl_pair_offsets, int *gout_stride_lookup,
-                               int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -702,7 +702,7 @@ template<int RADIAL>
 static __global__
 void ppnl_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVars envs,
                              int *shl_pair_offsets, int *bas_ij_idx,
-                             int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj)
 {
     KERNEL_SETUP();
     int *bas = envs.bas;
@@ -902,7 +902,7 @@ template<int RADIAL>
 static int ppnl_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0) return 0;
     cudaError_t err = cudaFuncSetAttribute(
@@ -912,7 +912,7 @@ static int ppnl_derivatives(double *grad, double *sigma, double *dm,
         auto threads = make_block(THREADS);
         LAUNCH_KERNEL( ppnl_derivatives_kernel<RADIAL>, blocks, threads, shm_size,
             grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx,
-            gout_stride_lookup, naoi, naoj);
+            gout_stride_lookup, naoi, naoj, stream);
         err = cudaGetLastError();
     }
     if (err != cudaSuccess) {
@@ -927,14 +927,14 @@ extern "C" {
 int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r2_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( int1e_r2_origi_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset);
+            naoi, naoj, ij_offset, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r2_origi kernel: %s\n", cudaGetErrorString(err));
@@ -946,14 +946,14 @@ int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
                       int nbatches_shl_pair, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r4_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( int1e_r4_origi_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset);
+            naoi, naoj, ij_offset, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r4_origi kernel: %s\n", cudaGetErrorString(err));
@@ -965,14 +965,14 @@ int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
-                          int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r2_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( int1e_r2_origi_ip2_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset);
+            naoi, naoj, ij_offset, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r2_origi_ip2 kernel: %s\n", cudaGetErrorString(err));
@@ -984,14 +984,14 @@ int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, int *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
-                          int naoi, int naoj, size_t ij_offset)
+                      int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_r4_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( int1e_r4_origi_ip2_kernel, blocks, threads, shm_size,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset);
+            naoi, naoj, ij_offset, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r4_origi_ip2 kernel: %s\n", cudaGetErrorString(err));
@@ -1003,31 +1003,31 @@ int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCovlp_cross_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     return ppnl_derivatives<0>(grad, sigma, dm, envs, shm_size,
                                  nbatches_shl_pair, shl_pair_offsets, bas_ij_idx,
-                                 gout_stride_lookup, naoi, naoj);
+                                 gout_stride_lookup, naoi, naoj, stream);
 }
 
 int PBCint1e_r2_origi_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     return ppnl_derivatives<2>(grad, sigma, dm, envs, shm_size,
                                  nbatches_shl_pair, shl_pair_offsets, bas_ij_idx,
-                                 gout_stride_lookup, naoi, naoj);
+                                 gout_stride_lookup, naoi, naoj, stream);
 }
 
 int PBCint1e_r4_origi_derivatives(double *grad, double *sigma, double *dm,
                             PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                             int *shl_pair_offsets, int *bas_ij_idx,
-                            int *gout_stride_lookup, int naoi, int naoj)
+                            int *gout_stride_lookup, int naoi, int naoj, cudaStream_t stream)
 {
     return ppnl_derivatives<4>(grad, sigma, dm, envs, shm_size,
                                  nbatches_shl_pair, shl_pair_offsets, bas_ij_idx,
-                                 gout_stride_lookup, naoi, naoj);
+                                 gout_stride_lookup, naoi, naoj, stream);
 }
 
 }

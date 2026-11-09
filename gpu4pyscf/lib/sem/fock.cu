@@ -36,7 +36,7 @@ void build_jk_2c2e_kernel(
     const int* loc_row,
     const int* loc_col,
     int npairs,
-    int nao) 
+        int nao)
 {
     // Each block processes one pair of interacting atoms (Atom A and Atom B)
     setup_context();
@@ -234,7 +234,7 @@ void build_jk_1c2e_kernel(
     const int* loc_col,
     int natm,
     int nao,
-    int num_d_pairs) 
+        int num_d_pairs)
 {
     // Grid handles 1 atom per block
     setup_context();
@@ -341,7 +341,7 @@ extern "C" {
         const int* loc_row,
         const int* loc_col,
         int npairs,
-        int nao)
+        int nao, cudaStream_t stream)
     {
         if (npairs <= 0) return 0;
 
@@ -356,7 +356,7 @@ extern "C" {
             w_1d, P, J, K,
             pair_i, pair_j, kr_offsets,
             aoslice, natorb, loc_row, loc_col,
-            npairs, nao);
+            npairs, nao, stream);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;
@@ -384,7 +384,7 @@ extern "C" {
         const int* loc_col,
         int natm,
         int nao,
-        int num_d_pairs)
+        int num_d_pairs, cudaStream_t stream)
     {
         if (natm <= 0) return 0;
 
@@ -400,7 +400,7 @@ extern "C" {
             gss, gsp, hsp, gpp, gp2, repd,
             intij, intkl, intrep,
             aoslice, natorb, loc_row, loc_col,
-            natm, nao, num_d_pairs);
+            natm, nao, num_d_pairs, stream);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;

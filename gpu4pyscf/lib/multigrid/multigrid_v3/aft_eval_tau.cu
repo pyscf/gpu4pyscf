@@ -243,7 +243,7 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
                             PBCIntEnvVars *envs, int *shl_pair_offsets,
                             int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                             int *mesh_cum, int *nimgs_cum, int *mesh,
-                            int nbatches_shl_pair, double factor)
+                            int nbatches_shl_pair, double factor, cudaStream_t stream)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -257,7 +257,7 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     LAUNCH_KERNEL( orth_ft_tau_dm_kernel, grids, threads, 0,
                     densityR, densityI, tauR, tauI, dm, shl_pair_offsets,
                     bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum,
-                    ntiles, factor, *envs);
+                    ntiles, factor, *envs, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));

@@ -40,7 +40,7 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                       float *diffuse_exps, float *diffuse_ctr_coef,
                       float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                      double omega, int tril_symmetry, int8_t *Ecut_mask)
+                        double omega, int tril_symmetry, int8_t *Ecut_mask)
 {
     setup_context();
     DYNAMIC_SHARED_PTR(float, shared_memory);
@@ -167,7 +167,7 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
 __global__ static
 void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                    int64_t *bas_ij_idx, int *gout_stride_lookup,
-                   uint32_t npairs, double omega)
+                  uint32_t npairs, double omega)
 {
     setup_context();
     DYNAMIC_SHARED_PTR(float, shared_memory);
@@ -462,7 +462,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
 //   pair_ij = ish[:,None,:,None] * NBAS_MAX + jsh[None,:,None,:]
 __global__ static
 void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
-                         int nbas, int tile)
+                    int nbas, int tile)
 {
     setup_context();
     int t_id = threadIdx_x;
@@ -494,7 +494,7 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                         float *diffuse_exps, float *diffuse_ctr_coef,
                         float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                        double omega, int tril_symmetry, int8_t *Ecut_mask)
+                        double omega, int tril_symmetry, int8_t *Ecut_mask, cudaStream_t stream)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
@@ -503,7 +503,7 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
     LAUNCH_KERNEL( fill_s_estimator, blocks, threads, buflen,
         s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
-        npairs, omega, tril_symmetry, Ecut_mask);
+        npairs, omega, tril_symmetry, Ecut_mask, stream);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -516,13 +516,13 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 
 int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
                   int64_t *bas_ij_idx, int *gout_stride_lookup,
-                  uint32_t npairs, double omega)
+                  uint32_t npairs, double omega, cudaStream_t stream)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( q_cond_kernel, blocks, threads, shm_size,
-        q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
+        q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega, stream);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -534,13 +534,13 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
 }
 
 int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
-                    int nbas, int tile)
+                    int nbas, int tile, cudaStream_t stream)
 {
     int ntile = (nish + tile - 1) / tile;
     auto blocks = make_grid(ntile);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( sort_pair_ij_kernel, blocks, threads, 0,
-        pair_ij, ish, jsh, nish, njsh, nbas, tile);
+        pair_ij, ish, jsh, nish, njsh, nbas, tile, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCsort_pair_ij %s\n",

@@ -10,10 +10,8 @@
 // GLOBAL DEFAULT-visibility device_global objects and libgint.so/libgvhf.so
 // are co-resident in the process with no DT_NEEDED link between them, so
 // identical names alias to whichever library's definition the dynamic
-// linker resolves first. That let gvhf's host-side bpcache memcpy target
-// gint's device image (or vice versa), corrupting whichever kernel ran
-// concurrently on the other library's queue. See
-// hang_analysis_evidence/DEFECT5_free_and_device_global_audit.md, Finding A.
+// linker resolves first, so gvhf's bpcache device_global is renamed to
+// keep it distinct from gint's.
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gvhf_bpcache;
 
 #else // USE_SYCL

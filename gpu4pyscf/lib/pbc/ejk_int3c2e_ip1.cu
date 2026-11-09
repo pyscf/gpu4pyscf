@@ -456,7 +456,7 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
                             uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                             int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int nauxbas, int naux,
-                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || nbatches_ksh == 0) {
         return 0;
@@ -465,7 +465,7 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( ejk_int3c2e_deriv_kernel, blocks, threads, shm_size,
@@ -473,7 +473,7 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, nauxbas, naux,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, nbatches_shl_pair, nbatches_ksh);
+            head, nbatches_shl_pair, nbatches_ksh, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));

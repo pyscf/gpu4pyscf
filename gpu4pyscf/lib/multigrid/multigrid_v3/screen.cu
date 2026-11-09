@@ -55,7 +55,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
                         PBCIntEnvVars envs,
                         int64_t *bas_ij_idx, int li_inc, int lj_inc,
                         int npairs, float log_threshold,
-                        float undressed_threshold)
+                              float undressed_threshold)
 {
     setup_context();
     int pair_id = global_x;
@@ -193,7 +193,7 @@ void grid_ranges_kernel(float2 *grid_frac_ranges, float *pair_ke,
 
 __global__ static
 void atom_grid_ranges_kernel(float2 *atom_grid_ranges, float2 *grid_frac_ranges,
-                             int *shl_pair_offsets, int npairs, int nsegs)
+                     int *shl_pair_offsets, int npairs, int nsegs)
 {
     setup_context();
     int seg_id = global_x;
@@ -320,7 +320,7 @@ void grid_range_to_tiles_kernel(int *grid_tile_idx, int64_t *dressed_bas_ij,
 // shell pairs between the primitve cell and the super-mol
 __global__ static
 void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
-                                 double *img_coords, int nimgs, float log_cutoff)
+                             double *img_coords, int nimgs, float log_cutoff)
 {
     setup_context();
     int jsh = global_x;
@@ -386,7 +386,7 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, PBCIntEnvVars envs,
 __global__ static
 void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars envs,
                               double *img_coords, int nimgs, int npairs,
-                              float log_cutoff, float Ecut_max, int is_mgga)
+                      float log_cutoff, float Ecut_max, int is_mgga)
 {
     setup_context();
     int pair_id = global_x;
@@ -462,7 +462,7 @@ void estimate_aft_Ecut_kernel(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars en
 __global__ static
 void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
                                      PBCIntEnvVars envs, int npairs, float log_cutoff,
-                                     int is_mgga, int *head)
+                             int is_mgga, int *head)
 {
     constexpr int batch_size = 64;
     setup_context();
@@ -550,7 +550,7 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
                               PBCIntEnvVars *envs,
                               int64_t *bas_ij_idx, int npairs,
                               int li_inc, int lj_inc, float log_threshold,
-                              float undressed_threshold)
+                              float undressed_threshold, cudaStream_t stream)
 {
     int batches = (npairs + THREADS-1) / THREADS;
     auto threads = make_block(THREADS);
@@ -558,7 +558,7 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
     LAUNCH_KERNEL( grid_ranges_kernel, grids, threads, 0,
                     grid_frac_ranges, pair_ke, Ecut_by_shell, primary_atoms,
                     *envs, bas_ij_idx, li_inc, lj_inc, npairs,
-                    log_threshold, undressed_threshold);
+                    log_threshold, undressed_threshold, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in gaussian_prod_grid_ranges: %s\n", cudaGetErrorString(err));
@@ -569,9 +569,9 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
 
 int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
                         int64_t *bas_ij_idx, float2 *grid_frac_ranges,
-                        int *nimgs, int *mesh, int npairs, int nbas, int *head)
+                        int *nimgs, int *mesh, int npairs, int nbas, int *head, cudaStream_t stream)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     int nimgs_x = nimgs[0];
     int nimgs_y = nimgs[1];
     int nimgs_z = nimgs[2];
@@ -583,7 +583,7 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
     auto grids = make_grid(batches);
     LAUNCH_KERNEL( grid_range_to_tiles_kernel, grids, threads, 0,
                     grid_tile_idx, dressed_bas_ij, bas_ij_idx, grid_frac_ranges,
-                    nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
+                    nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in grid_range_to_tiles: %s\n", cudaGetErrorString(err));
@@ -593,13 +593,13 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
 }
 
 int atom_grid_ranges(float2 *atom_frac_ranges, float2 *grid_frac_ranges,
-                     int *shl_pair_offsets, int npairs, int nsegs)
+                     int *shl_pair_offsets, int npairs, int nsegs, cudaStream_t stream)
 {
     int blocks = (nsegs + 255) / 256;
     auto threads = make_block(256);
     auto grids = make_grid(blocks);
     LAUNCH_KERNEL( atom_grid_ranges_kernel, grids, threads, 0,
-                    atom_frac_ranges, grid_frac_ranges, shl_pair_offsets, npairs, nsegs);
+                    atom_frac_ranges, grid_frac_ranges, shl_pair_offsets, npairs, nsegs, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in atom_grid_ranges_kernel: %s\n",
@@ -610,14 +610,14 @@ int atom_grid_ranges(float2 *atom_frac_ranges, float2 *grid_frac_ranges,
 }
 
 int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
-                             double *img_coords, int nimgs, float log_cutoff)
+                             double *img_coords, int nimgs, float log_cutoff, cudaStream_t stream)
 {
     int nbas = envs->nbas;
     int bvk_nbas = nbas * envs->bvk_ncells;
     auto threads = make_block(16, 16);
     auto grids = make_grid((bvk_nbas + 15) / 16, (nbas + 15) / 16);
     LAUNCH_KERNEL( ovlp_mask_estimation_kernel, grids, threads, 0,
-                    ovlp_mask, *envs, img_coords, nimgs, log_cutoff);
+                    ovlp_mask, *envs, img_coords, nimgs, log_cutoff, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_mask_estimation: %s\n", cudaGetErrorString(err));
@@ -627,15 +627,15 @@ int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
 }
 int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
                              PBCIntEnvVars *envs, int npairs, float log_cutoff,
-                             int is_mgga, int *head)
+                             int is_mgga, int *head, cudaStream_t stream)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     int blocks = (npairs + THREADS-1)/THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(blocks);
     LAUNCH_KERNEL( supmol_non_trivial_pairs_kernel, grids, threads, 0,
                     supmol_bas_ij, bas_ij_idx, *envs, npairs, log_cutoff,
-                    is_mgga, head);
+                    is_mgga, head, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in supmol_non_trivial_pairs_kernel: %s\n", cudaGetErrorString(err));
@@ -646,14 +646,14 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
 
 int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
                       double *img_coords, int nimgs, int npairs,
-                      float log_cutoff, float Ecut_max, int is_mgga)
+                      float log_cutoff, float Ecut_max, int is_mgga, cudaStream_t stream)
 {
     int blocks = (npairs + THREADS-1)/THREADS;
     auto threads = make_block(THREADS);
     auto grids = make_grid(blocks);
     LAUNCH_KERNEL( estimate_aft_Ecut_kernel, grids, threads, 0,
                     Ecut, bas_ij_idx, *envs, img_coords, nimgs, npairs,
-                    log_cutoff, Ecut_max, is_mgga);
+                    log_cutoff, Ecut_max, is_mgga, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in estimate_aft_Ecut_kernel: %s\n", cudaGetErrorString(err));

@@ -55,7 +55,7 @@
 #define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, out_, ...) { \
     auto blocks = make_grid(nbatches_); \
     auto threads = make_block(THREADS); \
-    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, *envs, __VA_ARGS__); \
+    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, *envs, __VA_ARGS__, stream); \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
@@ -66,7 +66,7 @@
 __global__ static
 void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                        int *shl_pair_offsets, int *gout_stride_lookup,
-                       int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -201,7 +201,7 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -349,7 +349,7 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                          int *shl_pair_offsets, int *gout_stride_lookup,
-                         int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -507,7 +507,7 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                         int *shl_pair_offsets, int *gout_stride_lookup,
-                        int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
     KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -1175,7 +1175,7 @@ extern "C" {
 int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                   int nbatches_shl_pair, int *bas_ij_idx,
                   int *shl_pair_offsets, int *gout_stride_lookup,
-                  int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_ovlp_kernel, nbatches_shl_pair, out,
@@ -1187,7 +1187,7 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *bas_ij_idx,
                  int *shl_pair_offsets, int *gout_stride_lookup,
-                 int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_kin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_kin_kernel, nbatches_shl_pair, out,
@@ -1199,7 +1199,7 @@ int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                     int nbatches_shl_pair, int *bas_ij_idx,
                     int *shl_pair_offsets, int *gout_stride_lookup,
-                    int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ipovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_ipovlp_kernel, nbatches_shl_pair, out,
@@ -1211,7 +1211,7 @@ int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
 int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
                    int nbatches_shl_pair, int *bas_ij_idx,
                    int *shl_pair_offsets, int *gout_stride_lookup,
-                   int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ipkin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     LAUNCH_OVERLAP_KERNEL(int1e_ipkin_kernel, nbatches_shl_pair, out,
@@ -1222,13 +1222,13 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
 
 int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
                         PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
+                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ovlp_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( ovlp_derivatives_kernel, blocks, threads, shm_size,
-            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ovlp_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1239,13 +1239,13 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
 
 int PBCkin_derivatives(double *grad, double *sigma, double *dm,
                        PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                       int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup)
+                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(kin_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     LAUNCH_KERNEL( kin_derivatives_kernel, blocks, threads, shm_size,
-            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in kin_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1256,7 +1256,7 @@ int PBCkin_derivatives(double *grad, double *sigma, double *dm,
 
 void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
                              PBCIntEnvVars *envs, int hermi, float log_cutoff,
-                             double *bvkmesh_Ls, int *shls_slice)
+                             double *bvkmesh_Ls, int *shls_slice, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -1271,6 +1271,6 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
     auto threads = make_block(256);
     LAUNCH_KERNEL( ovlp_mask_estimation_kernel, blocks, threads, 0,
             ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff, bvkmesh_Ls,
-            ish0, ish1, jsh0, jsh1);
+            ish0, ish1, jsh0, jsh1, stream);
 }
 }

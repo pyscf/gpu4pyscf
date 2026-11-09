@@ -19,8 +19,8 @@
 
 extern "C" {
 __host__
-int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *src, int sstride, 
-                int rows, int cols)
+int async_d2h_2d(double *dst, int dstride, const double *src, int sstride,
+                int rows, int cols, cudaStream_t stream)
 {
     void* host_ptr = (void *)dst;
     const void* device_ptr = (void *)src;
