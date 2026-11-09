@@ -457,6 +457,7 @@ class Gradients(tdrhf.Gradients):
         self.de = de = de + self.grad_nuc(atmlst=atmlst)
         if self.mol.symmetry:
             self.de = self.symmetrize(self.de, atmlst)
+        self.de += self.scf_geometry_corrections(atmlst)
         self._finalize()
         return self.de
 
