@@ -608,6 +608,64 @@ def packed_kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts = None, conj_k_idx = 
     g = kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts, conj_k_idx)
     return pack_nocc_nvir_shape_vector(g, nocc, nmo, nkpts)
 
+def reorder_mo_coeff_by_occupation(mo_coeff, mo_energy, mo_occ):
+    nmo_full = mo_coeff.shape[-1]
+    assert mo_occ.shape[-1] == nmo_full
+    assert mo_energy.shape == mo_occ.shape
+    new_mo_coeff = mo_coeff.copy()
+    new_mo_occ = cp.zeros_like(mo_occ)
+    new_mo_energy = cp.zeros_like(mo_energy)
+    if mo_coeff.ndim == 2:
+        assert mo_occ.ndim == 1
+        occidx = mo_occ > 0
+        viridx = mo_occ == 0
+        nocc = int(cp.sum(occidx))
+        nvir = int(cp.sum(viridx))
+        assert nocc > 0 and nvir > 0, "Occupied or virtual space goes to zero in RHF/RKS, likely a bug."
+        assert cp.max(cp.abs(mo_occ[occidx] - cp.round(mo_occ[occidx]))) < 1e-12, "Fractional occupation not allowed."
+        nocc = int(cp.sum(occidx))
+        new_mo_coeff[:, :nocc] = mo_coeff[:, occidx]
+        new_mo_coeff[:, nocc:] = mo_coeff[:, viridx]
+        new_mo_occ[:nocc] = mo_occ[occidx]
+        new_mo_energy[:nocc] = mo_energy[occidx]
+        new_mo_energy[nocc:] = mo_energy[viridx]
+    elif mo_coeff.ndim == 3:
+        assert mo_occ.ndim == 2
+        n_s_or_k = mo_coeff.shape[0]
+        assert mo_occ.shape[0] == n_s_or_k
+        for sk in range(n_s_or_k):
+            occidx = mo_occ[sk] > 0
+            viridx = mo_occ[sk] == 0
+            nocc = int(cp.sum(occidx))
+            nvir = int(cp.sum(viridx))
+            assert nocc > 0 and nvir > 0, "Occupied or virtual space of one spin or one k point goes to zero. GDM does not allow this pattern yet."
+            assert cp.max(cp.abs(mo_occ[sk][occidx] - cp.round(mo_occ[sk][occidx]))) < 1e-12, "Fractional occupation not allowed."
+            new_mo_coeff[sk, :, :nocc] = mo_coeff[sk][:, occidx]
+            new_mo_coeff[sk, :, nocc:] = mo_coeff[sk][:, viridx]
+            new_mo_occ[sk, :nocc] = mo_occ[sk, occidx]
+            new_mo_energy[sk, :nocc] = mo_energy[sk, occidx]
+            new_mo_energy[sk, nocc:] = mo_energy[sk, viridx]
+    elif mo_coeff.ndim == 4:
+        assert mo_occ.ndim == 3
+        n_s, n_k = mo_coeff.shape[0:2]
+        assert mo_occ.shape[0:2] == (n_s, n_k)
+        for s in range(n_s):
+            for k in range(n_k):
+                occidx = mo_occ[s, k] > 0
+                viridx = mo_occ[s, k] == 0
+                nocc = int(cp.sum(occidx))
+                nvir = int(cp.sum(viridx))
+                assert nocc > 0 and nvir > 0, "Occupied or virtual space of one spin or one k point goes to zero. GDM does not allow this pattern yet."
+                assert cp.max(cp.abs(mo_occ[s, k][occidx] - cp.round(mo_occ[s, k][occidx]))) < 1e-12, "Fractional occupation not allowed."
+                new_mo_coeff[s, k, :, :nocc] = mo_coeff[s, k][:, occidx]
+                new_mo_coeff[s, k, :, nocc:] = mo_coeff[s, k][:, viridx]
+                new_mo_occ[s, k, :nocc] = mo_occ[s, k, occidx]
+                new_mo_energy[s, k, :nocc] = mo_energy[s, k, occidx]
+                new_mo_energy[s, k, nocc:] = mo_energy[s, k, viridx]
+    else:
+        raise ValueError(f"mo_coeff.ndim = {mo_coeff.ndim} not supported.")
+    return new_mo_coeff, new_mo_energy, new_mo_occ
+
 def get_nocc(mo_occ, nkpts = None):
     nmo_full = mo_occ.shape[-1]
     if nkpts is None:
@@ -747,7 +805,8 @@ def _kernel(mf, dm0,
             line_search_c,
             line_search_tau,
             max_n_line_search_attempt,
-            line_search_initial_scale):
+            line_search_initial_scale,
+            check_occupation_per_n_iteration):
     """
         Geometric Direct Minimization
         Implementation follows:
@@ -837,6 +896,24 @@ def _kernel(mf, dm0,
         if nkpts is not None:
             gradient_norm *= cp.sqrt(nkpts) # gradient_norm = sqrt(1/nkpts * sum_k g_k^2), and g_k already includes a factor of 1/nkpts
 
+        if nkpts is not None and cycle % check_occupation_per_n_iteration == 0:
+            new_mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
+            if cp.max(cp.abs(new_mo_occ - mo_occ)) > 1e-10:
+                log.info("MO occupation pattern changed. GDM reset.")
+
+                lbfgs_s_y = []
+                previous_gradient = previous_step = None
+                previous_e_tot = None
+                step_type = "Uninitialized error! Please report a bug if you see this line."
+
+                mo_coeff, mo_energy, mo_occ = reorder_mo_coeff_by_occupation(mo_coeff, mo_energy, new_mo_occ)
+                del new_mo_occ
+                nocc = get_nocc(mo_occ, nkpts)
+                e_tot, fock = get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e)
+
+                gradient = packed_kappa_gradient(mo_coeff, nocc, nmo, fock, nkpts, conj_k_idx)
+                gradient_norm = float(cp.linalg.norm(gradient)) * cp.sqrt(nkpts)
+
         if not print_spin:
             spin_text = ""
         else:
@@ -846,7 +923,6 @@ def _kernel(mf, dm0,
             spin_text = f" {ss:10.4f}"
 
         if previous_e_tot is None:
-            assert cycle == 0
             log.info(f"{cycle + 1:6d} {e_tot:20.12f} {gradient_norm:15.3e}{spin_text}  Roothaan")
         else:
             delta_E = e_tot - previous_e_tot
@@ -960,6 +1036,9 @@ class GDM:
         self.max_n_line_search_attempt = 8
         self.line_search_initial_scale = 1.0
 
+        # PBC related parameters
+        self.check_occupation_per_n_iteration = 5
+
     to_gpu = utils.to_gpu
     device = utils.device
 
@@ -992,7 +1071,8 @@ class GDM:
                        self.line_search_c,
                        self.line_search_tau,
                        self.max_n_line_search_attempt,
-                       self.line_search_initial_scale)
+                       self.line_search_initial_scale,
+                       self.check_occupation_per_n_iteration)
 
 def gdm(mf):
     if isinstance(mf, GDM):
