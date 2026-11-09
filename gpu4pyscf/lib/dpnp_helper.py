@@ -666,10 +666,10 @@ def takebak(out, a, indices, axis=-1):
     indices_int32 = dpnp.asarray(indices, dtype=dpnp.int32)
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.takebak(
-        ctypes.c_void_p(stream.ptr),
         ctypes.c_void_p(out.data.ptr), a.ctypes,
         ctypes.c_void_p(indices_int32.data.ptr),
-        ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a)
+        ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a),
+        ctypes.c_void_p(stream.ptr)
     )
     if err != 0: # Not the mapped host memory
         out[...,indices] = dpnp.asarray(a)

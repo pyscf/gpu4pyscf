@@ -75,10 +75,7 @@ def _pin_libtcm():
     test session has passed (~15-30% of runs on Aurora's 2026.1 stack).
     Pinning libtcm with an extra dlopen before libtbb's first one makes
     libtbb's dlclose only decrement the refcount: the library stays mapped
-    and its handlers run normally. Debug-disable: GPU4PYSCF_PIN_TCM=0.
-    '''
-    if os.environ.get("GPU4PYSCF_PIN_TCM", "1") == "0":
-        return
+    and its handlers run normally.    '''
     try:
         ctypes.CDLL("libtcm.so.1", mode=ctypes.RTLD_GLOBAL)
     except OSError:
@@ -87,36 +84,23 @@ def _pin_libtcm():
 
 _pin_libtcm()
 
-_DEFERRED_FREE_THRESHOLD = int(
-    os.environ.get("GPU4PYSCF_DEFERRED_FREE_THRESHOLD", "256")
-)
-
-_DEFER_FREE_ENABLED = os.environ.get("GPU4PYSCF_DEFER_FREE", "1") != "0"
-_DEFER_FREE_MIN_BYTES = int(
-    os.environ.get("GPU4PYSCF_DEFER_FREE_MIN_BYTES", "0")
-)
+_DEFERRED_FREE_THRESHOLD = 256
+_DEFER_FREE_MIN_BYTES = 0
 # Coalesce this many freed buffers into a single keep-alive host task to
 # amortize per-free enqueue/GIL cost. 1 = submit a host task per free.
-_DEFER_FREE_BATCH = max(1, int(
-    os.environ.get("GPU4PYSCF_DEFER_FREE_BATCH", "64")
-))
+_DEFER_FREE_BATCH = 64
 # Flush a lingering partial batch at most once per this many allocations,
 # so tail buffers are not pinned indefinitely without flushing a host task
 # on every single allocation.
-_DEFER_FREE_FLUSH_STRIDE = max(1, int(
-    os.environ.get("GPU4PYSCF_DEFER_FREE_FLUSH_STRIDE", "128")
-))
-_DEFER_FREE_MAIN_THREAD_ONLY = (
-    os.environ.get("GPU4PYSCF_DEFER_FREE_MAIN_THREAD_ONLY", "1") != "0"
-)
+_DEFER_FREE_FLUSH_STRIDE = 128
+# All flush/barrier/wait paths must run on the thread that imported the
+# module (the libsycl scheduler rwlock deadlock otherwise).
+_DEFER_FREE_MAIN_THREAD_ONLY = True
 # Safety valve for the guard above: if frees keep arriving on non-owning
 # threads and no main-thread activity flushes the batch, stop growing it
 # past this many buffers (release the oldest eagerly instead). Only reachable
 # in a sustained all-off-thread free burst; normal runs flush long before.
-_DEFER_FREE_OFFTHREAD_CAP = max(
-    _DEFER_FREE_BATCH,
-    int(os.environ.get("GPU4PYSCF_DEFER_FREE_OFFTHREAD_CAP", "4096")),
-)
+_DEFER_FREE_OFFTHREAD_CAP = max(_DEFER_FREE_BATCH, 4096)
 
 
 # =====================================================================
@@ -526,7 +510,7 @@ def _reap_completed_locked():
     reaper free memory a still-running kernel is reading -- a genuine
     read-after-free, producing exactly the NotPresent page fault this
     investigation was chasing. Confirmed present and firing (before this fix)
-    on the exact failing test via `GPU4PYSCF_REAPER_PROBE` instrumentation
+    on the exact failing test via reaper instrumentation
     (section 5h): two batches (64 then ~16 items) reaped via the un-waited
     status query on every single `get_jk` call, before the task loop that
     later reports the fault even starts.
@@ -639,8 +623,7 @@ def _register_deferred_free(arr):
     not a dpnp array, it is too small, or the underlying USM handles are
     unavailable.
     """
-    if not _DEFER_FREE_ENABLED:
-        return arr
+
     try:
         get_array = getattr(arr, "get_array", None)
         if get_array is None:
@@ -1047,9 +1030,6 @@ def _bootstrap():
                 key[p] for p in rest if p < len(key))
             return perm, new_key
 
-        _getitem_register = (
-            os.environ.get("GPU4PYSCF_GETITEM_REGISTER", "1") != "0"
-        )
         _orig_setitem = dpnp.ndarray.__setitem__
         if not getattr(_orig_setitem, "__cupy_shim_setitem__", False):
             def _dpnp_shim_setitem(self, key, value, _orig=_orig_setitem):
@@ -1082,7 +1062,7 @@ def _bootstrap():
                 # lifetime benefit, so only distinct-pointer results are
                 # registered.
                 try:
-                    if (_getitem_register and
+                    if (
                             res is not self and
                             getattr(res, "get_array", None) is not None and
                             res.data.ptr != self.data.ptr):
