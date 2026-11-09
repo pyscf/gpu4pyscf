@@ -844,6 +844,8 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         for k, katm in enumerate(atmlst):
             for l, latm in enumerate(atmlst):
                 hessobj.de[k,l] += h_disp[k,l]
+    if mf.do_gcp():
+        hessobj.de += hessobj.get_gcp()
     logger.timer(hessobj, 'SCF hessian', *cput0)
 
     return hessobj.de
@@ -916,6 +918,12 @@ class HessianBase(lib.StreamObject):
     get_jk          = NotImplemented
     get_hcore       = NotImplemented
     kernel = hess = kernel
+
+    def get_gcp(self, gcp=None):
+        '''Hessian of the gCP/SRB correction. Called only when
+        base.do_gcp() is True, which requires PySCF >= 2.15.'''
+        from pyscf.hessian.gcp import get_gcp
+        return get_gcp(self, gcp)
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,
                   fx=None, atmlst=None, max_memory=4000, verbose=None):
