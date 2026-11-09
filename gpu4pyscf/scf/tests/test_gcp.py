@@ -34,6 +34,8 @@ O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
+# NH2 radical: its singly occupied orbital is non-degenerate, unlike OH's
+nh2 = 'N 0 0 0; H 0 0.8014 -0.6374; H 0 -0.8014 -0.6374'
 # PySCF and GPU4PySCF choose different default auxiliary bases for def2-mTZVP(P)
 auxbasis = 'def2-universal-jfit'
 
@@ -74,9 +76,9 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(e_gpu, e_cpu, 7)
 
     def test_r2scan3c_uks_energy_vs_pyscf(self):
-        mol_oh = pyscf.M(atom='O 0 0 0; H 0 0 0.97', spin=1, basis='def2-mtzvpp', verbose=0)
-        e_gpu = _run(dft.UKS(mol_oh, xc='r2scan-3c').density_fit(auxbasis)).e_tot
-        e_cpu = _run(cpu_dft.UKS(mol_oh, xc='r2scan-3c').density_fit(auxbasis)).e_tot
+        mol_nh2 = pyscf.M(atom=nh2, spin=1, basis='def2-mtzvpp', verbose=0)
+        e_gpu = _run(dft.UKS(mol_nh2, xc='r2scan-3c').density_fit(auxbasis)).e_tot
+        e_cpu = _run(cpu_dft.UKS(mol_nh2, xc='r2scan-3c').density_fit(auxbasis)).e_tot
         self.assertAlmostEqual(e_gpu, e_cpu, 7)
 
     def test_b973c_energy_vs_pyscf(self):
@@ -113,6 +115,19 @@ class KnownValues(unittest.TestCase):
         self.assertTrue(abs(g_disp).max() > 1e-6)
         # D3 does not change the density, so the difference is the D3 gradient alone
         np.testing.assert_allclose(g - g_off, g_disp, atol=1e-9)
+
+    def test_uks_tda_gradient_includes_scf_dispersion(self):
+        # The unrestricted TD gradients share the restricted kernel without
+        # inheriting from its class
+        mol_nh2 = pyscf.M(atom=nh2, spin=1, basis='def2-svp', verbose=0)
+        mf = _run(dft.UKS(mol_nh2, xc='b3lyp-d3bj').density_fit())
+        mf_off = _run(dft.UKS(mol_nh2, xc='b3lyp').density_fit())
+        g = mf.TDA().set(nstates=3).run().Gradients().kernel(state=1)
+        g_off = mf_off.TDA().set(nstates=3).run().Gradients().kernel(state=1)
+        g_disp = mf.Gradients().get_dispersion()
+        self.assertTrue(abs(g_disp).max() > 1e-6)
+        # The unrestricted TD solve leaves ~3e-9 of noise between the two runs
+        np.testing.assert_allclose(g - g_off, g_disp, atol=1e-7)
 
 @unittest.skipIf(cpu_gcp is not None, 'PySCF < 2.15 only')
 class OldPySCF(unittest.TestCase):
