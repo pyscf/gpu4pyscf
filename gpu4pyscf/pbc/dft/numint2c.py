@@ -14,7 +14,7 @@
 
 import numpy as np
 import cupy as cp
-from pyscf.pbc.dft import numint2c as numint2c_cpu
+from gpu4pyscf.dft import numint2c as mol_numint2c
 from gpu4pyscf.lib import utils
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.scf.ghf import _block_diag
@@ -42,12 +42,10 @@ class KNumInt2C(numint.KNumInt):
     nr_rks_fxc = nr_uks_fxc = nr_rks_fxc_st = NotImplemented
     get_fxc = nr_gks_fxc = nr_fxc = NotImplemented
 
-    collinear = numint2c_cpu.KNumInt2C.collinear
-    spin_samples = numint2c_cpu.KNumInt2C.spin_samples
-    collinear_thrd = numint2c_cpu.KNumInt2C.collinear_thrd
-    collinear_samples = numint2c_cpu.KNumInt2C.collinear_samples
+    collinear = mol_numint2c.NumInt2C.collinear
+    spin_samples = mol_numint2c.NumInt2C.spin_samples
 
-    _keys = {'collinear', 'spin_samples', 'collinear_thrd', 'collinear_samples', 'kpts'}
+    _keys = {'collinear', 'spin_samples', 'kpts'}
 
     def __init__(self, kpts=None):
         self.kpts = np.zeros((1, 3)) if kpts is None else np.reshape(kpts, (-1, 3))
