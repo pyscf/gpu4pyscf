@@ -22,6 +22,7 @@ from pyscf.pbc.lib.kpts_helper import gamma_point
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import most_diffuse_pgto, SortedGTO
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 from gpu4pyscf.pbc.tools import k2gamma
 
 kern_map = {
@@ -74,22 +75,22 @@ def _sorted_fake_cell_vnl(cell, type='scalar'):
     return fakecell, hl_blocks, pattern, splits
 
 def get_pp_nl(cell, kpts=None):
-    if kpts is None:
-        kpts_lst = np.zeros((1, 3))
-    else:
-        kpts_lst = np.reshape(kpts, (-1, 3))
-    nkpts = len(kpts_lst)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
+    nkpts = len(kpts)
 
     # pattern stores the unique [hl_dim, l] combinations
     fakecell, hl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell)
 
-    is_gamma_point = gamma_point(kpts_lst)
+    is_gamma_point = gamma_point(kpts)
     dtype = np.float64 if is_gamma_point else np.complex128
     nao = cell.nao
     ppnl = cp.zeros((nkpts, nao, nao), dtype=dtype)
     if not hl_blocks:
+        if is_single_kpt:
+            ppnl = ppnl[0]
         return ppnl
-    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
+
+    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts)
 
     hl_offset = [0] * 3
     for ii, (i0, i1) in enumerate(zip(splits[:-1], splits[1:])):
@@ -108,6 +109,8 @@ def get_pp_nl(cell, kpts=None):
         tmp = contract('nij,jknlq->iknlq', hl_block, ilp)
         ilp_conj = cp.conjugate(ilp, out=ilp)
         contract('iknlp,iknlq->kpq', ilp_conj, tmp, beta=1, out=ppnl)
+    if is_single_kpt:
+        ppnl = ppnl[0]
     return ppnl
 
 def get_pp_soc(cell, kpts=None):

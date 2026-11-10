@@ -245,6 +245,9 @@ def run_dft(mol_name, config, charge=None, spin=0):
     mf.nlc = nlc
     mf.get_dispersion = MethodType(gen_disp_fun(xc_disp, xc_gcp), mf)
     mf.do_disp = lambda: True
+    # get_dispersion above includes gCP; switch off the SCF's own gCP term
+    # (PySCF >= 2.15), which xc='GGA_XC_B97_3C' would otherwise enable.
+    mf.gcp = False
     #################################
 
     mf.chkfile = None

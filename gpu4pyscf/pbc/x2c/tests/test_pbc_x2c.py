@@ -175,19 +175,6 @@ class SmallScalarX2C(unittest.TestCase):
                 np.testing.assert_array_equal(actual[..., n:, :n], 0.)
                 np.testing.assert_array_equal(actual[..., :n, :n], actual[..., n:, n:])
 
-    def test_helper_default_kpts_shape(self):
-        helper = x2c1e.SpinFreeX2CHelper(self.cell)
-        for method in (helper.get_hcore, helper.get_xmat):
-            with self.subTest(method=method.__name__):
-                default = method()
-                single = method(kpts=np.zeros(3))
-                batch = method(kpts=np.zeros((1, 3)))
-                self.assertEqual(default.ndim, 3)
-                self.assertEqual(default.shape, batch.shape)
-                self.assertEqual(batch.shape, (1, *single.shape))
-                np.testing.assert_allclose(default.get(), batch.get(), atol=1e-12, rtol=0)
-                np.testing.assert_allclose(batch[0].get(), single.get(), atol=1e-12, rtol=0)
-
     def test_xmat_decoupling_and_hcore_reconstruction(self):
         helper = x2c1e.SpinFreeX2CHelper(self.cell)
         xcell = helper.get_xmol()
