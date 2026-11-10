@@ -905,11 +905,11 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 t0 = log.init_timer()
                 if mo_coeff is None:
                     dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
-                    dm_mask = take_last2d(dma, idx, out=dm_mask)
+                    dm_mask = take_last2d(dma[i], idx, out=dm_mask)
                     rho_tot[0, i, :, p0:p1] = eval_rho(_sorted_mol, ao_mask, dm_mask,
                                      xctype=xctype, hermi=hermi,
                                      with_lapl=with_lapl, buf=buf)
-                    dm_mask = take_last2d(dmb, idx, out=dm_mask)
+                    dm_mask = take_last2d(dmb[i], idx, out=dm_mask)
                     rho_tot[1, i, :, p0:p1] = eval_rho(_sorted_mol, ao_mask, dm_mask,
                                      xctype=xctype, hermi=hermi,
                                      with_lapl=with_lapl, buf=buf)

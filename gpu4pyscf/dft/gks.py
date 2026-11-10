@@ -58,15 +58,14 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if dm is None: dm = ks.make_rdm1()
     log = logger.new_logger(ks)
     t0 = log.init_timer()
-    ks.initialize_grids(mol, dm)
+    if ks.grids.coords is None:
+        rks.initialize_grids(ks, mol, dm[0]+dm[1])
+    ni = ks._numint
 
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
-        ni = ks._numint
-        if ni.collinear[0].lower() != 'm':
-            raise NotImplementedError('Only multi-colinear GKS is implemented')
         n, exc, vxc = ni.get_vxc(mol, ks.grids, ks.xc, dm,
                                  hermi=hermi, max_memory=max_memory)
         log.debug('nelec by numeric integration = %s', n)
@@ -132,8 +131,6 @@ class GKS(rks.KohnShamDFT, GHF):
         logger.info(self, 'collinear = %s', self._numint.collinear)
         if self._numint.collinear[0] == 'm':
             logger.info(self, 'mcfun spin_samples = %s', self._numint.spin_samples)
-            logger.info(self, 'mcfun collinear_thrd = %s', self._numint.collinear_thrd)
-            logger.info(self, 'mcfun collinear_samples = %s', self._numint.collinear_samples)
         return self
 
     @property
@@ -162,7 +159,4 @@ class GKS(rks.KohnShamDFT, GHF):
     
     def to_cpu(self):
         mf = gks.GKS(self.mol, xc=self.xc)
-        utils.to_cpu(self, out=mf)
-        mf.collinear = self.collinear
-        mf.spin_samples = self.spin_samples
-        return mf
+        return utils.to_cpu(self, out=mf)
