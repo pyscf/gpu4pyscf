@@ -59,7 +59,7 @@ class KnownValues(unittest.TestCase):
                     cpu_correction(ref, slab_center=center)
                     self.assertIs(slab_dipole_correction(mf, z0=center, cut=cut), mf)
                     self.assertEqual(mf.__class__.__name__,
-                                     f'SlabDipoleCorrection{name}')
+                                     f'Dipole{name}')
                     vref, v = ref.get_veff(dm=dm), mf.get_veff(dm=dm_gpu)
                     np.testing.assert_allclose((v-v0).get(), vref-v0_ref, atol=2e-9)
                     self.assertAlmostEqual(v.edip, vref.exc-v0_ref.exc, delta=2e-10)

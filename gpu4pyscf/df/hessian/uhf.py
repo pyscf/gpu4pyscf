@@ -278,20 +278,26 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
     j2c_10 *= -1
     j2c_10, tmp = cp.empty_like(j2c_10), j2c_10
     j2c_10[:,aux_sorting[:,None], aux_sorting] = tmp
-    j2c_10v = contract('xrs,st->xrt', j2c_10, metric_v)
+    j2c_10v = ndarray((3, naux, metric_v.shape[1]), buffer=tmp)
+    contract('xrs,st->xrt', j2c_10, metric_v, out=j2c_10v)
+    tmp = None
 
     # j3c_oo1p = (1|0)(0|00) + (1|00)
     j3c_oo1p = contract('xuv,vnij->xunij', j2c_10, dm_oo, alpha=-1, beta=1, out=j3c_oo1)
-    # (00|1)(1|0)(0|00) + (00|1)(0|0)(1|00) +
-    # (00|0)(0|1)(1|00) + (00|0)(0|1)(1|0)(0|00)
-    # = 001p * 001p
-    h_aux = contract('xrnij,ysnij->xrys', j3c_oo1p, j3c_oo1p, -k_factor)
+    aux_atm_labels = _bas_atom_labels(auxmol, aux_sorting)
+    # The helper flattens spin and occupied-pair indices, summing exchange
+    # within each spin channel without introducing cross-spin products.
+    ejk += df_rhf_hess._aux_metric_response(
+        metric_w, metric_v, j2c_10v, dm_oo, j3c_oo1p,
+        aux_atm_labels, natm) * (-k_factor)
     if j_factor != 0:
         auxvec_ipauxp = cp.einsum('xrnii->xr', j3c_oo1p)
-        contract('xr,ys->xrys', auxvec_ipauxp, auxvec_ipauxp, j_factor, 1, h_aux)
-    j2c_inv = (metric_v / metric_w).dot(metric_v.T)
-    h_aux *= j2c_inv[None,:,None,:]
+        ejk += df_rhf_hess._aux_metric_response(
+            metric_w, metric_v, j2c_10v, auxvec[:,None],
+            auxvec_ipauxp[:,:,None], aux_atm_labels, natm) * j_factor
 
+    # Pair density for the genuine second derivative of the metric.
+    # Products of first metric derivatives are included in the helper above.
     if j_factor == 0:
         dm_aux = None
     else:
@@ -303,38 +309,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
         auxmol, dm_aux[aux_sorting[:,None], aux_sorting], omega, lr_factor, sr_factor)
     ejk -= ejk_aux
 
-    # (00|0)(1|0)(0|1)(0|00)
-    j2c_ip2 = None
-    for x in range(3):
-        j2c_10v_w = j2c_10v[x] / metric_w
-        for y in range(3):
-            j2c_ip2 = contract('rs,ts->rt', j2c_10v_w, j2c_10v[y], out=j2c_ip2)
-            j2c_ip2 *= dm_aux
-            h_aux[x,:,y] += j2c_ip2
-    dm_aux = j2c_ip2 = j2c_10v_w = None
-
-    # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
-    dm_aux1 = contract('xrnij,snij->xrs', j3c_oo1p, dm_oo, -k_factor)
-    if j_factor != 0:
-        dm_aux1 = contract('xr,t->xrt', auxvec_ipauxp, auxvec, j_factor, 1, dm_aux1)
-    tmp = contract('xrt,st->xrs', j2c_10v, metric_v/metric_w)
-    # perform the following operations
-    #:w10_100 = contract('xrt,ytr->xryt', tmp, dm_aux1)
-    #:h_aux -= w10_100
-    #:h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
-    h_aux = contract('xrt,ytr->xryt', tmp, dm_aux1, alpha=-2, beta=1, out=h_aux)
-    dm_aux1 = j2c_10 = tmp = None
-
-    # swap the differentiation order
-    # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
-    #:h_aux = h_aux + h_aux.transpose(2,3,0,1)
-    h_aux = transpose_sum(h_aux.reshape(3*naux,3*naux), inplace=True)
-    h_aux = h_aux.reshape(3,naux,3,naux).transpose(1,3,0,2)
-
-    aux_atm_labels = _bas_atom_labels(auxmol, aux_sorting)
-    ejk_aux = _aggregate_to_atoms(h_aux, natm, aux_atm_labels, axis=(0,1))
-    ejk += ejk_aux * .5
-    j2c_inv = j3c_oo1 = h_aux = None
+    dm_aux = j2c_10 = j3c_oo1 = None
     t1 = t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # 3c integrals are computed in Cartesian bases, and sorted in the original
