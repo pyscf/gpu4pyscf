@@ -1,4 +1,4 @@
-#include <sycl_device.hpp>
+#include "gsycl/sycl_device.hpp"
 #include <oneapi/mkl/lapack.hpp>
 #include <oneapi/mkl/blas.hpp>
 #include <iostream>

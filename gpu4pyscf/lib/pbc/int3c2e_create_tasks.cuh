@@ -17,8 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 
 #define THREADS         256
 // WARP_SIZE: compile-time constant used for shared-memory sizing.

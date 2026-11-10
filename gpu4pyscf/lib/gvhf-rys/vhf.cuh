@@ -7,7 +7,7 @@
 // includes vhf.cuh (kernels, drivers, and shared .cuh helpers like
 // rys_contract_k.cuh). The plain C files that include it only need the structs.
 #ifdef __cplusplus
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 #endif
 
 #define PTR_RANGE_OMEGA 8

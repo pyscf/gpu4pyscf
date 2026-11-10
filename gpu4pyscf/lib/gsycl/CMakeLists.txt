@@ -18,9 +18,10 @@
 #
 # Provides two things:
 #   1. sycl_compat  — INTERFACE target that injects gsycl/ at the front
-#                     of the include path, making <cuda_runtime.h> and
-#                     <cuda.h> resolve to the SYCL shim headers instead
-#                     of the real CUDA toolkit headers.
+#                     of the include path (SYCL builds only), so <cub/cub.cuh>
+#                     and <cuComplex.h> resolve to the SYCL shims here instead
+#                     of the real CUDA toolkit headers. Sources include the
+#                     dual-backend gpu_compat.h (lib/ root) directly.
 #   2. gsycl        — shared library exposing the Python ABI (extern "C"
 #                     device/queue management symbols) via libgsycl.so.
 #                     All other .so files link against this to resolve

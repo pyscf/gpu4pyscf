@@ -15,7 +15,7 @@
  */
 
 #include <stdio.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 #include "ecp.h"
 #include "bessel.cu"
 #include "cart2sph.cu"

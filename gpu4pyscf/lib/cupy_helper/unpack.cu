@@ -18,9 +18,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 #define THREADS         16
 #define RBLKSIZE        16

@@ -20,7 +20,6 @@
 #include <string.h>
 #include <assert.h>
 #include <dlfcn.h>
-#include <cuda_runtime.h>
 #include "libxc.h"
 #include "gint/cuda_alloc.cuh"
 

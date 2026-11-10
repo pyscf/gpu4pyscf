@@ -16,11 +16,9 @@
 
 #pragma once
 
-// cuda.h: CUDA_VERSION (aft_eval_*); cuda_runtime.h: runtime API used everywhere.
-#include <cuda.h>
-#include <cuda_runtime.h>
+// gpu_compat.h (via this header chain) provides CUDA_VERSION (aft_eval_*); the runtime API shims live in gsycl/sycl_device.hpp.
 #include <cuComplex.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 // All constant memory of multigrid_v3 is declared here.
 #ifdef USE_SYCL

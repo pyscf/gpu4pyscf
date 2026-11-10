@@ -29,7 +29,7 @@
 #include <utility>
 #ifdef USE_SYCL
 #include <optional>
-#include <sycl_device.hpp>
+#include "gsycl/sycl_device.hpp"
 // CUDA's __forceinline__ implies `inline`, so upstream's
 // `__device__ __forceinline__` helpers can sit in headers/.cu files that
 // several TUs include. sycl_device.hpp's __forceinline__ is only the

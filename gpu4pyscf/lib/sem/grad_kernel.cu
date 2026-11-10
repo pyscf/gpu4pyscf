@@ -16,8 +16,7 @@
 
 #include <stdio.h>
 #include <math.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 
 __global__ void calc_pair_e2e_kernel(

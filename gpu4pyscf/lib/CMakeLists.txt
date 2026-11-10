@@ -124,13 +124,12 @@ if (USE_SYCL)
     set(GPU4PYSCF_EXCHCXX_SYCL_TARGET "")
   endif()
 
-  # This needs to be built first than anything else
+  # SYCL compat layer; built only for SYCL builds (this whole block is inside
+  # if(USE_SYCL)). CUDA builds never see gsycl/ on the include path.
   add_subdirectory(gsycl)
-  # Global fallback so subdirectories that haven't yet gained
-  # target_link_libraries(... sycl_compat) still find
-  # <cuda_runtime.h> and <cuda.h> via gsycl/ shims.
-  # Remove once all subdirectory CMakeLists.txt are updated.
-  include_directories(${PROJECT_SOURCE_DIR}/gsycl)      
+  # Every subdirectory links the sycl_compat INTERFACE target, which injects
+  # gsycl/ at the front of the include path (no raw <cuda*> includes remain
+  # outside gsycl/ itself -- sources use gpu_compat.h instead).
 endif()
 
 if (NOT USE_SYCL)

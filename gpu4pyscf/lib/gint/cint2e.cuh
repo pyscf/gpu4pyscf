@@ -16,11 +16,11 @@
 
 #pragma once
 
+#include "gpu_compat.h"
 #include "gint.h"
 
 // CUDA and SYCL headers plus the backend-agnostic kernel macros (setup_context,
 // threadIdx_x, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*).
-#include "gsycl/gpu_compat.h"
 
 #ifdef USE_SYCL
 

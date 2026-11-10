@@ -17,8 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #include "multigrid.cuh"
 
 __constant__ Fold2Index c_i_in_fold2idx[165];

@@ -16,7 +16,7 @@
 #pragma once
 
 #include <stdio.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 
 #ifndef USE_SYCL
 

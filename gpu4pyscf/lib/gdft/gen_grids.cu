@@ -17,9 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 #define NATOM_PER_BLOCK        128
 #define TILE    16

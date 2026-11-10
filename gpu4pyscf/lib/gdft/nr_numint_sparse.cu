@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"
 
@@ -29,7 +28,7 @@
 #define THREADSYY       (THREADSY * THREADSY)
 #define DIVXY           (THREADSX / THREADSY)
 
-// 3D launch/prologue unified via gsycl/gpu_compat.h (from nr_eval_gto.cuh).
+// 3D launch/prologue unified via gpu_compat.h (from nr_eval_gto.cuh).
 // blocks/threads are MAKE_RANGE_3D values in scope at each call site.
 // TAG is kept for call-site compatibility; kernel names are inferred.
 #define LAUNCH_KERNEL_3D(TAG, KERNEL, ...) \

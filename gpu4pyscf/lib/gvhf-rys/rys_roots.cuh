@@ -4,7 +4,7 @@
 #define INTERVAL        2.5
 #define INTERVALS       40
 
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 #ifdef USE_SYCL
 // The tables are `__device__` globals on CUDA; on SYCL they become constexpr

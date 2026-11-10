@@ -21,7 +21,6 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
-#include "gsycl/gpu_compat.h"
 
 #define RT2_MAX 9
 #define IJ_SIZE 11

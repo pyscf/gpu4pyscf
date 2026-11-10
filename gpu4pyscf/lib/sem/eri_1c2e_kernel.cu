@@ -18,8 +18,7 @@
 
 #include <stdio.h>
 #include <math.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 #define BINOM_DIM 30
 #define IDX2(r, c) ((r) * (BINOM_DIM) + (c))

@@ -28,7 +28,7 @@
 #include <string_view>
 #include <vector>
 
-#include <sycl_device.hpp>
+#include "gsycl/sycl_device.hpp"
 #include <exchcxx/exchcxx.hpp>
 #include <atomic>
 #include <mutex>

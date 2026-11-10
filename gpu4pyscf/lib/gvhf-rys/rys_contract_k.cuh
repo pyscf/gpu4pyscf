@@ -19,7 +19,7 @@
 #include "gvhf-rys/vhf.cuh"
 
 // Abstracts 2D-kernel gout thread-index setup. Used 4x in this header.
-// Indices resolve via gsycl/gpu_compat.h in both backends. setup_context()
+// Indices resolve via gpu_compat.h in both backends. setup_context()
 // also provides `item` for the __syncthreads() calls below.
 #define SETUP_GOUT_KERNEL() \
     setup_context(); \

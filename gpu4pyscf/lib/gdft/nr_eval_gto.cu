@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
 #include "gint/gint.h"
 #include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"

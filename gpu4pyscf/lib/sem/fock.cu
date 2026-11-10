@@ -16,10 +16,9 @@
 
 // nvcc -O3 -shared -Xcompiler -fPIC -arch=sm_70 fock.cu -o libfock.so
 
-#include <cuda_runtime.h>
 #include <math.h>
 #include <stdio.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 
 __global__

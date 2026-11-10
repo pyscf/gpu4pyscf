@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-#include <cuda_runtime.h>
 #include <stdio.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 #define THREADS        32
 
 __global__

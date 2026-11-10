@@ -16,7 +16,6 @@
 
 #include "gvhf-rys/rys_roots.cuh"
 // Backend macros for the converted helpers below.
-#include "gsycl/gpu_compat.h"
 
 #define SQRTPIE4        .8862269254527580136
 #define PIE4            .7853981633974483096

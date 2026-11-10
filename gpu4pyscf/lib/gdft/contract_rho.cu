@@ -19,9 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #include "contract_rho.cuh"
-#include "gsycl/gpu_compat.h"
 // Tree reduction along iy dimension in shared memory buf.
 #define REDUCE_Y(buf, ixy, iy) \
     for (int _s_ = BLKSIZEY >> 1; _s_ > 0; _s_ >>= 1) { \

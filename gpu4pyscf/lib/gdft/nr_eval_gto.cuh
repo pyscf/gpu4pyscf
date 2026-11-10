@@ -16,10 +16,10 @@
 
 #pragma once
 
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 // Kernel-side & launch-config macros to unify CUDA and SYCL in gdft.
-// Indexing, launch and shared-memory come from gsycl/gpu_compat.h; only the
+// Indexing, launch and shared-memory come from gpu_compat.h; only the
 // blocks.y mutator below still needs a backend branch (sycl::range and dim3
 // share no common accessor), kept here in this header, not in .cu files.
 #define MAKE_RANGE_2D(X, Y)  make_block((X), (Y))

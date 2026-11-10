@@ -23,7 +23,7 @@
 
 #define Q_COND_MARGIN   4.f
 
-// KERNEL_SETUP resolves thread/block indices via gsycl/gpu_compat.h in
+// KERNEL_SETUP resolves thread/block indices via gpu_compat.h in
 // both backends (setup_context + threadIdx_x/threadIdx_y/... macros).
 #define KERNEL_SETUP() setup_context()
 

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
+#include "gpu_compat.h"
 #include <stdio.h>
-#include <cuda_runtime.h>
 
 extern "C" {
 __host__

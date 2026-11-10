@@ -18,8 +18,7 @@
 
 #include <stdio.h>
 #include <math.h>
-#include <cuda_runtime.h>
-#include "gsycl/gpu_compat.h"
+#include "gpu_compat.h"
 
 #define INV_SQRT(x) (1.0 / sqrt(x))
 #define SQR(x) ((x) * (x))

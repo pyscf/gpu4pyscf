@@ -1,10 +1,10 @@
 #ifndef GPU4PYSCF_CONSTANT_CUH
 #define GPU4PYSCF_CONSTANT_CUH
 
+#include "gpu_compat.h"
 #include "gint/gint.h"
 
 #ifdef USE_SYCL
-#include "gsycl/gpu_compat.h"
 
 // Named distinctly from gint's s_gint_bpcache (gint/cint2e.cuh) -- both are
 // GLOBAL DEFAULT-visibility device_global objects and libgint.so/libgvhf.so

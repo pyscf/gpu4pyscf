@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "gvhf-rys/vhf.cuh"
-#include "gsycl/gpu_compat.h"
 
 #define THREADS         256
 #define DM_BLOCK        8
