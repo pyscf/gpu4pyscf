@@ -217,6 +217,60 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.barrier_start, 15.3)
         self.assertAlmostEqual(mf.barrier_end, 17.5)
 
+    def test_cell_dimension(self):
+        for dimension in (1, 2):
+            with self.subTest(dimension=dimension):
+                cell = make_cell()
+                mf = make_mf(cell)
+                cell.dimension = dimension
+                with self.assertRaisesRegex(NotImplementedError, '3D cell'):
+                    gate_charge(mf)
+
+    def test_barrier_positions(self):
+        cell = make_cell()
+        # Defaults and explicit intervals, including both periodic directions.
+        valid = (
+            dict(zgate=5., gate_side=-1),
+            dict(zgate=17., gate_side=1),
+            dict(zgate=5., gate_side=-1, barrier_start=3., barrier_end=7.),
+            dict(zgate=17., gate_side=1, barrier_start=15., barrier_end=19.),
+            dict(zgate=.2, gate_side=-1, barrier_start=21., barrier_end=2.),
+            dict(zgate=21.8, gate_side=1, barrier_start=20., barrier_end=1.),
+            dict(zgate=22.2, gate_side=-1, barrier_start=-1., barrier_end=24.),
+        )
+        for kwargs in valid:
+            with self.subTest(**kwargs):
+                gate_charge(make_mf(cell), barrier=True, dipole_width=.4,
+                            dipole_gap=.1, barrier_width=.2, **kwargs)
+
+        invalid = (
+            # Gate outside the interval or exactly on an edge.
+            (dict(zgate=17., barrier_start=13., barrier_end=16.), 'Gate plane'),
+            (dict(zgate=17., barrier_start=17., barrier_end=19.), 'Gate plane'),
+            (dict(zgate=17., barrier_start=15., barrier_end=17.), 'Gate plane'),
+            # Gate enclosed, but part of the return region is left exposed.
+            (dict(zgate=5., gate_side=-1, barrier_start=4.6, barrier_end=7.),
+             'dipole return region'),
+            (dict(zgate=17., gate_side=1, barrier_start=15., barrier_end=17.4),
+             'dipole return region'),
+            (dict(zgate=.2, gate_side=-1, barrier_start=21.8, barrier_end=2.),
+             'dipole return region'),
+            (dict(zgate=21.8, gate_side=1, barrier_start=20., barrier_end=.2),
+             'dipole return region'),
+            # Both dipole planes lie inside, but the interval cuts through
+            # the return region across the periodic boundary.
+            (dict(zgate=17., gate_side=1, barrier_start=17.3, barrier_end=17.2),
+             'dipole return region'),
+        )
+        for kwargs, message in invalid:
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    gate_charge(make_mf(cell), barrier=True, dipole_width=.4,
+                                dipole_gap=.1, barrier_width=.2, **kwargs)
+                # Unused barrier coordinates do not restrict barrier=False.
+                gate_charge(make_mf(cell), barrier=False, dipole_width=.4,
+                            dipole_gap=.1, barrier_width=.2, **kwargs)
+
 
 if __name__ == '__main__':
     unittest.main()

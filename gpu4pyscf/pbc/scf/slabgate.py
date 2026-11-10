@@ -80,6 +80,8 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             start+.1*L. For gate_side=+1, end defaults to cut+dipole_width/2
             and start to end-.1*L. Explicit edges are coordinates along
             z, independent of gate_side. Intervals can cross the boundary.
+            When barrier=True, the interval must contain zgate strictly
+            inside and cover the entire dipole return region.
         barrier_height: Plateau height in Hartree (default: .05 = .1 Ry).
         barrier_width: Linear ramp width INSIDE each edge, in Bohr; None
             means dipole_width, as in Brumme. Zero gives a rectangular barrier.
@@ -133,6 +135,16 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             barrier_start = (barrier_end - .1*length) % length
     if barrier_width is None:
         barrier_width = dipole_width
+    if barrier:
+        span = (barrier_end - barrier_start) % length
+        # Unwrap relative to the barrier start so crossing z=0 is allowed.
+        gate_pos = (zgate - barrier_start) % length
+        if not 0 < gate_pos < span:
+            raise ValueError('Gate plane must lie strictly inside the barrier interval')
+        return_start = (gate_pos + gate_side*(dipole_gap + dipole_width/2)
+                        - dipole_width/2)
+        if return_start < -1e-10 or return_start + dipole_width > span + 1e-10:
+            raise ValueError('Barrier interval must cover the entire dipole return region')
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
     mf.gate_side = gate_side

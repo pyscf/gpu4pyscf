@@ -38,9 +38,14 @@ class KnownValues(unittest.TestCase):
 
         def build(c):
             mf = make_mf(c, name)
-            # Intentionally place ions on the barrier ramps to test their force.
-            return gate_charge(mf, zgate=17., barrier=True, barrier_start=9.6,
-                               barrier_end=12.4, barrier_width=1.,
+            # Enclose the gate and return region, while deliberately placing
+            # an ion on the slab-facing ramp to test the ionic barrier force.
+            if gate_side == -1:
+                zgate, start, end = 5., 2.9, 12.4
+            else:
+                zgate, start, end = 17., 9.6, 19.1
+            return gate_charge(mf, zgate=zgate, barrier=True, barrier_start=start,
+                               barrier_end=end, barrier_width=1.,
                                dipole_width=2., dipole_gap=.1, gate_side=gate_side)
 
         mf = build(cell)
@@ -87,9 +92,9 @@ class KnownValues(unittest.TestCase):
         if name.startswith('K'):
             cell.charge = 2  # One hole per primitive cell for two k-points.
         if gate_side == -1:
-            zgate, start, end = 5., 3., 7.
+            zgate, start, end = 5., 2.9, 7.
         else:
-            zgate, start, end = 17., 15., 19.
+            zgate, start, end = 17., 15., 19.1
         mf = gate_charge(make_mf(cell, name, multigrid), zgate=zgate,
                          barrier=True, barrier_start=start, barrier_end=end,
                          barrier_width=.7, dipole_width=2., dipole_gap=.1,
