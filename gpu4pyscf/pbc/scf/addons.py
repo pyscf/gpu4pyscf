@@ -17,3 +17,4 @@ Add-ons for periodic SCF calculations.
 '''
 
 from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
+from gpu4pyscf.pbc.scf.slabgate import gate_charge
