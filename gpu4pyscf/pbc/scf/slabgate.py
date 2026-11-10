@@ -19,14 +19,18 @@ references: Phys. Rev. B 89, 245406 (2014).
 
 import numpy as np
 import cupy as cp
-from pyscf import lib
+from pyscf import lib, __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.scf.slabdipole import _slab_length, _dipole_grids, _slab_charge
 
 
+# Dipole-plane separation as a fraction of the cell length along z.
+DIPOLE_WIDTH_RATIO = getattr(__config__, 'pbc_scf_slabgate_dipole_width_ratio', .01)
+
+
 def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                 barrier_end=None, barrier_height=.05, barrier_width=None,
-                dipole_width=None, dipole_gap=1e-4, gate_side=-1):
+                dipole_gap=1e-4, gate_side=-1):
     '''
     Apply a compensating planar gate and its dipole correction in place.
 
@@ -60,6 +64,13 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     scf_summary['egate'] and ['ebarrier'] report these complete additions.
     Electronic contributions are already in scf_summary['e1'].
 
+    The dipole-plane separation dipole_width is DIPOLE_WIDTH_RATIO*L
+    (default: .01*L, as in Brumme). The return region is centered at
+    cut = zgate + gate_side*(dipole_gap + dipole_width/2).
+    For debugging, change this module's DIPOLE_WIDTH_RATIO before calling
+    gate_charge, or set pbc_scf_slabgate_dipole_width_ratio in pyscf.__config__
+    before importing this module.
+
     Args:
         mf: RKS/UKS/KRKS/KUKS for a three-dimensionally periodic slab.
             The slab normal is z, with the third lattice vector along positive
@@ -69,9 +80,6 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             the higher-coordinate side, -1 the lower-coordinate side
             (default: -1, Brumme's orientation). zgate sets the actual
             sheet position; this sign places the dipole and default barrier.
-        dipole_width: Separation d_dip of the dipole planes in Bohr; None
-            means .01*L, as in Brumme. The return region is centered at
-            cut = zgate + gate_side*(dipole_gap + dipole_width/2).
         dipole_gap: Small positive distance epsilon in Bohr between the
             gate and the nearest dipole plane (default: 1e-4).
         barrier: Enable the repulsive electronic barrier (default: False).
@@ -116,7 +124,7 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     if gate_side not in (-1, 1):
         raise ValueError('gate_side must be -1 or +1')
     zgate = (.5*length if zgate is None else zgate) % length
-    dipole_width = .01*length if dipole_width is None else dipole_width
+    dipole_width = DIPOLE_WIDTH_RATIO * length
     if not 0 < dipole_width < length:
         raise ValueError('Gate dipole width must satisfy 0 < width < cell length')
     if not 0 < dipole_gap < length-dipole_width:

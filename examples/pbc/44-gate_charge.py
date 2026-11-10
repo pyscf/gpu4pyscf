@@ -37,13 +37,13 @@ cell = gto.M(
 length = cell.lattice_vectors()[2, 2]
 mf = dft.UKS(cell, xc='pbe')
 
-# gate_charge adds the dipole automatically, with
+# gate_charge adds the dipole automatically, with d_dip=.01*length and
 # cut = zgate + gate_side*(epsilon + d_dip/2), modulo L.
 # Here gate_side=+1 puts the gate above the slab. The dipole is farther
 # toward +z; the default barrier extends toward the slab on the lower-z side.
 # z0 = (cut + L/2) % L. Explicit positions persist in force scanners.
 # For a lower gate, use gate_side=-1 and zgate=.1*length instead.
-gate_charge(mf, zgate=.5*length, gate_side=1, dipole_width=.01*length,
+gate_charge(mf, zgate=.5*length, gate_side=1,
             dipole_gap=1e-4, barrier=True, barrier_height=.05)
 mf.conv_tol = 1e-10
 mf.kernel()

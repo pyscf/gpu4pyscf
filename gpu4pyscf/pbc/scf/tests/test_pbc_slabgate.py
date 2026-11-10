@@ -13,11 +13,13 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import numpy as np
 import cupy as cp
 from pyscf.pbc import gto
 from pyscf.pbc.dft import numint as cpu_numint
 from gpu4pyscf.pbc import dft
+from gpu4pyscf.pbc.scf import slabgate
 from gpu4pyscf.pbc.scf.addons import gate_charge
 from gpu4pyscf.pbc.scf.slabdipole import _sawtooth, _slab_charge
 from gpu4pyscf.pbc.scf.slabgate import _sheet_potential, _barrier_potential
@@ -164,8 +166,8 @@ class KnownValues(unittest.TestCase):
     def test_charge_per_cell(self):
         cell = make_cell()
         gamma = gate_charge(make_mf(cell))
-        mf = gate_charge(make_mf(cell, 'KUKS'), zgate=17.,
-                         dipole_width=2., dipole_gap=.1)
+        with mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', 2./22.):
+            mf = gate_charge(make_mf(cell, 'KUKS'), zgate=17., dipole_gap=.1)
         self.assertEqual(_slab_charge(gamma, cell), 2.)
         self.assertEqual(_slab_charge(mf, cell), 1.)
         dm = mf.get_init_guess()
@@ -191,10 +193,11 @@ class KnownValues(unittest.TestCase):
         ne = float(cp.einsum('skij,kji->', dm, mf.get_ovlp()).real) / len(mf.kpts)
         self.assertAlmostEqual(ne, cell.atom_charges().sum()-2., delta=1e-9)
 
+    @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', .4/22.)
     def test_reset_and_parameters(self):
         cell = make_cell()
         mf = gate_charge(make_mf(cell), zgate=17., gate_side=-1,
-                         dipole_width=.4, dipole_gap=.1, barrier=True)
+                         dipole_gap=.1, barrier=True)
         self.assertEqual(mf.gate_side, -1)
         self.assertAlmostEqual(mf.cut, 16.7)
         self.assertAlmostEqual(mf.z0, 5.7)
@@ -203,7 +206,7 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(mf.barrier_width, mf.dipole_width)
 
         self.assertIs(gate_charge(mf, zgate=17., gate_side=1,
-                                  dipole_width=.4, dipole_gap=.1, barrier=True), mf)
+                                  dipole_gap=.1, barrier=True), mf)
         self.assertEqual(mf.gate_side, 1)
         self.assertAlmostEqual(mf.cut, 17.3)
         self.assertAlmostEqual(mf.z0, 6.3)
@@ -226,6 +229,7 @@ class KnownValues(unittest.TestCase):
                 with self.assertRaisesRegex(NotImplementedError, '3D cell'):
                     gate_charge(mf)
 
+    @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', .4/22.)
     def test_barrier_positions(self):
         cell = make_cell()
         # Defaults and explicit intervals, including both periodic directions.
@@ -240,7 +244,7 @@ class KnownValues(unittest.TestCase):
         )
         for kwargs in valid:
             with self.subTest(**kwargs):
-                gate_charge(make_mf(cell), barrier=True, dipole_width=.4,
+                gate_charge(make_mf(cell), barrier=True,
                             dipole_gap=.1, barrier_width=.2, **kwargs)
 
         invalid = (
@@ -265,10 +269,10 @@ class KnownValues(unittest.TestCase):
         for kwargs, message in invalid:
             with self.subTest(**kwargs):
                 with self.assertRaisesRegex(ValueError, message):
-                    gate_charge(make_mf(cell), barrier=True, dipole_width=.4,
+                    gate_charge(make_mf(cell), barrier=True,
                                 dipole_gap=.1, barrier_width=.2, **kwargs)
                 # Unused barrier coordinates do not restrict barrier=False.
-                gate_charge(make_mf(cell), barrier=False, dipole_width=.4,
+                gate_charge(make_mf(cell), barrier=False,
                             dipole_gap=.1, barrier_width=.2, **kwargs)
 
 

@@ -13,8 +13,10 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import numpy as np
 import cupy as cp
+from gpu4pyscf.pbc.scf import slabgate
 from gpu4pyscf.pbc.scf.addons import gate_charge, slab_dipole_correction
 from gpu4pyscf.pbc.grad.slabgate import gate_grad
 from gpu4pyscf.pbc.grad.slabdipole import dipole_grad
@@ -33,6 +35,7 @@ def gate_energy(mf, dm):
 
 
 class KnownValues(unittest.TestCase):
+    @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', 2./22.)
     def check_explicit(self, name='RKS', gate_side=-1):
         cell = make_cell()
 
@@ -46,7 +49,7 @@ class KnownValues(unittest.TestCase):
                 zgate, start, end = 17., 9.6, 19.1
             return gate_charge(mf, zgate=zgate, barrier=True, barrier_start=start,
                                barrier_end=end, barrier_width=1.,
-                               dipole_width=2., dipole_gap=.1, gate_side=gate_side)
+                               dipole_gap=.1, gate_side=gate_side)
 
         mf = build(cell)
         dm = mf.get_init_guess()
@@ -84,6 +87,7 @@ class KnownValues(unittest.TestCase):
         numeric = finite_difference(cell, energy)
         np.testing.assert_allclose(dipole_grad(mf.Gradients(), dm), numeric, atol=3e-7, rtol=0)
 
+    @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', 2./22.)
     def check_scf(self, name='RKS', multigrid=False, gate_side=-1):
         cell = make_cell()
         cell.atom = 'C 2.1 2.8 10.; H 2.8 3.3 11.7'
@@ -97,7 +101,7 @@ class KnownValues(unittest.TestCase):
             zgate, start, end = 17., 15., 19.1
         mf = gate_charge(make_mf(cell, name, multigrid), zgate=zgate,
                          barrier=True, barrier_start=start, barrier_end=end,
-                         barrier_width=.7, dipole_width=2., dipole_gap=.1,
+                         barrier_width=.7, dipole_gap=.1,
                          gate_side=gate_side)
         mf.kernel()
         self.assertTrue(mf.converged)
