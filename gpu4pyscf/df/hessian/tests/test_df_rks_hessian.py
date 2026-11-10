@@ -117,6 +117,7 @@ class KnownValues(unittest.TestCase):
         hess_ref = mf.Hessian().kernel()
 
         mf = mol.RKS(xc='wb97x').to_gpu().density_fit()
+        mf.grids.level = 1
         mf.with_df.use_gpu_memory = False
         hess_host = mf.Hessian().kernel()
         self.assertTrue(isinstance(mf.with_df._cderi[0], numpy.ndarray))
