@@ -30,6 +30,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -91,7 +92,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
                 aow = ao * vR[i,p0:p1,None]
                 vj_kpts[i,k] += ao.conj().T.dot(aow)
 
-    return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
+    return _format_jks(vj_kpts, dm_kpts,
+                       kpts_band if input_band is not None else None, kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
@@ -131,10 +133,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         mo_coeff = None
 
     ni = mydf._numint
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = np.asarray(kpts).reshape(-1, 3)
+    if isinstance(kpts, (list, tuple)):
+        kpts = np.asarray(kpts)
+    input_kpts = kpts
+    kpts, _ = _normalize_kpts(kpts)
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -202,7 +204,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
             for i in range(nset):
                 vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
 
-    return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
+    return _format_jks(vk_kpts, dm_kpts,
+                       kpts_band if input_band is not None else None, input_kpts)
 
 def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
            with_j=True, with_k=True, exxdiv=None):
@@ -265,7 +268,7 @@ def get_j(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None):
     vj = get_j_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band)
     assert vj.ndim == 4
     if kpts_band is None:
-        vj = vj[:,0,:,:]
+        return vj.reshape(dm.shape)
     if dm.ndim == 2:
         vj = vj[0]
     return vj
@@ -300,7 +303,7 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
     vk = get_k_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band, exxdiv)
     assert vk.ndim == 4
     if kpts_band is None:
-        vk = vk[:,0,:,:]
+        return vk.reshape(dm.shape)
     if dm.ndim == 2:
         vk = vk[0]
     return vk
@@ -318,7 +321,7 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     if kpts is None:
         # FFTDF exposes this function directly, so honor its configured k-points.
         kpts = mydf.kpts
-    kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(kpts)
     is_gamma_point = is_zero(kpts)
     ni = mydf._numint
     dm_kpts = cp.asarray(dm_kpts, order='C')
@@ -390,43 +393,38 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     return vk
 
 def _format_dms(dm_kpts, kpts):
-    if kpts is None or kpts.ndim == 1:
-        nkpts = 1
-    else:
-        nkpts = len(kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    nkpts = len(kpts)
     nao = dm_kpts.shape[-1]
     dms = dm_kpts.reshape(-1,nkpts,nao,nao)
     assert dms.dtype in (np.double, np.complex128)
     return cp.asarray(dms, order='C')
 
 def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
+    '''Restore density dimensions using kpts in its original input form.
+
+    kpts_band must be None or a normalized (N, 3) array.
+    '''
     if kpts_band is kpts or kpts_band is None:
         return v_kpts.reshape(dm_kpts.shape)
     else:
+        assert kpts_band.ndim == 2
         nkpts_band = len(kpts_band)
         nao = dm_kpts.shape[-1]
-        if dm_kpts.ndim == v_kpts.ndim:
-            assert v_kpts.shape[-3:] == (nkpts_band, nao, nao)
-            return v_kpts
 
-        is_single_kpt = kpts is not None and kpts.ndim == 1
+        _, is_single_kpt = _normalize_kpts(kpts)
         if is_single_kpt:
-            is_rhf = dm_kpts.ndim == 2
+            shape = dm_kpts.shape[:-2]
         else:
             assert dm_kpts.ndim >= 3
-            is_rhf = dm_kpts.ndim == 3
-        if is_rhf:
-            v_kpts = v_kpts.reshape(nkpts_band, nao, nao)
-        else:  # KUHF dms
-            v_kpts = v_kpts.reshape(2, nkpts_band, nao, nao)
-        return v_kpts
+            shape = dm_kpts.shape[:-3]
+        return v_kpts.reshape(shape + (nkpts_band, nao, nao))
+
 
 def _factorize_dm(dm_kpts, kpts=None):
     from gpu4pyscf.df.df_jk import factorize_dm
-    if kpts is None or kpts.ndim == 1:
-        nkpts = 1
-    else:
-        nkpts = len(kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    nkpts = len(kpts)
     orbl, orbr = factorize_dm(dm_kpts)
     if orbl.size == 0:
         nset = dm_kpts.size // (nkpts * dm_kpts.shape[-1]**2)

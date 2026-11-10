@@ -26,6 +26,8 @@ if hasattr(multigrid_cpu, 'MultiGridNumInt'):
 else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v3 as multigrid
+from gpu4pyscf.pbc.df import aft, fft as fft_df
+from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.tools import ifft, fft
 from gpu4pyscf.pbc.dft import numint, UniformGrids
 from gpu4pyscf.pbc.dft import KRKS as KRKS_gpu
@@ -222,10 +224,8 @@ class KnownValues(unittest.TestCase):
 
     def test_get_pp(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_pp()
-        if ref.ndim == 2: # In pyscf==2.8.0
-            ref = ref[None,:,:]
         out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
-        self.assertEqual(out.shape, ref.shape)
+        assert out.ndim == 2
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_pp_diffuse_f_tight_s(self):
@@ -240,23 +240,19 @@ class KnownValues(unittest.TestCase):
                     'Zn': [[0], 0.50704497116043, 0, [], 0]},
             unit='Bohr', precision=1e-6, verbose=0)
         ref = pseudo.get_pp(cell)
-        out = multigrid.MultiGridNumInt(cell).get_pp().get()[0]
+        out = multigrid.MultiGridNumInt(cell).get_pp().get()
         assert abs(out-ref).max() < 1e-6
 
     def test_get_nuc(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
-        if ref.ndim == 2: # In pyscf==2.8.0
-            ref = ref[None,:,:]
-        self.assertEqual(out.shape, ref.shape)
+        assert out.ndim == 2
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc_nonorth(self):
         ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc().get()
-        if ref.ndim == 2: # In pyscf==2.8.0
-            ref = ref[None,:,:]
-        self.assertEqual(out.shape, ref.shape)
+        assert out.ndim == 2
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
 
     def test_get_nuc_kpts(self):
@@ -319,7 +315,7 @@ class KnownValues(unittest.TestCase):
         ni.enable_aft = False
         ni.allow_mesh_reduction = False
         dm_sc = multigrid._wannier_transform_dm(
-            ni, cp.asarray(dm), None, xctype='MGGA')[0]
+            ni, cp.asarray(dm), np.zeros((1, 3)), xctype='MGGA')[0]
         rhoG, tauG = multigrid._eval_density(ni, dm_sc, with_tau=True)
         weight = cell.vol / np.prod(cell.mesh)
         rho = ifft(rhoG, cell.mesh).real.ravel() / weight
@@ -407,7 +403,7 @@ class KnownValues(unittest.TestCase):
 
         vxcG = fft(cp.asarray(weights).reshape(cell.mesh), cell.mesh)
         out = multigrid._eval_xc_mat(ni, vxcG)
-        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        out = multigrid._inverse_wannier_transform_fock(ni, out, np.zeros((1, 3)))[0]
         np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
 
     def test_eval_mgga_mat_skewed_lattice(self):
@@ -434,7 +430,7 @@ class KnownValues(unittest.TestCase):
 
         vxcG = [fft(cp.asarray(w).reshape(cell.mesh), cell.mesh) for w in weights]
         out = multigrid._eval_xc_mat(ni, vxcG)
-        out = multigrid._inverse_wannier_transform_fock(ni, out, None)[0]
+        out = multigrid._inverse_wannier_transform_fock(ni, out, np.zeros((1, 3)))[0]
         np.testing.assert_allclose(out.get(), ref, atol=1e-9, rtol=0)
 
     def test_get_vxc_lda_kpts(self):
@@ -1416,6 +1412,30 @@ class AdditionalModes(unittest.TestCase):
             reference[selection] += expected
         np.testing.assert_array_equal(target.get(), reference)
         np.testing.assert_array_equal(source.get(), spectrum)
+
+    def test_pp_gamma_shapes(self):
+        cell = gto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                     mesh=[31]*3, precision=1e-8, verbose=0)
+        ref = aft.AFTDF(cell).get_pp()
+        for factory in (fft_df.FFTDF, GDF, multigrid.MultiGridNumInt):
+            obj = factory(cell)
+            default = obj.get_pp()
+            assert default.shape == (cell.nao, cell.nao)
+            assert default.dtype == np.float64
+            assert abs(default - ref).max() < 1e-8
+
+    def test_pp_gamma_batch_shapes(self):
+        cell = gto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                     mesh=[31]*3, precision=1e-8, verbose=0)
+        kpts = np.zeros((1, 3))
+        ref = aft.AFTDF(cell).get_pp(kpts)
+        for factory in (fft_df.FFTDF, GDF, multigrid.MultiGridNumInt):
+            result = factory(cell).get_pp(kpts)
+            assert result.shape == (1, cell.nao, cell.nao)
+            assert result.dtype in (np.float64, np.complex128)
+            assert abs(result - ref).max() < 1e-8
 
 
 if __name__ == '__main__':

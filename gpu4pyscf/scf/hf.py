@@ -32,7 +32,7 @@ from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot, stack_with_padding)
 from gpu4pyscf.scf import diis, jk, j_engine
-from . import dispersion
+from . import dispersion, gcp
 from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf import __config__
 
@@ -377,6 +377,13 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
             e_disp = mf.get_dispersion()
             mf.scf_summary['dispersion'] = e_disp
             e_tot += e_disp
+    if mf.do_gcp():
+        if 'gcp' in mf.scf_summary:
+            e_tot += mf.scf_summary['gcp']
+        else:
+            e_gcp = mf.get_gcp()
+            mf.scf_summary['gcp'] = e_gcp
+            e_tot += e_gcp
     mf.scf_summary['nuc'] = nuc.real
     if isinstance(e_tot, cupy.ndarray):
         e_tot = e_tot.get()
@@ -1241,6 +1248,8 @@ class SCF(pyscf_lib.StreamObject):
     check_convergence        = None
     do_disp                  = dispersion.check_disp
     get_dispersion           = dispersion.get_dispersion
+    do_gcp                   = gcp.check_gcp
+    get_gcp                  = gcp.get_gcp
     kernel = scf             = scf
     as_scanner               = hf_cpu.SCF.as_scanner
     _finalize                = hf_cpu.SCF._finalize
