@@ -59,7 +59,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     if ks.grids.coords is None:
-        rks.initialize_grids(ks, mol, dm[0]+dm[1])
+        rks.initialize_grids(ks, mol, dm)
     ni = ks._numint
 
     if hermi == 2:  # because rho = 0

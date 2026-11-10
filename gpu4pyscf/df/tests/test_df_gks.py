@@ -80,7 +80,7 @@ class KnownValues(unittest.TestCase):
         assert isinstance(mf, cpu_df_jk._DFHF)
         assert np.abs(e_gpu - e_cpu) < 1e-5
 
-    @unittest.skip("skip test_to_gpu")
+    @unittest.skipIf(mcfun is None, "mcfun library not found.")
     def test_to_gpu(self):
         mf = cpu_dft.GKS(mol, xc='b3lyp').density_fit()
         mf.collinear = 'm'
@@ -238,14 +238,15 @@ class SmallDFGKSPotentials(unittest.TestCase):
     def test_unsupported_xc_modes(self):
         dm = cupy.asarray(self.dm)
         mf = self._method('LDA,VWN')
-        mf.collinear = 'col'
-        with self.assertRaisesRegex(NotImplementedError, 'multi-colinear'):
+        mf.collinear = 'ncol'
+        with self.assertRaisesRegex(NotImplementedError, 'ncol'):
             mf.get_veff(dm=dm)
-        mf.collinear = 'm'
         mf.nlc = 'vv10'
         assert mf.do_nlc()
-        with self.assertRaisesRegex(NotImplementedError, 'non-collinear nlc'):
-            mf.get_veff(dm=dm)
+        for collinear in ('col', 'mcol'):
+            mf.collinear = collinear
+            with self.assertRaisesRegex(NotImplementedError, 'NLC', msg=collinear):
+                mf.get_veff(dm=dm)
         mf.nlc = ''
         mf.xc = 'CAM-B3LYP'
         mf.range_separated_mode = 'invalid'

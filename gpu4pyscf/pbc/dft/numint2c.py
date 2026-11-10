@@ -15,7 +15,6 @@
 import numpy as np
 import cupy as cp
 from pyscf.pbc.dft import numint2c as numint2c_cpu
-from gpu4pyscf.lib import utils
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.scf.ghf import _block_diag
 
@@ -44,10 +43,8 @@ class KNumInt2C(numint.KNumInt):
 
     collinear = numint2c_cpu.KNumInt2C.collinear
     spin_samples = numint2c_cpu.KNumInt2C.spin_samples
-    collinear_thrd = numint2c_cpu.KNumInt2C.collinear_thrd
-    collinear_samples = numint2c_cpu.KNumInt2C.collinear_samples
 
-    _keys = {'collinear', 'spin_samples', 'collinear_thrd', 'collinear_samples', 'kpts'}
+    _keys = {'collinear', 'spin_samples', 'kpts'}
 
     def __init__(self, kpts=None):
         self.kpts = np.zeros((1, 3)) if kpts is None else np.reshape(kpts, (-1, 3))
@@ -65,7 +62,8 @@ class KNumInt2C(numint.KNumInt):
         return super().get_rho(cell, charge, grids, kpts)
 
     def to_cpu(self):
-        return utils.to_cpu(self, out=numint2c_cpu.KNumInt2C(self.kpts))
+        return numint2c_cpu.KNumInt2C(self.kpts.copy()).set(
+            omega=self.omega, collinear=self.collinear, spin_samples=self.spin_samples)
 
 
 class NumInt2C(KNumInt2C):
@@ -78,4 +76,5 @@ class NumInt2C(KNumInt2C):
     get_vxc = nr_gks_vxc = nr_vxc
 
     def to_cpu(self):
-        return utils.to_cpu(self, out=numint2c_cpu.NumInt2C())
+        return numint2c_cpu.NumInt2C().set(
+            omega=self.omega, collinear=self.collinear, spin_samples=self.spin_samples)
