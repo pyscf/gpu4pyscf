@@ -119,6 +119,48 @@ KNOWN_FAILURES = {
     #   _int_vnl / get_pp_soc with new .cu kernels; the SYCL build keeps the
     #   old pp_int.py, so the new upstream tests import names that do not
     #   exist on SYCL -> ImportError.
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_fc':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_fc_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_frozen_core':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_frozen_core_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_metal':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_metal_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_metal_acfd_exx':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_metal_frozen_core':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_metal_frozen_core_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krpa.py::KnownValues::test_krpa_metal_frozen_core_acfd_exx':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_fc':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_fc_frozen_core':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_fc_full_rdm_gf':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_metal':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_metal_outcore':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_metal_frozen_core':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
+    'gpu4pyscf/pbc/gw/tests/test_krgw_ac.py::KnownValues::test_krgwac_metal_full_gf':
+        _NOT_PORTED + ' pbc gw/krpa (#1029) uses cp.cublas, absent from dpnp facade',
     'gpu4pyscf/gw/tests/test_gw_ac.py::KnownValues::test_gwac_diag':
         _NOT_PORTED + ' gw/rpa (#994) uses cp.cublas, absent from dpnp facade',
     'gpu4pyscf/gw/tests/test_gw_ac.py::KnownValues::test_gwac_diag_outcore':
