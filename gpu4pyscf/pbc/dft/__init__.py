@@ -20,15 +20,12 @@ from . import rks
 from . import uks
 from . import krks
 from . import kuks
-from . import gks
-from . import kgks
 from . import krkspu
 from . import kukspu
 from .rks import KohnShamDFT
 
 KRKS = krks.KRKS
 KUKS = kuks.KUKS
-KGKS = kgks.KGKS
 KRKSpU = krkspu.KRKSpU
 KUKSpU = kukspu.KUKSpU
 
@@ -36,7 +33,13 @@ def GKS(cell, *args, **kwargs):
     '''Generalized KS at one k-point, or KGKS when kpts is supplied.'''
     if 'kpts' in kwargs:
         return KGKS(cell, *args, **kwargs)
+    from . import gks
     return gks.GKS(cell, *args, **kwargs)
+
+def KGKS(cell, *args, **kwargs):
+    '''Generalized KS with k-points.'''
+    from . import kgks
+    return kgks.KGKS(cell, *args, **kwargs)
 
 def RKS(cell, *args, **kwargs):
     if 'kpts' in kwargs:
