@@ -908,8 +908,8 @@ def _gamma_df_energy(cell, auxcell, dm, omega, k_factor):
     mydf = FFTDF(cell)
     mydf.mesh = mesh = np.maximum(cell.mesh, auxcell.mesh)
     coords = mydf.grids.coords
-    ao = mydf._numint.eval_ao(cell, coords, np.zeros(3))[0]
-    aux = mydf._numint.eval_ao(auxcell, coords, np.zeros(3))[0]
+    ao = mydf._numint.eval_ao(cell, coords, np.zeros((1, 3)))[0]
+    aux = mydf._numint.eval_ao(auxcell, coords, np.zeros((1, 3)))[0]
     coulG = tools.get_coulG(cell, mesh=mesh, omega=-abs(omega or 0))
     auxG = tools.fft(np.asarray(aux.T, order='C'), mesh)
 

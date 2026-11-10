@@ -39,13 +39,12 @@ from gpu4pyscf.scf.jk import (
     _check_rsh_factors, _TimingCollector,
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH, THREADS)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
-from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
@@ -226,13 +225,11 @@ class PBCJKMatrixOpt:
 
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
                   omega=None, lr_factor=0, sr_factor=1, verbose=None):
-        '''
-        Build kpts adapted K matrices
-        Return a (*, nkpts, nao, nao) array.
+        '''Build short-range K matrices with the same shape as dm.
 
-        If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
-        matrix is still evaluated as the k-point sampling case. The "nkpts"
-        dimension is set to 1
+        None selects a single Gamma point, as does a 1D zero k-point.
+        Single-point Gamma sampling requires a real density matrix.
+        Explicit 2D k-points retain the batched sampling convention.
         '''
         log = logger.new_logger(self, verbose)
         cell = self.cell
@@ -244,7 +241,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
@@ -441,7 +438,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, _ = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
@@ -611,13 +608,11 @@ class PBCJKMatrixOpt:
         return wcoulG
 
     def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None):
-        '''
-        Build kpts adapted K matrices
-        Return a (*, nkpts, nao, nao) array.
+        '''Build short-range J matrices with the same shape as dm.
 
-        If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
-        matrix is still evaluated as the k-point sampling case. The "nkpts"
-        dimension is set to 1
+        None selects a single Gamma point, as does a 1D zero k-point.
+        Single-point Gamma sampling requires a real density matrix.
+        Explicit 2D k-points retain the batched sampling convention.
         '''
         log = logger.new_logger(self)
         cell = self.cell
@@ -630,7 +625,7 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True
@@ -804,12 +799,8 @@ class PBCJKMatrixOpt:
         cell = self.cell
         assert cell.dimension == 3
 
-        if kpts is None:
-            kpts = np.zeros((1,3))
-            kmesh = [1] * 3
-        else:
-            kpts = kpts.reshape(-1, 3)
-            kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        kpts, _ = _normalize_kpts(kpts)
+        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
@@ -918,7 +909,7 @@ class PBCJKMatrixOpt:
         dms = transpose_sum(dms)
         dms *= .5
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             if is_single_kpt:
@@ -1085,7 +1076,7 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kpts, _ = _normalize_kpts(kpts)
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
@@ -1589,7 +1580,7 @@ def _search_diffuse_pairs(cell, mesh):
     pair_max = cp.zeros((nao, nao))
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
         Gpq = ft_kern(Gv[p0:p1])
-        _pair_max = cp.abs(Gpq[0]).max(axis=0)
+        _pair_max = cp.abs(Gpq).max(axis=0)
         pair_max = cp.maximum(pair_max, _pair_max)
     pair_max = condense('max', pair_max, cell.ao_loc)
 
@@ -1839,10 +1830,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     return pair_cache
 
 def _guess_omega(cell, kpts=None):
-    if kpts is None or kpts.ndim == 1:
-        nkpts = 1
-    else:
-        nkpts = len(kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
     ng = int(5e4/(nao*nkpts**.65))
     ng = (max(3, ng) // 2) * 2 + 1

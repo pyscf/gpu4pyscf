@@ -77,6 +77,19 @@ class TestGetPpNlGamma(unittest.TestCase):
         err = np.max(np.abs(cp.asnumpy(gpu) - np.asarray(cpu)))
         self.assertAlmostEqual(err, 0, places, f"max|err|={err:.2e}")
 
+    def test_gamma_shapes_without_projectors(self):
+        cell = pyscf.M(atom='He 0 0 0', a=np.eye(3)*5, unit='Bohr',
+                       basis=[[0, [1., 1.]]], pseudo='gth-pade', verbose=0)
+        default = pp_int.get_pp_nl(cell)
+        single = pp_int.get_pp_nl(cell, np.zeros(3))
+        batch = pp_int.get_pp_nl(cell, np.zeros((1, 3)))
+        assert default.shape == single.shape == (cell.nao, cell.nao)
+        assert batch.shape == (1, cell.nao, cell.nao)
+        assert default.dtype == single.dtype == batch.dtype == np.float64
+        assert not cp.any(default)
+        cp.testing.assert_array_equal(default, single)
+        cp.testing.assert_array_equal(default, batch[0])
+
     def test_carbon(self):
         self._compare(cell_c)
 
