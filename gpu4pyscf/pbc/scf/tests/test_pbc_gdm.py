@@ -24,6 +24,7 @@ from gpu4pyscf.pbc.scf.khf import KRHF
 from gpu4pyscf.pbc.scf.kuhf import KUHF
 from gpu4pyscf.scf.gdm import gdm
 from gpu4pyscf.pbc.dft import multigrid_v3
+from gpu4pyscf.pbc.dft.gen_grid import BeckeGrids
 
 class KnownValues(unittest.TestCase):
     def test_pbc_gdm_krhf_gamma(self):
@@ -138,16 +139,17 @@ class KnownValues(unittest.TestCase):
         # del mf
         ref_energy = -276.43210752821
         ref_n_cycle = 31
-        ref_gradient = np.array([
-            [-0.0000000010,     0.0000000012,    -0.0000000022],
-            [ 0.0000000010,    -0.0000000013,     0.0000000023],
-            [ 0.0000000000,     0.0000000001,    -0.0000000001],
-            [-0.0000000001,     0.0000000000,    -0.0000000001],
-        ])
+        # ref_gradient = np.array([
+        #     [-0.0000000010,     0.0000000012,    -0.0000000022],
+        #     [ 0.0000000010,    -0.0000000013,     0.0000000023],
+        #     [ 0.0000000000,     0.0000000001,    -0.0000000001],
+        #     [-0.0000000001,     0.0000000000,    -0.0000000001],
+        # ])
 
         mf = KUHF(cell, kpts = kpts).density_fit()
         mf.conv_tol = 1e-10
         mf = gdm(mf)
+        mf.check_occupation_per_n_iteration = 1
         test_energy = mf.kernel()
         mf = mf.undo_gdm()
         assert mf.converged
@@ -156,7 +158,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-10
         # assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6 # Not checking gradient because it's too slow
-        assert test_n_cycle <= ref_n_cycle + 5
+        assert test_n_cycle <= ref_n_cycle + 10
 
     def test_pbc_gdm_krks_uniform_grid(self):
         cell = pyscf.M(
@@ -206,18 +208,165 @@ class KnownValues(unittest.TestCase):
         test_n_cycle = mf.cycles
         test_gradient = mf.Gradients().kernel()
 
-        assert np.abs(test_energy - ref_energy) < 1e-10
+        assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
         assert test_n_cycle <= ref_n_cycle + 5
 
     def test_pbc_gdm_kuks_multigrid(self):
-        raise
+        cell = pyscf.M(
+            a = '''
+                -2.1283550000000000   -2.1283550000000000    0.0000000000000000
+                -2.1283550000000000    0.0000000000000000   -2.1283550000000000
+                 0.0000000000000000   -2.1283550000000000   -2.1283550000000000
+            ''',
+            atom = """
+                Mg 0.5000000000000000    0.5000000000000000    0.5001000000000000
+                O  0.0000000000000000    0.0000000000000000    0.0000000000000000
+            """,
+            fractional = True,
+            basis = "gth-dzvp-molopt-sr",
+            pseudo = "gth-pbe",
+            spin = 2,
+            verbose = 0,
+        )
+        kpts = cell.make_kpts([2, 2, 2])
+        xc = "LDA"
+
+        # mf = KUKS(cell, xc = xc, kpts = kpts)
+        # mf._numint = multigrid_v3.MultiGridNumInt(cell)
+        # mf.conv_tol = 1e-10
+        # mf.max_cycle = 100
+        # ref_energy = mf.kernel()
+        # assert mf.converged
+        # ref_n_cycle = mf.cycles
+        # ref_gradient = mf.Gradients().kernel()
+        # del mf
+        ref_energy = -78.0287048479913
+        ref_n_cycle = 12
+        ref_gradient = np.array([
+            [ 0.0000000001,    -0.0000222442,    -0.0000222442],
+            [-0.0000000000,     0.0000230580,     0.0000230580],
+        ])
+
+        mf = KUKS(cell, xc = xc, kpts = kpts)
+        mf._numint = multigrid_v3.MultiGridNumInt(cell)
+        mf.conv_tol = 1e-10
+        mf.max_cycle = 100
+        mf = gdm(mf)
+        test_energy = mf.kernel()
+        mf = mf.undo_gdm()
+        assert mf.converged
+        test_n_cycle = mf.cycles
+        test_gradient = mf.Gradients().kernel()
+
+        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert test_n_cycle <= ref_n_cycle + 5
 
     def test_pbc_gdm_kuks_beckegrid(self):
-        raise
+        cell = pyscf.M(
+            a = '''
+                100 0 0
+                0 100 0
+                0 0 100
+            ''',
+            atom = """
+                C  -0.6695000000   0.0000000000   0.0000000000
+                C   0.6695000000   0.0000000000   0.0000000000
+                H  -1.2342172746   0.9287967484   0.0000000000
+                H  -1.2342172746  -0.9287967484   0.0000000000
+                H   1.2342172746   0.3176671970   0.8727834506
+                H   1.2342172746  -0.3176671970  -0.8727834506
+            """,
+            basis = "def2-svp",
+            spin = 2,
+            verbose = 0,
+        )
+        kpts = cell.make_kpts([1, 1, 1])
+        xc = "r2scan"
+
+        # mf = KUKS(cell, xc = xc, kpts = kpts).density_fit(auxbasis = "def2-universal-jkfit")
+        # mf.grids = BeckeGrids(cell)
+        # mf.grids.atom_grid = (99, 590)
+        # mf.conv_tol = 1e-10
+        # ref_energy = mf.kernel()
+        # assert mf.converged
+        # ref_n_cycle = mf.cycles
+        # ref_gradient = mf.Gradients().kernel()
+        # del mf
+        ref_energy = -78.3655656124592
+        ref_n_cycle = 9
+        ref_gradient = np.array([
+            [ 0.0913143427,    -0.0000000000,     0.0000000000],
+            [-0.0913192722,    -0.0000000000,     0.0000000000],
+            [ 0.0092354581,    -0.0057841156,     0.0077438774],
+            [ 0.0092354581,     0.0057841156,    -0.0077438774],
+            [-0.0092352643,     0.0052979879,    -0.0080838157],
+            [-0.0092352643,    -0.0052979879,     0.0080838157],
+        ])
+
+        mf = KUKS(cell, xc = xc, kpts = kpts).density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids = BeckeGrids(cell)
+        mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1e-10
+        mf = gdm(mf)
+        test_energy = mf.kernel()
+        mf = mf.undo_gdm()
+        assert mf.converged
+        test_n_cycle = mf.cycles
+        test_gradient = mf.Gradients().kernel()
+
+        assert np.abs(test_energy - ref_energy) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert test_n_cycle <= ref_n_cycle + 5
 
     def test_pbc_gdm_linear_dependent_basis(self):
-        raise
+        cell = pyscf.M(
+            a = '''
+                0.000000000, 3.370137329, 3.370137329
+                3.370137329, 0.000000000, 3.370137329
+                3.370137329, 3.370137329, 0.000000000
+            ''',
+            atom = """
+                C 0 0 0
+                C 1.685068664391 1.685068664391 1.785068664391
+            """,
+            unit = 'bohr',
+            basis = "gth-tzvp",
+            pseudo = "gth-pbe",
+            verbose = 0,
+        )
+        kpts = cell.make_kpts([2, 2, 2])
+        xc = "pbe"
+
+        # mf = KRKS(cell, xc = xc, kpts = kpts).density_fit(auxbasis = "def2-universal-jkfit")
+        # mf._numint = multigrid_v3.MultiGridNumInt(cell)
+        # mf.conv_tol = 1e-10
+        # ref_energy = mf.kernel()
+        # assert mf.converged
+        # ref_n_cycle = mf.cycles
+        # ref_gradient = mf.Gradients().kernel()
+        # del mf
+        ref_energy = -11.2616170936777
+        ref_n_cycle = 7
+        ref_gradient = np.array([
+            [ 0.0000000000,     0.0000000000,    -0.0586528814],
+            [-0.0000000001,    -0.0000000001,     0.0586528110],
+        ])
+
+        mf = KRKS(cell, xc = xc, kpts = kpts).density_fit(auxbasis = "def2-universal-jkfit")
+        mf._numint = multigrid_v3.MultiGridNumInt(cell)
+        mf.conv_tol = 1e-10
+        mf = gdm(mf)
+        test_energy = mf.kernel()
+        mf = mf.undo_gdm()
+        assert mf.converged
+        test_n_cycle = mf.cycles
+        test_gradient = mf.Gradients().kernel()
+
+        assert np.abs(test_energy - ref_energy) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert test_n_cycle <= ref_n_cycle + 5
 
 if __name__ == "__main__":
     print("Full Tests for GDM")

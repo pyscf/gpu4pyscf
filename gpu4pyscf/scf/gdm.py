@@ -1037,7 +1037,7 @@ class GDM:
         self.line_search_initial_scale = 1.0
 
         # PBC related parameters
-        self.check_occupation_per_n_iteration = 5
+        self.check_occupation_per_n_iteration = 10
 
     to_gpu = utils.to_gpu
     device = utils.device
