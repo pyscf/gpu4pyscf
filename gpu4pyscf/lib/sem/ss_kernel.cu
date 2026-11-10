@@ -266,17 +266,16 @@ __global__ void ss_summation_kernel(
 
 extern "C" {
 
-int launch_ss_kernel_c(
-    int n_pairs,
+int launch_ss_kernel_c(int n_pairs,
     int* ia, int* ib, int* ic, int* id, int* m, int* iab,
     double* af, double* bf,
     double* binom,
-    double* out
+    double* out, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
 
-    ss_summation_kernel<<<blocks_per_grid, threads_per_block>>>(
+    ss_summation_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out
     );
         
@@ -287,14 +286,13 @@ int launch_ss_kernel_c(
     return 0;
 }
 
-int launch_afn_kernel_c(
-    int n_pairs,
+int launch_afn_kernel_c(int n_pairs,
     const double* p_vec,
-    double* af_out
+    double* af_out, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    afn_kernel<<<blocks_per_grid, threads_per_block>>>(
+    afn_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         n_pairs, p_vec, af_out
     );
     
@@ -305,15 +303,14 @@ int launch_afn_kernel_c(
     return 0;
 }
 
-int launch_bfn_kernel_c(
-    int n_pairs,
+int launch_bfn_kernel_c(int n_pairs,
     const double* x,
     const double* taylor_coeffs,
-    double* bf_out
+    double* bf_out, cudaStream_t stream
 ) {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    bfn_kernel<<<blocks_per_grid, threads_per_block>>>(
+    bfn_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         n_pairs, x, taylor_coeffs, bf_out
     );
     
@@ -324,16 +321,15 @@ int launch_bfn_kernel_c(
     return 0;
 }
 
-int launch_rotation_transform_kernel(
-    int n_pairs,
+int launch_rotation_transform_kernel(int n_pairs,
     const double* S_local,
     const double* C_tensor,
-    double* di_out
+    double* di_out, cudaStream_t stream
 )
 {
     int threads_per_block = 128;
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
-    rotation_transform_kernel<<<blocks_per_grid, threads_per_block>>>(
+    rotation_transform_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         n_pairs, S_local, C_tensor, di_out
     );
         

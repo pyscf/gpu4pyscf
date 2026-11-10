@@ -17,13 +17,15 @@ import cupy as cp
 from packaging.version import Version
 import ctypes
 import pyscf
+import pytest
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from pyscf.pbc.df import fft as fft_cpu
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.df import fft
-from gpu4pyscf.pbc.scf import rsjk
+from gpu4pyscf.pbc.scf import hf, uhf, ghf, khf, kuhf, kghf, rsjk
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.pbc import probe_charge_sr_coulomb
 from gpu4pyscf.pbc.df import aft, aft_jk
 
@@ -486,7 +488,7 @@ def test_ejk_sr_derivatives_gamma_point():
         return cp.einsum('ij,ji->', vk, dm).real * -.5 * .5
     _check_strain(ek[-3:], cell, eval_ejk, tol=2e-6)
 
-def test_ejk_sr_derivatives_kpts():
+def test_ejk_sr_derivatives_kpts_high_cost():
     cell = pyscf.M(
         atom = '''
         H   1.757    0.    0.4696
@@ -587,7 +589,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     ref *= 2
     assert abs(ejk - ref).max() < 1e-6
 
-def test_ejk_ip1_per_atom_kpts():
+def test_ejk_ip1_per_atom_kpts_high_cost():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -858,6 +860,31 @@ def test_ejk_strain_deriv_gamma_point():
     assert abs(ref - sigma).max() < 2e-5
 
 def test_ejk_strain_deriv_kpts():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.2 1.5 1.8', a=np.eye(3)*4.,
+                   basis=[[0, [.25, 1]], [1, [.3, 1]]], precision=1e-10,
+                   verbose=0)
+    kmesh = [2,1,1]
+    kpts = cell.make_kpts(kmesh)
+    dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    opt = rsjk.PBCJKMatrixOpt(cell).build()
+    deriv = opt._get_ejk_derivatives(dm, kpts=kpts)
+    assert deriv.shape == (cell.natm+3, 3)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_strain_deriv(mydf, dm, kpts=kpts)
+    ref -= .5 * aft_jk.get_ek_strain_deriv(mydf, dm, kpts=kpts)
+    assert abs(ref - deriv[-3:]).max() < 1e-6
+
+    def eval_ejk(displaced):
+        displaced_kpts = displaced.make_kpts(kmesh)
+        vj, vk = fft.FFTDF(displaced, kpts=displaced_kpts).get_jk(
+            dm, hermi=1, kpts=displaced_kpts)
+        return cp.einsum('kij,kji->', vj-.5*vk, dm).real * .5 / len(kpts)
+
+    _check_gradient(deriv[:-3], cell, eval_ejk)
+    _check_strain(deriv[-3:], cell, eval_ejk, tol=1e-6)
+
+
+def test_ejk_strain_deriv_kpts_high_cost():
     from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
     cell = pyscf.M(
         atom = '''
@@ -1087,7 +1114,8 @@ def test_sort_pair_ij():
         ctypes.cast(ish.data.ptr, ctypes.c_void_p),
         ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nish), ctypes.c_int(njsh),
-        ctypes.c_int(rsjk.NBAS_MAX), ctypes.c_int(tile))
+        ctypes.c_int(rsjk.NBAS_MAX), ctypes.c_int(tile),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     i, j = divmod(pair_ij, rsjk.NBAS_MAX)
     assert np.array_equal(i.get(), [0,0,0,1,1,1,2,2,2,0,0,1,1,2,2,3,3,3,3,3])
     assert np.array_equal(j.get(), [0,1,2,0,1,2,0,1,2,3,4,3,4,3,4,0,1,2,3,4])
@@ -1295,3 +1323,92 @@ def test_lr_jk_contracted_basis():
     # The short-range engine includes the finite G=0 contribution.
     ref -= np.pi / omega**2 / cell.vol * charge * overlap
     assert abs(dat - ref).max() < 1e-8
+
+def test_j_sr_kpts_single_and_batch():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
+                   unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+                   pseudo='gth-pade', mesh=[15]*3, precision=1e-9, verbose=0)
+    kpts = cell.make_kpts([3, 1, 1])
+    opt = rsjk.PBCJKMatrixOpt(cell).build(kpts=kpts)
+    dm = int1e.int1e_ovlp(cell, kpts) * .1
+    for spin in (True, False):
+        dm_kpts = cp.stack([dm*.6, dm*.4]) if spin else dm
+        single_dm = dm_kpts[..., 1, :, :]
+        batch_dm = dm_kpts[..., 1:2, :, :]
+        single = opt._get_j_sr(single_dm, hermi=1, kpts=kpts[1])
+        batch = opt._get_j_sr(batch_dm, hermi=1, kpts=kpts[1:2])
+        assert single.shape == single_dm.shape
+        assert batch.shape == batch_dm.shape
+        assert single.dtype == batch.dtype == np.complex128
+        assert abs(single - batch.reshape(single.shape)).max() < 1e-10
+
+        result = opt._get_j_sr(dm_kpts, hermi=1, kpts=kpts)
+        assert result.shape == dm_kpts.shape
+        assert result.dtype == np.complex128
+        assert abs(result - result.swapaxes(-1, -2).conj()).max() < 1e-10
+
+def test_k_sr_kpts_single_and_batch():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
+                   unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+                   pseudo='gth-pade', mesh=[15]*3, precision=1e-9, verbose=0)
+    kpts = cell.make_kpts([3, 1, 1])
+    opt = rsjk.PBCJKMatrixOpt(cell).build(kpts=kpts)
+    dm = int1e.int1e_ovlp(cell, kpts) * .1
+    for spin in (True, False):
+        dm_kpts = cp.stack([dm*.6, dm*.4]) if spin else dm
+        single_dm = dm_kpts[..., 1, :, :]
+        batch_dm = dm_kpts[..., 1:2, :, :]
+        single = opt._get_k_sr(single_dm, hermi=1, kpts=kpts[1])
+        batch = opt._get_k_sr(batch_dm, hermi=1, kpts=kpts[1:2])
+        assert single.shape == single_dm.shape
+        assert batch.shape == batch_dm.shape
+        assert single.dtype == batch.dtype == np.complex128
+        assert abs(single - batch.reshape(single.shape)).max() < 1e-10
+
+        result = opt._get_k_sr(dm_kpts, hermi=1, kpts=kpts)
+        assert result.shape == dm_kpts.shape
+        assert result.dtype == np.complex128
+        assert abs(result - result.swapaxes(-1, -2).conj()).max() < 1e-10
+
+
+@pytest.mark.parametrize('factory', [hf.RHF, uhf.UHF, ghf.GHF])
+def test_scf_jk_gamma_density_layout(factory):
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
+                   unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+                   pseudo='gth-pade', mesh=[15]*3, precision=1e-9, verbose=0)
+    mf = factory(cell, exxdiv=None)
+    dm = cp.eye(cell.nao)
+    if factory is uhf.UHF:
+        dm = cp.stack([dm*.6, dm*.4])
+    elif factory is ghf.GHF:
+        dm = ghf._block_diag(dm).astype(np.complex128)
+        dm[0, cell.nao] = .1j
+        dm[cell.nao, 0] = -.1j
+    vj, vk = mf.get_jk(dm=dm)
+    assert vj.shape == vk.shape == dm.shape
+    refj, refk = mf.get_jk(dm=dm, kpt=np.zeros(3))
+    assert abs(vj - refj).max() < 1e-11
+    assert abs(vk - refk).max() < 1e-11
+    assert mf.get_veff(dm=dm).shape == dm.shape
+
+
+@pytest.mark.parametrize('factory', [khf.KRHF, kuhf.KUHF, kghf.KGHF])
+def test_kscf_jk_stored_sampling_density_layout(factory):
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
+                   unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+                   pseudo='gth-pade', mesh=[15]*3, precision=1e-9, verbose=0)
+    kpts = cell.make_kpts([1, 1, 1])
+    mf = factory(cell, kpts=kpts, exxdiv=None)
+    dm = int1e.int1e_ovlp(cell, kpts) * .1
+    if factory is kuhf.KUHF:
+        dm = cp.stack([dm*.6, dm*.4])
+    elif factory is kghf.KGHF:
+        dm = ghf._block_diag(dm).astype(np.complex128)
+        dm[:, 0, cell.nao] = .1j
+        dm[:, cell.nao, 0] = -.1j
+    vj, vk = mf.get_jk(dm_kpts=dm)
+    assert vj.shape == vk.shape == dm.shape
+    refj, refk = mf.get_jk(dm_kpts=dm, kpts=kpts)
+    assert abs(vj - refj).max() < 1e-11
+    assert abs(vk - refk).max() < 1e-11
+    assert mf.get_veff(dm_kpts=dm).shape == dm.shape

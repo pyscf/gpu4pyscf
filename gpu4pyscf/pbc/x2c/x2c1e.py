@@ -175,6 +175,9 @@ class PBCX2CHelper(mol_x2c.X2CHelperBase):
 
 class SpinFreeX2CHelper(PBCX2CHelper):
     def get_hcore(self, cell=None, kpts=None):
+        """kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        """
         if cell is None: cell = self.cell
         if cell.has_ecp():
             raise NotImplementedError
@@ -183,11 +186,10 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         c = lib.param.LIGHT_SPEED
         xcell = self.get_xmol(cell)
 
-        is_single_kpt = False
+        is_single_kpt = kpts is None or kpts.ndim == 1
         if kpts is None:
             kpts = np.zeros((1, 3))
         else:
-            is_single_kpt = kpts.ndim == 1
             kpts = kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
@@ -225,6 +227,9 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         return h1
 
     def get_xmat(self, cell=None, kpts=None):
+        """kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        """
         if cell is None: cell = self.cell
         if cell.has_ecp():
             raise NotImplementedError
@@ -233,11 +238,10 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         c = lib.param.LIGHT_SPEED
         xcell = self.get_xmol(cell)
 
-        is_single_kpt = False
+        is_single_kpt = kpts is None or kpts.ndim == 1
         if kpts is None:
             kpts = np.zeros((1, 3))
         else:
-            is_single_kpt = kpts.ndim == 1
             kpts = kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
@@ -288,9 +292,11 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
         # When omega is specified, the short-range Coulomb is evaluated
         rsdf_omega = min(rsdf_omega, omega)
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_single_kpt = kpts is None or kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
-    if is_single_kpt:
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    elif is_single_kpt:
         kpts = kpts.reshape(1, 3)
     if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
@@ -346,6 +352,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
 
     nao = cell.nao
     wj = cp.zeros((nao, bvk_ncells, nao))
+    stream = cp.cuda.get_current_stream()
     err = kern(
         ctypes.cast(wj.data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
@@ -365,7 +372,8 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-        ctypes.c_float(log_cutoff))
+        ctypes.c_float(log_cutoff),
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('contract_int3c2e_auxvec failed')
     pool = task_pool = head = None
@@ -429,7 +437,8 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
-            ctypes.c_int(compressing))
+            ctypes.c_int(compressing),
+            ctypes.c_void_p(stream.ptr))
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 

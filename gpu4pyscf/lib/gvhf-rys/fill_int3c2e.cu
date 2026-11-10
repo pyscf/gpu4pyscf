@@ -1578,15 +1578,15 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
                  int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
                  int ao_pair_offset, int aux_offset, int naux, int reorder_aux,
-                 int to_sph)
+                 int to_sph, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * POOL_SIZE);
-    cudaMemset(head, 0, sizeof(int));
-    int3c2e_kernel<<<workers, THREADS, shm_size>>>(
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
+    int3c2e_kernel<<<workers, THREADS, shm_size, stream>>>(
             out, *envs, pool, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
@@ -1601,12 +1601,12 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
 
 int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
                      uint32_t *bas_ij_idx, int *out_offsets, int *input_offsets,
-                     int nshl_pair, int naux, int nao_sph, int pair_compressed)
+                     int nshl_pair, int naux, int nao_sph, int pair_compressed, cudaStream_t stream)
 {
     constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
     dim3 blocks(nshl_pair, aux_batches);
-    cart2sph_kernel<<<blocks, threads>>>(
+    cart2sph_kernel<<<blocks, threads, 0, stream>>>(
             out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
             naux, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();

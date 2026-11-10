@@ -489,10 +489,14 @@ def test_gamma_minao_guesses_high_cost(cell):
 
 def test_kpoint_minao_guesses_high_cost(cell):
     kpts = cell.make_kpts([2, 1, 1], wrap_around=True)
+    idx = cp.arange(cell.nao)
     mf_minao = kghf.KGHF(cell, kpts, exxdiv=None)
     dm = mf_minao.get_init_guess(key='minao')
     assert bool(cp.isfinite(dm).all())
     np.testing.assert_allclose(dm.get(), dm.get().swapaxes(-1, -2).conj(), atol=1e-11)
+    # Break spin symmetry as in CPU GHF: the unpolarized guesses otherwise
+    # oscillate between occupations for this open-shell k-point mesh.
+    dm[:, idx+cell.nao, idx] = dm[:, idx, idx+cell.nao] = dm[:, idx, idx] * .05
     mf_minao.conv_tol = 1e-9
     mf_minao.max_cycle = 50
     mf_minao.kernel(dm0=dm)
@@ -506,6 +510,7 @@ def test_kpoint_minao_guesses_high_cost(cell):
     dm = mf_atom.get_init_guess(key='atom')
     assert bool(cp.isfinite(dm).all())
     np.testing.assert_allclose(dm.get(), dm.get().swapaxes(-1, -2).conj(), atol=1e-11)
+    dm[:, idx+cell.nao, idx] = dm[:, idx, idx+cell.nao] = dm[:, idx, idx] * .05
     mf_atom.conv_tol = 1e-9
     mf_atom.max_cycle = 50
     mf_atom.kernel(dm0=dm)
@@ -515,3 +520,12 @@ def test_kpoint_minao_guesses_high_cost(cell):
     assert float(cp.trace(dm @ overlap, axis1=-2, axis2=-1).real.mean()) == pytest.approx(
         cell.nelectron, abs=1e-10)
     assert mf_minao.e_tot == pytest.approx(mf_atom.e_tot, abs=2e-8)
+
+
+def test_ghf_stored_nonzero_single_point(cell):
+    kpt = cell.make_kpts([3, 1, 1])[1]
+    mf = ghf.GHF(cell, kpt=kpt)
+    result = mf.get_hcore()
+    assert result.shape == (2*cell.nao, 2*cell.nao)
+    assert result.dtype == np.complex128
+    assert abs(result - mf.get_hcore(kpt=kpt)).max() < 1e-14

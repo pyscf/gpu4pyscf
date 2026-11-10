@@ -490,11 +490,11 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                         float *diffuse_exps, float *diffuse_ctr_coef,
                         float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                        double omega, int tril_symmetry, int8_t *Ecut_mask)
+                        double omega, int tril_symmetry, int8_t *Ecut_mask, cudaStream_t stream)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
-    fill_s_estimator<<<sp_blocks, THREADS, buflen>>>(
+    fill_s_estimator<<<sp_blocks, THREADS, buflen, stream>>>(
         s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
         npairs, omega, tril_symmetry, Ecut_mask);
@@ -510,10 +510,10 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 
 int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
                   int64_t *bas_ij_idx, int *gout_stride_lookup,
-                  uint32_t npairs, double omega)
+                  uint32_t npairs, double omega, cudaStream_t stream)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
-    q_cond_kernel<<<sp_blocks, THREADS, shm_size>>>(
+    q_cond_kernel<<<sp_blocks, THREADS, shm_size, stream>>>(
         q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
 
     cudaError_t err = cudaGetLastError();
@@ -526,10 +526,10 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
 }
 
 int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
-                    int nbas, int tile)
+                    int nbas, int tile, cudaStream_t stream)
 {
     int ntile = (nish + tile - 1) / tile;
-    sort_pair_ij_kernel<<<ntile, THREADS>>>(pair_ij, ish, jsh, nish, njsh, nbas, tile);
+    sort_pair_ij_kernel<<<ntile, THREADS, 0, stream>>>(pair_ij, ish, jsh, nish, njsh, nbas, tile);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCsort_pair_ij %s\n",

@@ -175,11 +175,11 @@ int ovlp_mask_estimation(int8_t *ovlp_mask, float *Ecut, float *radius,
                          float *exps, float *log_coeff,
                          float *bas_coords, int *ao_loc_in_cell0,
                          int *ls, int cell0_nbas, int nbas,
-                         int hermi, int l_inc, float log_cutoff)
+                         int hermi, int l_inc, float log_cutoff, cudaStream_t stream)
 {
     constexpr int threads = 1024;
     int blocks = (cell0_nbas*nbas + threads-1)/threads;
-    ovlp_mask_estimation_kernel<<<blocks, threads>>>(
+    ovlp_mask_estimation_kernel<<<blocks, threads, 0, stream>>>(
         ovlp_mask, Ecut, radius, exps, log_coeff, bas_coords, ao_loc_in_cell0,
         ls, cell0_nbas, nbas, hermi, l_inc, log_cutoff);
     cudaError_t err = cudaGetLastError();
@@ -192,11 +192,11 @@ int ovlp_mask_estimation(int8_t *ovlp_mask, float *Ecut, float *radius,
 
 int filter_supmol_bas(int8_t *mask, double *Ls, int nimgs,
                       int *uniq_Dbasis_idx, int nbas_uniq,
-                      int *bas, int nbas, double *env, float log_cutoff)
+                      int *bas, int nbas, double *env, float log_cutoff, cudaStream_t stream)
 {
     constexpr int threads = 1024;
     int blocks = (nbas*nimgs + threads-1)/threads;
-    filter_supmol_bas_kernel<<<blocks, threads>>>(
+    filter_supmol_bas_kernel<<<blocks, threads, 0, stream>>>(
         mask, Ls, nimgs, uniq_Dbasis_idx, nbas_uniq, bas, nbas, env, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

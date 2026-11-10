@@ -160,7 +160,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
         assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
-    def test_nac_camb3lyp_tddft_singlet_vs_ref(self):
+    def test_nac_camb3lyp_tddft_singlet_vs_ref_high_cost(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -241,7 +241,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
-    def test_nac_camb3lyp_tda_singlet_vs_ref_ris_zvector_solver(self):
+    def test_nac_camb3lyp_tda_singlet_vs_ref_ris_zvector_solver_high_cost(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()

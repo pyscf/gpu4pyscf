@@ -16,6 +16,7 @@ import numpy as np
 import unittest
 import pytest
 import pyscf
+from pyscf import lib
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.grad.rks import _get_denlc
 from gpu4pyscf.lib.multi_gpu import num_devices
@@ -292,7 +293,20 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 2e-6
 
-    def test_wb97xv_densityfit_dense_grid_without_response(self):
+    def test_wb97xv_densityfit(self):
+        mol = pyscf.M(atom='H 0 0 0; H .2 .1 .8', basis='sto3g', verbose=0)
+        mf = mol.RKS(xc='wb97x-v').density_fit().to_gpu()
+        mf.grids.level = 1
+        mf.nlcgrids.level = 0
+        mf.run(conv_tol=1e-12)
+        assert mf.converged
+        grad = mf.Gradients()
+        grad.grid_response = False
+        g = grad.kernel()
+        assert abs(lib.fp(g[0]) - 0.006972389657848941) < 1e-7
+        assert abs(g.sum()) < 1e-9
+
+    def test_wb97xv_densityfit_dense_grid_without_response_high_cost(self):
         mf = make_mf(mol, nlc_atom_grid_dense, density_fit = True)
         grad_obj = mf.Gradients()
         assert grad_obj.grid_response is False

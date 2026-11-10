@@ -253,22 +253,24 @@ class KnownValues(unittest.TestCase):
         assert abs(lib.fp(ej) - -5.7379651745047555) < 2e-12
 
     def test_jk_energy_per_atom(self):
-        cp.random.seed(8)
+        # Backend-independent input: np.random (MT19937) is identical on
+        # every host, unlike cp.random (cuRAND on CUDA, oneMKL on SYCL).
+        np.random.seed(8)
         nao = mol.nao
         nocc = 5
-        mo_coeff = cp.random.rand(3, nao, nocc) - .5
+        mo_coeff = cp.asarray(np.random.rand(3, nao, nocc)) - .5
         dm = cp.einsum('spi,sqi->spq', mo_coeff, mo_coeff)
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         j_factor = [1, -1,  0]
         k_factor = [1, -1, -1]
         ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(lib.fp(ejk) - 16.8821623565) < 2e-9
+        assert abs(lib.fp(ejk) - -39.9335312459366) < 2e-9
         assert abs(ejk.sum(axis=0)).max() < 1e-9
 
         # mimic insufficent memory, processing in small batches
         with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 3000000)):
             ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(lib.fp(ejk) - 16.8821623565) < 2e-9
+        assert abs(lib.fp(ejk) - -39.9335312459366) < 2e-9
 
         ref = 0
         for i in range(len(dm)):

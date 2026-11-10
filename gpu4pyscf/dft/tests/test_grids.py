@@ -198,7 +198,7 @@ class KnownValues(unittest.TestCase):
         # grids.size != 900 due to alignment
         assert 900 <= grids.size <= 1024
 
-    def test_GDFTscreen_index_kernel_bugfix(self):
+    def test_GDFTscreen_index_kernel_bugfix_high_cost(self):
         # To reproduce the bug, remove the first __syncthreads() in _screen_index() CUDA kernel.
         # See issue 919. Not able to reproduce with smaller molecule or basis.
         mol = pyscf.M(

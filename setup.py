@@ -138,7 +138,7 @@ setup(
         "pytest-coverage==0.0",
     ],
     cmdclass={'build_py': CMakeBuildPy},
-    extras_require={'dispersion': ['pyscf-dispersion']},
+    extras_require={'dispersion': ['pyscf-dispersion>=1.7.0']},
     install_requires=[
         'pyscf>=2.8.0',
         f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0

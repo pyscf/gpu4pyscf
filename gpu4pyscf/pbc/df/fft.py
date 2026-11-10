@@ -32,15 +32,27 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk, aft
 from gpu4pyscf.pbc.df.aft import _check_kpts, get_SI, _get_ZSI
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
 
 def get_nuc(mydf, kpts=None):
+    '''Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    Args:
+        mydf : FFTDF object
+            Provides the cell and reciprocal-space mesh.
+            mydf.kpts has no effects.
+
+    Kwargs:
+        kpts : (3,) or (nkpts, 3) ndarray, optional
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+
+    Returns:
+        cupy.ndarray
+            AO matrix with dimensions following the kpts convention.
+    '''
     from gpu4pyscf.pbc.dft import numint
-    is_single_kpt = kpts is not None and kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -72,13 +84,23 @@ def get_nuc(mydf, kpts=None):
 
 def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+
+    Args:
+        mydf : FFTDF object
+            Provides the cell and reciprocal-space mesh.
+            mydf.kpts has no effects.
+
+    Kwargs:
+        kpts : (3,) or (nkpts, 3) ndarray, optional
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+
+    Returns:
+        cupy.ndarray
+            AO matrix with dimensions following the kpts convention.
     '''
     from gpu4pyscf.pbc.dft import numint
-    is_single_kpt = kpts is not None and kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -132,7 +154,7 @@ def get_pp(mydf, kpts=None):
             pp = cell._pseudo[symb]
             p1 = 0
             for l, proj in enumerate(pp[5:]):
-                rl, nl, hl = proj
+                rl, nl, hl = proj[:3]
                 if nl > 0:
                     fakemol._bas[0,gto.ANG_OF] = l
                     fakemol._env[ptr+3] = .5*rl**2
@@ -155,7 +177,7 @@ def get_pp(mydf, kpts=None):
                 SPG_lm_aoGs = SPG_lmi.dot(aokG)
                 p1 = 0
                 for l, proj in enumerate(pp[5:]):
-                    rl, nl, hl = proj
+                    rl, nl, hl = proj[:3]
                     if nl > 0:
                         p0, p1 = p1, p1+nl*(l*2+1)
                         hl = cp.asarray(hl)
@@ -261,7 +283,7 @@ class FFTDF(lib.StreamObject):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         if is_single_kpt:
             vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
                                    with_j, with_k, exxdiv)

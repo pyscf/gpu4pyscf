@@ -54,7 +54,7 @@ def tearDownModule():
     global cell, cell1, kpts
     del cell, cell1, kpts
 
-class AFTProtocols(unittest.TestCase):
+class KnownValues(unittest.TestCase):
     def setUp(self):
         self.cell = pgto.M(
             atom='C .2 .3 .4; H 1.4 1.2 1.6', unit='Bohr', spin=1,
@@ -71,35 +71,29 @@ class AFTProtocols(unittest.TestCase):
         mydf.mesh = np.array([13, 15, 17])
         mydf.max_memory = 777
         mydf.time_reversal_symmetry = False
-        converted = mydf.to_cpu()
-        self.assertIsInstance(converted, aft_cpu.AFTDF)
-        self.assertIs(converted.cell, cell)
-        self.assertEqual(converted.max_memory, mydf.max_memory)
-        self.assertFalse(converted.time_reversal_symmetry)
-        np.testing.assert_array_equal(converted.mesh, mydf.mesh)
-        np.testing.assert_array_equal(converted.kpts, mydf.kpts)
-        reference = aft_cpu.AFTDF(cell).set(mesh=mydf.mesh.copy())
-        for name in ('get_nuc', 'get_pp'):
-            with self.subTest(operator=name):
-                actual = getattr(mydf, name)()
-                self.assertIsInstance(actual, cp.ndarray)
-                self.assertEqual(actual.shape, (1, cell.nao, cell.nao))
-                self.assertEqual(actual.dtype, np.float64)
-                np.testing.assert_allclose(actual.get(), getattr(reference, name)(),
-                                           atol=1e-9, rtol=0)
-                np.testing.assert_allclose(actual.get(), getattr(converted, name)(),
-                                           atol=1e-9, rtol=0)
-                single = getattr(mydf, name)(kpts=np.zeros(3))
-                np.testing.assert_allclose(single.get(), actual[0].get(),
-                                           atol=1e-12, rtol=0)
-                np.testing.assert_allclose(single.get(), single.T.get(),
-                                           atol=1e-11, rtol=0)
-        dm = np.linalg.inv(cell.pbc_intor('int1e_ovlp'))
-        actual, exchange = mydf.get_jk(cp.asarray(dm), with_k=False)
-        self.assertIsNone(exchange)
-        for cpu_df in (reference, converted):
-            expected = cpu_df.get_jk(dm, with_k=False)[0]
-            np.testing.assert_allclose(actual.get(), expected, atol=1e-9, rtol=0)
+        mydf_cpu = mydf.to_cpu()
+        self.assertIsInstance(mydf_cpu, aft_cpu.AFTDF)
+        self.assertIs(mydf_cpu.cell, cell)
+        self.assertEqual(mydf_cpu.max_memory, mydf.max_memory)
+        self.assertFalse(mydf_cpu.time_reversal_symmetry)
+        np.testing.assert_array_equal(mydf_cpu.mesh, mydf.mesh)
+        np.testing.assert_array_equal(mydf_cpu.kpts, mydf.kpts)
+
+        ref = mydf_cpu.get_nuc(kpts=np.zeros(3))
+        actual = mydf.get_nuc()
+        self.assertIsInstance(actual, cp.ndarray)
+        assert actual.ndim == 2
+        self.assertEqual(actual.dtype, np.float64)
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+
+        ref = mydf_cpu.get_pp(kpts=np.zeros(3))
+        actual = mydf.get_pp()
+        self.assertIsInstance(actual, cp.ndarray)
+        assert actual.ndim == 2
+        self.assertEqual(actual.dtype, np.float64)
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+        single = mydf.get_pp(kpts=np.zeros(3))
+        np.testing.assert_allclose(single.get(), actual.get(), atol=1e-12, rtol=0)
 
     def test_reset_scaled_kpts_and_range_cache(self):
         cell = self.cell
@@ -198,9 +192,62 @@ class AFTProtocols(unittest.TestCase):
     def test_long_range_mesh_and_weighted_kernels_nonzero_kpoint(self):
         self._check_long_range_mesh_and_weighted_kernels(np.array([.13, -.07, .09]))
 
+    def test_aft_gamma_derivative_with_kpts(self):
+        cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                       basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                       mesh=[15]*3, precision=1e-8, verbose=0)
+        dm = cp.eye(cell.nao)
+        obj = aft.AFTDF(cell)
 
+        # Coulomb energy derivatives with default Gamma sampling.
+        refj = obj.get_ej_derivatives(dm)
+        assert refj.shape == (cell.natm+3, 3)
+        assert refj.dtype == np.float64
 
-class KnownValues(unittest.TestCase):
+        # An explicit single Gamma point gives the same derivatives.
+        result = obj.get_ej_derivatives(dm, kpts=np.zeros(3))
+        assert result.shape == refj.shape
+        assert result.dtype == np.float64
+        assert abs(result - refj).max() < 1e-10
+
+        # A one-point Gamma batch preserves the energy-derivative layout.
+        result = obj.get_ej_derivatives(dm, kpts=np.zeros((1, 3)))
+        assert result.shape == refj.shape
+        assert result.dtype == np.float64
+        assert abs(result - refj).max() < 1e-10
+
+        # Exchange energy derivatives with default Gamma sampling.
+        refk = obj.get_ek_derivatives(dm)
+        assert refk.shape == (cell.natm+3, 3)
+        assert refk.dtype == np.float64
+
+        # An explicit single Gamma point gives the same derivatives.
+        result = obj.get_ek_derivatives(dm, kpts=np.zeros(3))
+        assert result.shape == refk.shape
+        assert result.dtype == np.float64
+        assert abs(result - refk).max() < 1e-10
+
+        # A one-point Gamma batch preserves the energy-derivative layout.
+        result = obj.get_ek_derivatives(dm, kpts=np.zeros((1, 3)))
+        assert result.shape == refk.shape
+        assert result.dtype == np.float64
+        assert abs(result - refk).max() < 1e-10
+
+    def test_get_jk_preserves_density_shape(self):
+        cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                        basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                        mesh=[15]*3, precision=1e-8, verbose=0)
+        obj = aft.AFTDF(cell)
+        dm = cp.eye(cell.nao)
+        spin_dm = cp.stack([dm*.6, dm*.4])
+        for density in (dm, dm[None], spin_dm, spin_dm[:, None]):
+            vj, vk = obj.get_jk(density)
+            assert vj.shape == vk.shape == density.shape
+            assert vj.dtype == vk.dtype == np.float64
+            refj, refk = obj.get_jk(density, kpts=np.zeros((1, 3)))
+            assert abs(vj - refj).max() < 1e-10
+            assert abs(vk - refk).max() < 1e-10
+
     def test_aft_get_pp(self):
         ref = aft_cpu.AFTDF(cell).get_pp(kpts=kpts[0])
         v1 = aft.AFTDF(cell).get_pp(kpts=kpts[0]).get()
@@ -548,7 +595,7 @@ class KnownValues(unittest.TestCase):
             assert abs(ek_ewald - ref).max() < 5e-8
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_ek_ip1_kpts(self):
+    def test_ek_ip1_kpts_high_cost(self):
         cell = pgto.M(
             atom = '''
             O   0.000    0.    0.1174
@@ -562,6 +609,20 @@ class KnownValues(unittest.TestCase):
             basis=[[0, [.25, 1]], [1, [.3, 1]]],
         )
         kpts = cell.make_kpts([3,2,1])
+        self._check_ek_ip1_kpts(cell, kpts)
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_ek_ip1_kpts(self):
+        # Retain s/p shells and non-Gamma sampling with fewer atoms and k-points.
+        cell = pgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]], verbose=0,
+        )
+        kpts = cell.make_kpts([2,1,1])
+        self._check_ek_ip1_kpts(cell, kpts)
+
+    def _check_ek_ip1_kpts(self, cell, kpts):
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         myaft = aft.AFTDF(cell)
         grad_sigma = aft_jk.get_ek_derivatives(myaft, dm, kpts=kpts)

@@ -41,7 +41,8 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao, int3c2e
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kk_adapted_iter, conj_images_in_bvk_cell, _normalize_kpts)
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
@@ -73,7 +74,8 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
 
-    is_gamma_point = kpts is None or is_zero(kpts)
+    kpts, _ = _normalize_kpts(kpts)
+    is_gamma_point = is_zero(kpts)
     if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
             cell, auxcell, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
@@ -170,7 +172,11 @@ def cholesky_decomposed_metric(j2c):
     # Cupy cholesky does not check positive-definite, seems returning nan in the
     # resultant CD matrix silently.
     j2c = cp.asarray(j2c, order='C')
-    j2c = cp.linalg.cholesky(j2c)
+    try:
+        j2c = cp.linalg.cholesky(j2c)
+    except ValueError:
+        # dpnp raises LinAlgError (a ValueError) on non-PD input
+        raise LinearDepencyError('j2c is not positive definite') from None
     if cp.isnan(j2c[-1,-1]):
         raise LinearDepencyError('j2c is not positive definite')
     return j2c, j2c_negative, j2ctag
@@ -291,8 +297,8 @@ def _append_dd_cderi(opt, cderi, cd_j2c_cache, omega, recontract, kpts=None):
     cell = opt.cell
 
     real_output = kpts is None
+    kpts, _ = _normalize_kpts(kpts)
     if real_output:
-        kpts = np.zeros((1, 3))
         dtype = np.float64
     else:
         dtype = np.complex128
@@ -915,9 +921,9 @@ def _symmetrize_cderi(out, ki_idx=None):
     naux *= out.dtype.itemsize // 8
     stream = cp.cuda.get_current_stream()
     err = libpbc.symmetrize_cderi(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p), mapping_ptr,
-        ctypes.c_int(nkpts), ctypes.c_int(nao), ctypes.c_int(naux))
+        ctypes.c_int(nkpts), ctypes.c_int(nao), ctypes.c_int(naux),
+        ctypes.cast(stream.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('symmetrize_cderi kernel failed')
     return out
@@ -983,14 +989,14 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             j3c_ptr = ctypes.cast(cderi_compressed.data.ptr, ctypes.c_void_p)
         stream = cp.cuda.get_current_stream()
         err = kern(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(cderi.data.ptr, ctypes.c_void_p), ctypes.c_int(naux),
             j3c_ptr,
             ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nao_pairs),
             ctypes.c_int(nL*nao),
             ctypes.c_int(0), ctypes.c_int(naux),
-            ctypes.c_int(0), ctypes.c_int(on_host))
+            ctypes.c_int(0), ctypes.c_int(on_host),
+            ctypes.cast(stream.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('decompress_and_transpose kernel failed')
     else:
@@ -1036,10 +1042,8 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
-    is_gamma_point = kpts is None or is_zero(kpts)
-    if is_single_kpt:
-        kpts = kpts.reshape(1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
+    is_gamma_point = is_zero(kpts)
     if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
     else:
@@ -1087,6 +1091,9 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
 
 def get_nuc(cell, kpts=None):
     '''Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1096,15 +1103,18 @@ def get_nuc(cell, kpts=None):
 
 def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
+
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
-    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    is_single_kpt = kpts is not None and kpts.ndim == 1
+    kpts, is_single_kpt = _normalize_kpts(kpts)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
     t1 = log.timer_debug1('get_pp_loc_part2', *t0)
-    vpp += cp.asarray(get_pp_nl_gpu(cell, kpts))
+    vpp += cp.asarray(get_pp_nl(cell, kpts))
     t1 = log.timer_debug1('get_pp_nl', *t1)
 
     vpp += get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)

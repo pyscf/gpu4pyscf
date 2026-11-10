@@ -25,7 +25,7 @@ extern "C" {
 
 #define count_non_trivial_pairs_kernel_macro(li, lj)                           \
   gpu4pyscf::gpbc::multi_grid::count_non_trivial_pairs_kernel<li, lj>          \
-      <<<block_grid, block_size>>>(n_counts, i_shells, n_i_shells, j_shells,   \
+      <<<block_grid, block_size, 0, stream>>>(n_counts, i_shells, n_i_shells, j_shells,                             \
                                    n_j_shells, vectors_to_neighboring_images,  \
                                    n_images, mesh_a, mesh_b, mesh_c, atm, bas, \
                                    env, threshold_in_log)
@@ -42,7 +42,7 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
                             const double *vectors_to_neighboring_images,
                             const int n_images, const int *mesh, const int *atm,
                             const int *bas, const double *env,
-                            const double threshold_in_log) {
+                            const double threshold_in_log, cudaStream_t stream) {
   dim3 block_size(16, 16);
   dim3 block_grid((n_i_shells * n_images + 15) / 16,
                   (n_j_shells * n_images + 15) / 16);
@@ -87,7 +87,7 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
 
 #define screen_gaussian_pairs_kernel_macro(li, lj)                             \
   gpu4pyscf::gpbc::multi_grid::screen_gaussian_pairs_kernel<li, lj>            \
-      <<<block_grid, block_size>>>(                                            \
+      <<<block_grid, block_size, 0, stream>>>(                                 \
           shell_pair_indices, image_indices, pairs_to_blocks_begin,            \
           pairs_to_blocks_end, written_counts, i_shells, n_i_shells, j_shells, \
           n_j_shells, n_pairs, vectors_to_neighboring_images, n_images,        \
@@ -107,7 +107,7 @@ int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
                           const double *vectors_to_neighboring_images,
                           const int n_images, const int *mesh, const int *atm,
                           const int *bas, const double *env,
-                          const double threshold_in_log) {
+                          const double threshold_in_log, cudaStream_t stream) {
   dim3 block_size(16, 16);
   dim3 block_grid((n_i_shells * n_images + 15) / 16,
                   (n_j_shells * n_images + 15) / 16);
@@ -116,7 +116,7 @@ int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
   const int mesh_c = mesh[2];
   int *written_counts = nullptr;
   checkCudaErrors(cudaMalloc(&written_counts, sizeof(int)));
-  checkCudaErrors(cudaMemset(written_counts, 0, sizeof(int)));
+  checkCudaErrors(cudaMemsetAsync(written_counts, 0, sizeof(int), stream));
   switch (i_angular * 10 + j_angular) {
     screen_gaussian_pairs_kernel_case_macro(0, 0);
     screen_gaussian_pairs_kernel_case_macro(0, 1);
@@ -164,7 +164,7 @@ int count_pairs_on_blocks(int *n_pairs_per_block,
                           const int n_j_shells, const int *image_indices,
                           const double *vectors_to_neighboring_images,
                           const int n_images, const int mesh[3], const int *atm,
-                          const int *bas, const double *env) {
+                          const int *bas, const double *env, cudaStream_t stream) {
   const int n_blocks_a = n_blocks[0];
   const int n_blocks_b = n_blocks[1];
   const int n_blocks_c = n_blocks[2];
@@ -172,7 +172,7 @@ int count_pairs_on_blocks(int *n_pairs_per_block,
   const dim3 block_size(n_threads, 1, 1);
   const dim3 block_grid(n_blocks_c, n_blocks_b, n_blocks_a);
   gpu4pyscf::gpbc::multi_grid::
-      count_pairs_on_blocks_kernel<<<block_grid, block_size>>>(
+      count_pairs_on_blocks_kernel<<<block_grid, block_size, 0, stream>>>(
           n_pairs_per_block, n_unstable_pairs_per_block, pairs_to_blocks_begin,
           pairs_to_blocks_end, n_pairs, non_trivial_pairs, i_shells, j_shells,
           n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
@@ -189,7 +189,7 @@ void put_pairs_on_blocks(
     const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
     const int n_j_shells, const int *image_indices,
     const double *vectors_to_neighboring_images, const int n_images,
-    const int mesh[3], const int *atm, const int *bas, const double *env) {
+    const int mesh[3], const int *atm, const int *bas, const double *env, cudaStream_t stream) {
   const int n_blocks_a = n_blocks[0];
   const int n_blocks_b = n_blocks[1];
   const int n_blocks_c = n_blocks[2];
@@ -197,7 +197,7 @@ void put_pairs_on_blocks(
   const dim3 block_size(n_threads);
   const dim3 block_grid(n_contributing_blocks);
   gpu4pyscf::gpbc::multi_grid::
-      put_pairs_on_blocks_kernel<<<block_grid, block_size>>>(
+      put_pairs_on_blocks_kernel<<<block_grid, block_size, 0, stream>>>(
           pairs_on_blocks, accumulated_n_pairs_per_block, sorted_block_index,
           pairs_to_blocks_begin, pairs_to_blocks_end, n_blocks_a, n_blocks_b,
           n_blocks_c, n_pairs, non_trivial_pairs, i_shells, j_shells,

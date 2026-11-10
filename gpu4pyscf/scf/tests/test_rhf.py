@@ -358,7 +358,6 @@ class KnownValues(unittest.TestCase):
 
     # TODO:
     #test analyze
-    #test stability
     #test newton
     #test x2c
     #test canonicalize

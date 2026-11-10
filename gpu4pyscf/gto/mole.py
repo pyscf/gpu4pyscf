@@ -739,7 +739,8 @@ class SortedGTO:
                     ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                     ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
-                    ctypes.c_int(ncol), ctypes.c_int(p1 - p0))
+                    ctypes.c_int(ncol), ctypes.c_int(p1 - p0),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 assert err == 0
 
         if mat.dtype == np.complex128:
@@ -783,7 +784,8 @@ class SortedGTO:
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
-                ctypes.c_int(ncol), ctypes.c_int(counts))
+                ctypes.c_int(ncol), ctypes.c_int(counts),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             assert err == 0
 
         if mat.dtype == np.complex128:
@@ -833,7 +835,8 @@ class SortedGTO:
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
-                ctypes.c_int(nrow*counts))
+                ctypes.c_int(nrow*counts),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             assert err == 0
 
         if mat_dtype == np.complex128:
@@ -887,7 +890,8 @@ class SortedGTO:
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(recontract_bas)), ctypes.c_int(self.nbas),
-                ctypes.c_int(nrow*counts))
+                ctypes.c_int(nrow*counts),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             assert err == 0
 
         if mat_dtype == np.complex128:

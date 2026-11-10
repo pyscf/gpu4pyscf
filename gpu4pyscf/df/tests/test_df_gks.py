@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by PySCF
     '''
-    def test_gks(self):
+    def test_gks_high_cost(self):
         mf_gpu = gpu_dft.GKS(mol, xc='b3lyp').density_fit(auxbasis='def2-tzvpp-jkfit')
         mf_gpu.collinear = 'm'
         mf_gpu._numint.spin_samples = 50

@@ -158,7 +158,8 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1.,
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes,
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
             kern_counts += 1
@@ -296,7 +297,8 @@ def _grad_nuc_without_ecp(mol, dm0):
         lib.c_null_ptr(),
         ctypes.c_int(0),
         ctypes.c_int(0), ctypes.c_int(0),
-        ctypes.c_int(mol.natm), ctypes.c_int(mol.natm))
+        ctypes.c_int(mol.natm), ctypes.c_int(mol.natm),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     de += de_aux
@@ -514,6 +516,12 @@ class GradientsBase(lib.StreamObject):
     get_dispersion = get_dispersion
     _hcore_energy = _hcore_energy
 
+    def get_gcp(self, gcp=None, verbose=None):
+        '''Gradient of the gCP/SRB correction. Called only when
+        base.do_gcp() is True, which requires PySCF >= 2.15.'''
+        from pyscf.grad.gcp import get_gcp
+        return get_gcp(self, gcp, verbose)
+
     def get_ovlp(self, mol):
         from gpu4pyscf.pbc.gto.int1e import int1e_ipovlp
         return -int1e_ipovlp(mol)
@@ -543,6 +551,8 @@ class GradientsBase(lib.StreamObject):
             self.de = self.symmetrize(self.de)
         if self.base.do_disp():
             self.de += self.get_dispersion()
+        if self.base.do_gcp():
+            self.de += self.get_gcp()
         # Keep all contributions on the full molecule, then select rows once.
         if atmlst is not None:
             self.de = self.de[list(atmlst)]

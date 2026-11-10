@@ -1,3 +1,40 @@
+v1.9.1 (2026-11-03)
+-------------------
+* New Features
+  - Geometric direct minimization for SCF calculations. (#978)
+  - GPU SAP and VSAP initial guesses. (#997)
+  - GPU internal stability analysis for RHF, RKS, UHF and UKS, and external stability analysis for RHF, RKS and UHF. (#1005)
+* Fixes
+  - GPU OOM in density-fitted Hessian calculations. (#973, #992)
+  - Numerical instability in density-fitted RHF and UHF gradients with nearly linearly dependent auxiliary bases. (#1019)
+  - Spurious magnetic-moment warnings in SAD and AUTOSAD initial guesses. (#1020)
+  - Range-separated Coulomb matrices with multiple density matrices. (#990)
+  - Multigrid v3 synchronization bug, affecting Coulomb and XC matrices and stress tensors. (#986)
+  - Multigrid v2 pair-list indexing and synchronization bug. (#995)
+  - Multigrid screening arguments and meta-GGA kinetic energy density screening radii. (#995)
+  - Races in periodic AFT integrals and short-range density-fitting Coulomb contractions. (#995)
+  - Short-range integral screening races in molecular and periodic J/K builders. (#995)
+  - Uninitialized screened integrals affecting MP2 and in-core CCSD. (#995)
+  - DFT grid grouping races for systems with more than 128 atoms. (#995)
+  - CUDA stream and launch configuration bugs in one-electron integrals. (#1003)
+  - Spurious LR-PCM transition-density contributions to restricted triplet TDA/TDDFT gradients. (#1013)
+  - Generalized-spin J/K assembly and pure GKS Coulomb energies. (#1004)
+  - DFT quadrature with non-Hermitian densities. (#1004)
+  - Fix DFT grid grouping bug caused by incorrect atom sorting. (#1004)
+  - Krylov initial guesses. (#1004)
+  - cuSOLVER error handling and single-device task keyword arguments. (#1004)
+  - MP2 initialization with frozen or supplied orbitals, density-fitting integral layouts and density reconstruction without stored amplitudes. (#1004)
+  - Periodic GHF initial-guess normalization. (#1004)
+  - Molecular and periodic QM/MM cache invalidation. (#1004)
+  - Frozen-solvent initialization and response. (#1004)
+  - TD response eigensolver linearly dependent corrections. (#1004)
+  - Non-adiabatic coupling scanner convergence indices. (#1004)
+  - CPU/GPU conversion for Hessian settings, CCSD state, SMD and smeared SCF objects. (#1004)
+* API Updates
+  - Deprecate eval_rho3 in favor of eval_rho4. (#1004)
+  - Reject unsupported full-range lr_factor and SAP breaksym arguments instead of silently ignoring them. (#1004)
+
+
 v1.9.0 (2026-10-07)
 -------------------
 * New Features (PBC systems)

@@ -37,8 +37,14 @@ def test_d3_gradients():
     assert abs(out['gradient'][0, 2] - 0.0004553384490128) < 1e-10
     assert abs(out['virial'][2, 2] - -0.000860464962618) < 1e-10
 
-def test_d3_with_pbc():
-    mol = pyscf.M(atom='H 0 0 0; H 0 0 1', a=np.eye(3)*2)
+@pytest.mark.parametrize('dimension,energy', [
+    (1, -0.0014506963767424985),
+    (3, -0.010868454099032226), # s-dftd3 1.7.0 CLI, 3D periodic input
+])
+def test_d3_with_pbc(dimension, energy):
+    # The old single-bool pointer inadvertently selected one-dimensional PBC.
+    mol = pyscf.M(atom='H 0 0 0; H 0 0 1', a=np.eye(3)*2,
+                  dimension=dimension, low_dim_ft_type='inf_vacuum')
     model = DFTD3Dispersion(mol, xc='WB97X')
     out = model.get_dispersion()
-    assert abs(out['energy'] - -0.0014506963767424985) < 1e-10
+    assert abs(out['energy'] - energy) < 1e-10

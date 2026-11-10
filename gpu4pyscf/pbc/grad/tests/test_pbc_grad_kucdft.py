@@ -49,7 +49,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test_finite_diff_cdft_grad(self):
+    def test_finite_diff_cdft_grad_high_cost(self):
         kpts = cell.make_kpts([3, 2, 1])
         charge_constraints = ([[0]], [4.1])
         mf = kucdft.CDFT_KUKS(cell, kpts, charge_constraints=charge_constraints)
@@ -100,7 +100,7 @@ class KnownValues(unittest.TestCase):
         g_fd = (e_plus - e_minus) / (2.0 * h)
         self.assertAlmostEqual(g_ana[atom_idx, coord_idx], g_fd, 5)
 
-    def test_finite_diff_cdft_spin_grad(self):
+    def test_finite_diff_cdft_spin_grad_high_cost(self):
         kpts = cell.make_kpts([3, 2, 1])
         spin_constraints = ([[0], [1]], [0.2, -0.2])
         mf = kucdft.CDFT_KUKS(cell, kpts, spin_constraints=spin_constraints)

@@ -146,7 +146,8 @@ class VHFOpt(_vhf.VHFOpt):
                     bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
                     _sorted_mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.natm),
                     _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(_sorted_mol.nbas),
-                    _sorted_mol._env.ctypes.data_as(ctypes.c_void_p))
+                    _sorted_mol._env.ctypes.data_as(ctypes.c_void_p),
+                    ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
                 self._bpcache[n] = bpcache
 
         cput1 = log.timer_debug1('Initialize GPU cache', *cput1)
@@ -270,7 +271,6 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
                 charge_exponents_pointer = exponents_slice.data.ptr
             grids_slice = grids[p0:p1]
             err = libgint.GINTfill_int3c1e(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(grids_slice.data.ptr, ctypes.c_void_p),
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -281,7 +281,8 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
                 bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
                 ctypes.c_int(nbins),
                 ctypes.c_int(cp_ij_id),
-                ctypes.c_double(omega))
+                ctypes.c_double(omega),
+                ctypes.cast(stream.ptr, ctypes.c_void_p))
 
             if err != 0:
                 raise RuntimeError('GINTfill_int3c1e failed')
@@ -358,7 +359,6 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
         int1e_angular_slice = cp.zeros([j1-j0, i1-i0], order='C')
 
         err = libgint.GINTfill_int3c1e_charge_contracted(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
             intopt.bpcache,
             ctypes.cast(grids.data.ptr, ctypes.c_void_p),
             ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -370,7 +370,8 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
             ctypes.c_int(nbins),
             ctypes.c_int(cp_ij_id),
             ctypes.c_double(omega),
-            ctypes.c_int(n_charge_sum_per_thread))
+            ctypes.c_int(n_charge_sum_per_thread),
+            ctypes.cast(stream.ptr, ctypes.c_void_p))
 
         if err != 0:
             raise RuntimeError('GINTfill_int3c1e_charge_contracted failed')
@@ -467,7 +468,6 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
             n_pair_sum_per_thread = nao_cart
             grids_slice = grids[p0:p1, :]
             err = libgint.GINTfill_int3c1e_density_contracted(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
                 ctypes.cast(grids_slice.data.ptr, ctypes.c_void_p),
                 ctypes.cast(charge_exponents_pointer, ctypes.c_void_p),
@@ -479,7 +479,8 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
                 ctypes.c_int(nbins),
                 ctypes.c_int(cp_ij_id),
                 ctypes.c_double(omega),
-                ctypes.c_int(n_pair_sum_per_thread))
+                ctypes.c_int(n_pair_sum_per_thread),
+                ctypes.cast(stream.ptr, ctypes.c_void_p))
 
             if err != 0:
                 raise RuntimeError('GINTfill_int3c1e_density_contracted failed')

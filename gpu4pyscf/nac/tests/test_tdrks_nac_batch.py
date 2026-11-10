@@ -340,7 +340,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_tpss(self):
+    def test_nac_tda_singlet_tpss_high_cost(self):
         mf = dft.RKS(mol, xc='tpss').to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
