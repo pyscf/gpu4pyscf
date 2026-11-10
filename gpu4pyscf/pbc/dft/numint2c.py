@@ -63,7 +63,8 @@ class KNumInt2C(numint.KNumInt):
         return super().get_rho(cell, charge, grids, kpts)
 
     def to_cpu(self):
-        return utils.to_cpu(self, out=numint2c_cpu.KNumInt2C(self.kpts))
+        from pyscf.pbc.dft.numint2c import KNumInt2C
+        return utils.to_cpu(self, out=KNumInt2C(self.kpts))
 
 
 class NumInt2C(KNumInt2C):
@@ -76,4 +77,5 @@ class NumInt2C(KNumInt2C):
     get_vxc = nr_gks_vxc = nr_vxc
 
     def to_cpu(self):
-        return utils.to_cpu(self, out=numint2c_cpu.NumInt2C())
+        from pyscf.pbc.dft.numint2c import NumInt2C
+        return utils.to_cpu(self, out=NumInt2C())
