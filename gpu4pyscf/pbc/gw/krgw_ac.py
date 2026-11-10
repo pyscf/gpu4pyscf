@@ -1283,8 +1283,8 @@ def make_rdm1_linear(gw, ao_repr=False):
 
     Returns
     -------
-    rdm1 : double ndarray
-        density matrix
+    rdm1 : complex ndarray
+        density matrix, returned as real if all imaginary parts are negligible
     """
     assert gw.sigmaI is not None
     assert gw.rdm is True and gw.fullsigma is True
@@ -1314,23 +1314,20 @@ def make_rdm1_linear(gw, ao_repr=False):
             gf[k, :, :, iw] += gf0[k, :, :, iw] @ sigma[k, :, :, iw] @ gf0[k, :, :, iw]
 
     # GW density matrix
-    rdm1 = np.zeros(shape=[nkpts, nmo, nmo], dtype=np.double)
+    rdm1 = np.zeros(shape=[nkpts, nmo, nmo], dtype=np.complex128)
     for k in range(nkpts):
-        rdm1[k] = 2.0 / np.pi * np.einsum('ijw,w->ij', gf[k], wts).real + np.eye(nmo)
-        logger.info(gw, 'GW particle number @ k%d = %s', k, np.trace(rdm1[k]))
+        rdm1[k] = 2.0 / np.pi * np.einsum('ijw,w->ij', gf[k], wts) + np.eye(nmo)
+        logger.info(gw, 'GW particle number @ k%d = %s', k, np.trace(rdm1[k]).real)
 
     # Symmetrize density matrix
     for k in range(nkpts):
-        rdm1[k] = 0.5 * (rdm1[k] + rdm1[k].T)
+        rdm1[k] = 0.5 * (rdm1[k] + rdm1[k].conj().T)
 
     if ao_repr is True:
-        ovlp = cp.asnumpy(gw._scf.get_ovlp())
         mo_coeff = cp.asnumpy(gw._scf.mo_coeff)
-        for k in range(nkpts):
-            CS = ovlp[k] @ mo_coeff[k]
-            rdm1[k] = CS @ rdm1[k] @ CS.conj().T
+        rdm1 = mo_coeff @ rdm1 @ mo_coeff.conj().swapaxes(-1, -2)
 
-    return rdm1
+    return np.real_if_close(rdm1)
 
 
 def _mo_energy_frozen(gw, mo_energy):

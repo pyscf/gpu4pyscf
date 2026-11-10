@@ -113,6 +113,22 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(rpa.e_corr, -0.207229608059, delta=1e-6)
         self.assertAlmostEqual(rpa.e_tot, -10.716296981848, delta=1e-6)
 
+    def test_krpa_frozen_core(self):
+        # the HF energy includes the frozen orbitals, so e_hf is the same as without frozen orbitals
+        rpa = krpa.KRPA(kmf, frozen=1)
+        rpa.kernel()
+        self.assertAlmostEqual(rpa.e_corr, -0.140298453244, delta=1e-6)
+        self.assertAlmostEqual(rpa.e_hf, -10.509067373789, delta=1e-6)
+
+    def test_krpa_frozen_core_outcore(self):
+        # frozen=[0] freezes the same orbital as frozen=1
+        rpa = krpa.KRPA(kmf, frozen=[0])
+        rpa.outcore = True
+        rpa.segsize = 2
+        rpa.kernel()
+        self.assertAlmostEqual(rpa.e_corr, -0.140298453244, delta=1e-6)
+        self.assertAlmostEqual(rpa.e_hf, -10.509067373789, delta=1e-6)
+
     def test_krpa_metal(self):
         rpa = krpa.KRPA(kmf_metal)
         rpa.kernel()
@@ -134,6 +150,27 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(rpa.e_corr, -0.04031792880477294, delta=1e-5)
         self.assertAlmostEqual(rpa.e_tot, -47.660250115879, delta=1e-5)
 
+
+    def test_krpa_metal_frozen_core(self):
+        rpa = krpa.KRPA(kmf_metal, frozen=1)
+        rpa.kernel()
+        self.assertAlmostEqual(rpa.e_corr, -0.032569675165, delta=1e-5)
+        self.assertAlmostEqual(rpa.e_hf, -47.566615020470, delta=1e-5)
+
+    def test_krpa_metal_frozen_core_outcore(self):
+        rpa = krpa.KRPA(kmf_metal, frozen=1)
+        rpa.outcore = True
+        rpa.segsize = 3
+        rpa.kernel()
+        self.assertAlmostEqual(rpa.e_corr, -0.032569675165, delta=1e-5)
+        self.assertAlmostEqual(rpa.e_hf, -47.566615020470, delta=1e-5)
+
+    def test_krpa_metal_frozen_core_acfd_exx(self):
+        rpa = krpa.KRPA(kmf_metal, frozen=1)
+        rpa.acfd_exx = True
+        rpa.kernel()
+        self.assertAlmostEqual(rpa.e_corr, -0.032569675165, delta=1e-5)
+        self.assertAlmostEqual(rpa.e_hf, -47.619932187074, delta=1e-5)
 
 if __name__ == "__main__":
     print("Full Tests for GPU periodic RPA")

@@ -748,10 +748,11 @@ def get_rpa_exx(rpa, acfd=False, correction_only=False):
     ex : double
         exchange energy
     """
-    mo_coeff = cp.asarray(_mo_frozen(rpa, rpa._scf.mo_coeff))
-    mo_occ = cp.asarray(_mo_occ_frozen(rpa, rpa._scf.mo_occ))
+    # exchange energy of the mean-field determinant, frozen orbitals included
+    mo_coeff = cp.asarray(rpa._scf.mo_coeff)
+    mo_occ = cp.asarray(rpa._scf.mo_occ)
 
-    nocc = rpa.nocc
+    nocc = cp.count_nonzero(mo_occ, axis=1).get()  # number of occupied orbitals at each k-point
     nao = mo_coeff.shape[1]
     nkpts = rpa.nkpts
     kpts = rpa.kpts
@@ -825,12 +826,11 @@ def get_rpa_exx(rpa, acfd=False, correction_only=False):
                     # ex -= cp.einsum('Lij,Lij->', Lij_occ.reshape(-1, nocc, nocc), Lij.reshape(-1, nocc, nocc).conj())
                     ex -= cp.cublas.dotc(Lij_occ.ravel(), Lij.ravel())
                 else:
-                    # This computes Lij = einsum('mi,Pmn,nj->Pij', mo_coeff[km][:, :nocc].conj(), Lpq_ao,
-                    # mo_coeff[kn][:, :nocc])
-                    tmp = contract('Pmn,mi->Pin', Lpq_ao, mo_coeff[km][:, :nocc].conj())
-                    Lij = contract('Pin,nj->Pij', tmp, mo_coeff[kn][:, :nocc])
+                    # This computes Lij = einsum('mi,Pmn,nj->Pij', mo_coeff[km][:, :nocc[km]].conj(), Lpq_ao,
+                    # mo_coeff[kn][:, :nocc[kn]])
+                    tmp = contract('Pmn,mi->Pin', Lpq_ao, mo_coeff[km][:, :nocc[km]].conj())
+                    Lij = contract('Pin,nj->Pij', tmp, mo_coeff[kn][:, :nocc[kn]])
                     tmp = None
-                    # ex -= cp.einsum('Lij,Lij->', Lij.reshape(-1, nocc, nocc), Lij.reshape(-1, nocc, nocc).conj())
                     ex -= cp.cublas.dotc(Lij.ravel(), Lij.ravel())
         Lpq_kL = Lpq_ao = out_buf = unpack_buf = None
 

@@ -133,6 +133,12 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(rdm1.shape, (gw.nkpts, gw.nmo, gw.nmo))
         nelec = sum(np.trace(dm) for dm in rdm1) / gw.nkpts
         self.assertAlmostEqual(nelec, 7.999947846930319, delta=1e-6)
+        # AO representation is C dm C^dagger, so Tr(dm_ao S) gives the same particle number
+        rdm1_ao = gw.make_rdm1(ao_repr=True)
+        mo_coeff = kmf.mo_coeff.get()
+        np.testing.assert_allclose(rdm1_ao, mo_coeff @ rdm1 @ mo_coeff.conj().transpose(0, 2, 1), atol=1e-10)
+        nelec = np.einsum('kij,kji->', rdm1_ao, kmf.get_ovlp().get()).real / gw.nkpts
+        self.assertAlmostEqual(nelec, 7.999947846930319, delta=1e-6)
         omega = np.linspace(0.2, 1.2, 101)
         gf, gf0, _ = gw.make_gf(omega, gw.eta)
         self.assertEqual(gf.shape, (gw.nkpts, gw.nmo, gw.nmo, len(omega)))
