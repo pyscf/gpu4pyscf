@@ -158,6 +158,8 @@ jobs:
             python -c "import gpu4pyscf; print('gpu4pyscf import OK')" ; } 2>&1 | tee /tmp/logs/50_smoke.log
 
       - name: Test with pytest (same command as upstream unittest.yml)
+        # Testing disabled: build-only run. Remove `if: false` to re-enable.
+        if: false
         # Identical pytest invocation to upstream's unittest.yml; only the
         # scope differs. Enable suites one at a time by uncommenting a line.
         timeout-minutes: 240

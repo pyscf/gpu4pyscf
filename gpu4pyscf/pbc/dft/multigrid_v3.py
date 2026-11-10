@@ -51,7 +51,7 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.tools import k2gamma, get_coulG, ke_to_mesh, mesh_to_ke
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
@@ -355,6 +355,7 @@ _eval_density = _eval_density_v2
 def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     assert xctype == 'LDA'
     assert not ni.allow_mesh_reduction
+    kpts, _ = _normalize_kpts(kpts)
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
     n_dm, nkpts, nao = dm_sc.shape[:3]
     rhoG = cp.array([_eval_density(ni, dm_sc[i])[0] for i in range(n_dm)])
@@ -1576,11 +1577,6 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
         return out
 
 def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
-
     ni._ensure_initialized(kpts, xctype)
 
     cell = ni.sorted_cell
@@ -1621,7 +1617,7 @@ def _inverse_wannier_transform_fock(ni, veff, kpts):
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
-        if kpts is not None and len(kpts) != bvk_ncells:
+        if len(kpts) != bvk_ncells:
             expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
         else:
             expLk = fft_matrix(ni.kmesh)
@@ -1647,6 +1643,7 @@ def get_rho(ni, dm_kpts, kpts=None):
             k points. If not specified, gamma point is assumed
     '''
     assert dm_kpts.ndim < 4
+    kpts, _ = _normalize_kpts(kpts)
     cell = ni.cell
     mesh = ni.mesh
 
@@ -1662,12 +1659,13 @@ def get_rho(ni, dm_kpts, kpts=None):
     return rhoR
 
 def get_nuc(ni, kpts=None):
+    """Get the periodic nuc-el AO matrix, with G=0 removed.
+
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+    """
     cell = ni.cell
-    is_single_kpt = kpts is not None and kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
 
     ni._ensure_initialized(kpts, 'LDA')
 
@@ -1684,16 +1682,15 @@ def get_nuc(ni, kpts=None):
 
 def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
+
+    kpts follows the PySCF kpts convention; see
+    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     """
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(kpts)
 
     ni._ensure_initialized(kpts, 'LDA')
 
@@ -1706,8 +1703,8 @@ def get_pp(ni, kpts=None):
     t1 = log.timer_debug1("vpploc", *t0)
 
     vppnl = get_pp_nl(cell, kpts)
-    if kpts is None or is_zero(kpts):
-        vpp += vppnl[0].real
+    if is_zero(kpts):
+        vpp += vppnl.real
     else:
         vpp += vppnl
 
@@ -1747,7 +1744,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
             Density matrix at each k-point.
-        kpts : (nkpts, 3) ndarray
+        kpts : None, (3,) or (nkpts, 3) ndarray, or KPoints
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+            Without kpts_band, the output matrix retains the shape of dm_kpts.
 
     Kwargs:
         kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
@@ -1763,6 +1763,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     '''
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
+
+    input_kpts = kpts
+    kpts, _ = _normalize_kpts(kpts)
 
     xctype = ni._xc_type(xc_code)
     nvar = _xc_var_length(xctype)
@@ -1840,7 +1843,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _eval_xc_mat(ni, xc_for_fock, out=dm_sc)
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
-        kpts_band = kpts_band.reshape(-1, 3)
+        kpts_band, _ = _normalize_kpts(kpts_band)
         kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
@@ -1849,7 +1852,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _eval_xc_mat(ni, xc_for_fock)
         veff = _inverse_wannier_transform_fock(ni, veff, kpts_band)
 
-    veff = _format_jks(veff, dm_kpts, kpts_band, kpts)
+    veff = _format_jks(veff, dm_kpts, kpts_band, input_kpts)
     veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1862,7 +1865,10 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
             Density matrix at each k-point.
-        kpts : (nkpts, 3) ndarray
+        kpts : None, (3,) or (nkpts, 3) ndarray, or KPoints
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+            Without kpts_band, the output matrix retains the shape of dm_kpts.
 
     Kwargs:
         kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
@@ -1879,16 +1885,19 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
+    input_kpts = kpts
+    kpts, _ = _normalize_kpts(kpts)
+
     xctype = ni._xc_type(xc_code)
     nvar = _xc_var_length(xctype)
     if xctype == 'HF':
         if with_j:
-            vj = ni.get_j(dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
+            vj = ni.get_j(dm_kpts[0]+dm_kpts[1], hermi, input_kpts, kpts_band)
             veff = cp.stack([vj, vj])
-            return lib.tag_array(veff, ecoul=vj.ecoul, exc=0)
+            return tag_array(veff, ecoul=vj.ecoul, exc=0)
         else:
             veff = cp.zeros_like(dm_kpts)
-            return lib.tag_array(veff, ecoul=0, exc=0)
+            return tag_array(veff, ecoul=0, exc=0)
 
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi, xctype)
     assert len(dm_sc) == 2
@@ -1970,7 +1979,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             _inverse_wannier_transform_fock(ni, veff_b, kpts)])
 
     else:
-        kpts_band = kpts_band.reshape(-1, 3)
+        kpts_band, _ = _normalize_kpts(kpts_band)
         kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
         ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
@@ -1982,7 +1991,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             _inverse_wannier_transform_fock(ni, veff_a, kpts_band),
             _inverse_wannier_transform_fock(ni, veff_b, kpts_band)])
 
-    veff = _format_jks(veff, dm_kpts, kpts_band, kpts)
+    veff = _format_jks(veff, dm_kpts, kpts_band, input_kpts)
     veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -2179,7 +2188,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                    kpts=None, with_j=False):
         if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        assert kpts is None or kpts.ndim == 2
+        kpts, _ = _normalize_kpts(kpts)
 
         assert dms.ndim == 4
         n_dm, nkpts, nao = dms.shape[:3]
@@ -2241,7 +2250,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                    kpts=None, with_j=False):
         if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        assert kpts is None or kpts.ndim == 2
+        kpts, _ = _normalize_kpts(kpts)
 
         assert dms.ndim == 5
         n_dm, nkpts, nao = dms.shape[1:4]
@@ -2303,7 +2312,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
         if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        assert kpts is None or kpts.ndim == 2
+        kpts, _ = _normalize_kpts(kpts)
 
         xctype = self._xc_type(xc_code)
         nvar = _xc_var_length(xctype)
@@ -2390,6 +2399,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                 Whether to include the contribution from the local part of
                 pseudo-potential or electron-nuclear Coulomb interactions
         '''
+        kpts, _ = _normalize_kpts(kpts)
         cell = self.cell
         log = logger.new_logger(cell)
         t0 = log.init_timer()

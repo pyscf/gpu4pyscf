@@ -407,3 +407,51 @@ def test_cross_int1e():
     ref = gto.intor_cross('int1e_ovlp', mol1, mol2)
     dat = int1e.CrossInt1e(mol1, mol2).intor('PBCint1e_ovlp', 1, (0,0))
     assert abs(dat.get() - ref).max() < 1e-12
+
+def test_int1e_ovlp_kpts():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
+                   unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+                   pseudo='gth-pade', mesh=[15]*3, precision=1e-8, verbose=0)
+    kpts = cell.make_kpts([3, 1, 1])
+    ref = np.asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+
+    result = int1e.int1e_ovlp(cell, kpts=None).get()
+    assert result.ndim == 2
+    assert abs(result - ref[0]).max() < 1e-12
+    assert result.dtype == np.float64
+
+    result = int1e.int1e_ovlp(cell, kpts=kpts[:1]).get()
+    assert result.ndim == 3
+    assert abs(result - ref[:1]).max() < 1e-12
+
+    result = int1e.int1e_ovlp(cell, kpts=kpts[1]).get()
+    assert result.ndim == 2
+    assert abs(result - ref[1]).max() < 1e-12
+
+    result = int1e.int1e_ovlp(cell, kpts=kpts).get()
+    assert result.ndim == 3
+    assert abs(result - ref).max() < 1e-12
+
+def test_int1e_ipovlp_kpts():
+    cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
+                   unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+                   pseudo='gth-pade', mesh=[15]*3, precision=1e-8, verbose=0)
+    kpts = cell.make_kpts([3, 1, 1])
+    ref = np.asarray(cell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts))
+
+    result = int1e.int1e_ipovlp(cell, kpts=None).get()
+    assert result.ndim == 3
+    assert abs(result - ref[0]).max() < 1e-12
+    assert result.dtype == np.float64
+
+    result = int1e.int1e_ipovlp(cell, kpts=kpts[:1]).get()
+    assert result.ndim == 4
+    assert abs(result - ref[:1]).max() < 1e-12
+
+    result = int1e.int1e_ipovlp(cell, kpts=kpts[1]).get()
+    assert result.ndim == 3
+    assert abs(result - ref[1]).max() < 1e-12
+
+    result = int1e.int1e_ipovlp(cell, kpts=kpts).get()
+    assert result.ndim == 4
+    assert abs(result - ref).max() < 1e-12

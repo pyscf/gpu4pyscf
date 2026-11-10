@@ -705,6 +705,51 @@ class SpinAdaptedKernel(unittest.TestCase):
     def test_spin_adapted_kernel_kpoints_mgga_triplet(self):
         self._check_spin_adapted_kernel([2, 1, 1], 'TPSS', False, -1)
 
+    def test_ao_gamma_shapes(self):
+        cell = pbcgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                        basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                        mesh=[15]*3, precision=1e-8, verbose=0)
+        for deriv in (0, 1):
+            coords = cell.get_uniform_grids()[:20]
+            default = numint.eval_ao_kpts(cell, coords, deriv=deriv)
+            single = numint.eval_ao_kpts(cell, coords, np.zeros(3), deriv=deriv)
+            batch = numint.eval_ao_kpts(cell, coords, np.zeros((1, 3)), deriv=deriv)
+            reference = numint.eval_ao(cell, coords, kpt=None, deriv=deriv)
+            assert default.shape == single.shape == reference.shape
+            assert batch.shape == (1,) + default.shape
+            cp.testing.assert_allclose(default, reference, atol=1e-12, rtol=0)
+            cp.testing.assert_allclose(default, single, atol=1e-12, rtol=0)
+            cp.testing.assert_allclose(default, batch[0], atol=1e-12, rtol=0)
+
+    def test_xc_preserves_density_shape(self):
+        cell = pbcgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                       basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                       mesh=[15]*3, precision=1e-8, verbose=0)
+        grids = gen_grid.UniformGrids(cell).build()
+        ni = numint.KNumInt()
+
+        dm = cp.eye(cell.nao)
+        dm_batch = dm[None]
+        ne, exc, v = numint.nr_rks(ni, cell, grids, 'lda,vwn', dm)
+        neb, excb, vb = numint.nr_rks(ni, cell, grids, 'lda,vwn', dm_batch)
+        assert v.ndim == 2
+        assert v.shape == dm.shape
+        assert vb.shape == dm_batch.shape
+        cp.testing.assert_allclose(v, vb[0], atol=1e-11, rtol=0)
+        np.testing.assert_allclose(ne, neb, atol=1e-11, rtol=0)
+        np.testing.assert_allclose(exc, excb, atol=1e-11, rtol=0)
+
+        dm = cp.stack([dm*.6, dm*.4])
+        dm_batch = dm[:, None]
+        ne, exc, v = numint.nr_uks(ni, cell, grids, 'lda,vwn', dm)
+        neb, excb, vb = numint.nr_uks(ni, cell, grids, 'lda,vwn', dm_batch)
+        assert v.ndim == 3
+        assert v.shape == dm.shape
+        assert vb.shape == dm_batch.shape
+        cp.testing.assert_allclose(v, vb[:, 0], atol=1e-11, rtol=0)
+        np.testing.assert_allclose(ne, neb, atol=1e-11, rtol=0)
+        np.testing.assert_allclose(exc, excb, atol=1e-11, rtol=0)
+
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")

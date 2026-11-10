@@ -42,7 +42,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
 from gpu4pyscf.pbc.df.ft_ao import (
     libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -716,6 +716,12 @@ class SRInt3c2eOpt:
         return vj_aux
 
     def contract_auxvec(self, auxvec, kpts=None, sort_output=True):
+        """Contract to AO matrices.
+
+        kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        """
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         assert auxvec.dtype == np.float64
         assert auxvec.ndim == 1
         assert len(auxvec) == self.auxcell.nao
@@ -782,7 +788,7 @@ class SRInt3c2eOpt:
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
-        if kpts is None or is_zero(kpts):
+        if is_zero(kpts):
             vj = vj.sum(axis=1)
             vj = vj.reshape(1,nao,nao)
         else:
@@ -794,7 +800,7 @@ class SRInt3c2eOpt:
         vj = hermi_triu(vj)
         if sort_output:
             vj = cell.apply_CT_mat_C(vj)
-        return vj
+        return vj[0] if is_single_kpt else vj
 
 def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)

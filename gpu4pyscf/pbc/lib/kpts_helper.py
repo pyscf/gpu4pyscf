@@ -137,3 +137,54 @@ def fft_matrix(kmesh, with_gamma_point=True):
              Fy[None,:,None,None,:,None] *
              Fz[None,None,:,None,None,:])
     return expLk.reshape(nkpts, nkpts)
+
+def _normalize_kpts(kpts):
+    '''Normalize k-points to an (nkpts, 3) array and flag single-point input.
+
+    PySCF kpts convention:
+        The input form determines whether integral results have a k-point axis.
+        For one-electron integrals such as the overlap matrix:
+
+        * None selects a single Gamma point and returns (nao, nao).
+        * An array of shape (3,) selects a single k-point and returns (nao, nao).
+        * An array of shape (nkpts, 3) selects a batch and returns
+          (nkpts, nao, nao), even when nkpts == 1. For example,
+          kpts=[[0, 0, 0]] retains the leading axis of length one.
+
+        With None, the supplied cell is sampled at Gamma with periodic boundary
+        conditions. Integrals are real when the operator permits it. Explicit
+        single-point or batched input may produce complex arrays even when
+        their values could be represented as real numbers.
+
+        When present, axes are ordered as (spin, kpts, components, nao, nao).
+        Ordinary one-electron integrals have no spin or component axis. Their
+        derivatives have shape (ncomp, nao, nao) for single-point input and
+        (nkpts, ncomp, nao, nao) for batched input.
+
+    Args:
+        kpts: None, array_like, or KPoints instance
+            Sampling in the convention above. A KPoints instance supplies
+            its full kpts array, rather than kpts_ibz, and is treated as a batch.
+
+    Returns:
+        kpts: ndarray of shape (nkpts, 3)
+            Normalized sampling. None becomes a zero array of shape (1, 3).
+        is_single_kpt: bool
+            True for None or a (3,) input; False for batched input.
+            This describes the input form, not whether sampling is at Gamma.
+            The helper only normalizes sampling; callers use this flag to
+            determine whether to omit the k-point axis from their output.
+    '''
+    is_single_kpt = True
+    if kpts is None:
+        return np.zeros((1, 3)), is_single_kpt
+
+    if isinstance(kpts, KPoints):
+        return kpts.kpts, not is_single_kpt
+
+    kpts = np.asarray(kpts)
+    if kpts.ndim == 1:
+        return kpts.reshape(1, 3), is_single_kpt
+
+    assert kpts.ndim == 2
+    return kpts, not is_single_kpt

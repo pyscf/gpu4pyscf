@@ -520,3 +520,12 @@ def test_kpoint_minao_guesses_high_cost(cell):
     assert float(cp.trace(dm @ overlap, axis1=-2, axis2=-1).real.mean()) == pytest.approx(
         cell.nelectron, abs=1e-10)
     assert mf_minao.e_tot == pytest.approx(mf_atom.e_tot, abs=2e-8)
+
+
+def test_ghf_stored_nonzero_single_point(cell):
+    kpt = cell.make_kpts([3, 1, 1])[1]
+    mf = ghf.GHF(cell, kpt=kpt)
+    result = mf.get_hcore()
+    assert result.shape == (2*cell.nao, 2*cell.nao)
+    assert result.dtype == np.complex128
+    assert abs(result - mf.get_hcore(kpt=kpt)).max() < 1e-14
