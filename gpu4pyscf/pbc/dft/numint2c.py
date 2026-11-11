@@ -15,7 +15,6 @@
 import numpy as np
 import cupy as cp
 from gpu4pyscf.dft import numint2c as mol_numint2c
-from gpu4pyscf.lib import utils
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.scf.ghf import _block_diag
 
@@ -64,7 +63,8 @@ class KNumInt2C(numint.KNumInt):
 
     def to_cpu(self):
         from pyscf.pbc.dft.numint2c import KNumInt2C
-        return utils.to_cpu(self, out=KNumInt2C(self.kpts))
+        return KNumInt2C(self.kpts.copy()).set(
+            omega=self.omega, collinear=self.collinear, spin_samples=self.spin_samples)
 
 
 class NumInt2C(KNumInt2C):
@@ -78,4 +78,5 @@ class NumInt2C(KNumInt2C):
 
     def to_cpu(self):
         from pyscf.pbc.dft.numint2c import NumInt2C
-        return utils.to_cpu(self, out=NumInt2C())
+        return NumInt2C().set(
+            omega=self.omega, collinear=self.collinear, spin_samples=self.spin_samples)
