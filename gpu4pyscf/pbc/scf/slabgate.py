@@ -32,7 +32,20 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                 barrier_end=None, barrier_height=.05, barrier_width=None,
                 dipole_gap=1e-4, gate_side=-1):
     '''
-    Apply a compensating planar gate and its dipole correction in place.
+    Apply a compensating planar gate, with a dipole correction only in 3D.
+
+    For dimension=2, phi_c = -2*pi*qc/A*abs(s), with the default PySCF
+    finite-part reference (not inf_vacuum). The sheet self-energy is zero;
+    no background or dipole correction is added. In 2D, s=z-zgate and all
+    gate/barrier coordinates are used as supplied, without periodic wrapping.
+    The user must choose a consistent integration region and sufficient vacuum
+    for the base 2D electrostatics; no gate-slab distance check is performed.
+    Default uniform grids span [-L/2, L/2) along z.
+    The default barrier edges are zgate +/- .05*L and its ramp width is .01*L;
+    gate_side and dipole_gap do not affect these 2D defaults.
+    The base SCF method and its derivatives must support dimension=2;
+    backend availability is not checked by this addon.
+    The potential, self-energy and dipole placement below describe 3D.
 
     The sheet carries qc = -q, where q = cell.charge/nkpts is the charge
     PER PRIMITIVE CELL. At a single k-point, q = cell.charge. Negative q
@@ -63,6 +76,8 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     and sheet terms should vanish or remain constant when placed in vacuum.
     scf_summary['egate'] and ['ebarrier'] report these complete additions.
     Electronic contributions are already in scf_summary['e1'].
+    ** It should be noted that the qc*v_b(zgate) term is constant for fixed
+    parameters, some codes may ignore it. **
 
     The dipole-plane separation dipole_width is DIPOLE_WIDTH_RATIO*L
     (default: .01*L, as in Brumme). The return region is centered at
@@ -72,7 +87,7 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     before importing this module.
 
     Args:
-        mf: RKS/UKS/KRKS/KUKS for a three-dimensionally periodic slab.
+        mf: RKS/UKS/KRKS/KUKS for a slab with dimension=3 or 2.
             The slab normal is z, with the third lattice vector along positive
             z and the other two in the xy plane.
         zgate: Sheet position in Bohr; None means L/2.
@@ -87,9 +102,10 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             gate_side=-1, start defaults to cut-dipole_width/2 and end to
             start+.1*L. For gate_side=+1, end defaults to cut+dipole_width/2
             and start to end-.1*L. Explicit edges are coordinates along
-            z, independent of gate_side. Intervals can cross the boundary.
+            z, independent of gate_side. Intervals can cross the boundary in
+            3D; in 2D they are ordinary intervals with start < end.
             When barrier=True, the interval must contain zgate strictly
-            inside and cover the entire dipole return region.
+            inside and, in 3D, cover the entire dipole return region.
         barrier_height: Plateau height in Hartree (default: .05 = .1 Ry).
         barrier_width: Linear ramp width INSIDE each edge, in Bohr; None
             means dipole_width, as in Brumme. Zero gives a rectangular barrier.
@@ -99,7 +115,7 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     differentiating atomic positions. Gradients are dE/dR; forces are -dE/dR.
     No translation-force subtraction is made for this external field.
 
-    The dipole correction is added automatically to cancel the periodic
+    In 3D, the dipole correction is added automatically to cancel the periodic
     residual field. An existing dipole addon is reused and its cut,
     width and z0 are reset to the Brumme convention. In particular,
     z0 = (cut+L/2) % L makes Eq. (7) vanish without a constant shift.
@@ -120,41 +136,64 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Gate charge requires RKS/UKS/KRKS/KUKS')
-    length = _slab_length(mf.cell)
+    length = _slab_length(mf.cell, allow_2d=True)
+    dimension = mf.cell.dimension
+    if getattr(mf, '_gate_dimension', dimension) != dimension:
+        raise ValueError('Changing gate dimensionality requires a new SCF object')
+    if dimension == 2:
+        _check_2d_gate(mf, mf.cell)
     if gate_side not in (-1, 1):
         raise ValueError('gate_side must be -1 or +1')
-    zgate = (.5*length if zgate is None else zgate) % length
-    dipole_width = DIPOLE_WIDTH_RATIO * length
-    if not 0 < dipole_width < length:
-        raise ValueError('Gate dipole width must satisfy 0 < width < cell length')
-    if not 0 < dipole_gap < length-dipole_width:
-        raise ValueError('Dipole gap must satisfy 0 < gap < cell length - dipole width')
-    # z_dip - gate_side*d_dip/2 = z_mono + gate_side*epsilon.
-    cut = (zgate + gate_side*(dipole_gap + dipole_width/2)) % length
-    if gate_side == -1:
+    zgate = .5*length if zgate is None else zgate
+    if dimension == 3:
+        zgate %= length
+    if dimension == 2:
+        # No dipole return region in 2D. Center the default barrier on the
+        # gate, independently of the 3D dipole placement parameters.
         if barrier_start is None:
-            barrier_start = (cut - dipole_width/2) % length
+            barrier_start = zgate - .05*length
         if barrier_end is None:
-            barrier_end = (barrier_start + .1*length) % length
+            barrier_end = zgate + .05*length
+        if barrier_width is None:
+            barrier_width = .01*length
     else:
-        if barrier_end is None:
-            barrier_end = (cut + dipole_width/2) % length
-        if barrier_start is None:
-            barrier_start = (barrier_end - .1*length) % length
-    if barrier_width is None:
-        barrier_width = dipole_width
+        dipole_width = DIPOLE_WIDTH_RATIO * length
+        if not 0 < dipole_width < length:
+            raise ValueError('Gate dipole width must satisfy 0 < width < cell length')
+        if not 0 < dipole_gap < length-dipole_width:
+            raise ValueError('Dipole gap must satisfy 0 < gap < cell length - dipole width')
+        # z_dip - gate_side*d_dip/2 = z_mono + gate_side*epsilon.
+        cut = (zgate + gate_side*(dipole_gap + dipole_width/2)) % length
+        if gate_side == -1:
+            if barrier_start is None:
+                barrier_start = (cut - dipole_width/2) % length
+            if barrier_end is None:
+                barrier_end = (barrier_start + .1*length) % length
+        else:
+            if barrier_end is None:
+                barrier_end = (cut + dipole_width/2) % length
+            if barrier_start is None:
+                barrier_start = (barrier_end - .1*length) % length
+        if barrier_width is None:
+            barrier_width = dipole_width
     if barrier:
-        span = (barrier_end - barrier_start) % length
-        # Unwrap relative to the barrier start so crossing z=0 is allowed.
-        gate_pos = (zgate - barrier_start) % length
+        if dimension == 3:
+            # Periodic barrier intervals can cross the cell boundary in 3D.
+            span = (barrier_end - barrier_start) % length
+            gate_pos = (zgate - barrier_start) % length
+        else:
+            span = barrier_end - barrier_start
+            gate_pos = zgate - barrier_start
         if not 0 < gate_pos < span:
             raise ValueError('Gate plane must lie strictly inside the barrier interval')
-        return_start = (gate_pos + gate_side*(dipole_gap + dipole_width/2)
-                        - dipole_width/2)
-        if return_start < -1e-10 or return_start + dipole_width > span + 1e-10:
-            raise ValueError('Barrier interval must cover the entire dipole return region')
+        if dimension == 3:
+            return_start = (gate_pos + gate_side*(dipole_gap + dipole_width/2)
+                            - dipole_width/2)
+            if return_start < -1e-10 or return_start + dipole_width > span + 1e-10:
+                raise ValueError('Barrier interval must cover the entire dipole return region')
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
+    mf._gate_dimension = dimension
     mf.gate_side = gate_side
     mf.zgate = zgate
     mf.barrier = barrier
@@ -163,6 +202,9 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     mf.barrier_height = barrier_height
     mf.barrier_width = barrier_width
     mf._gate_parameters(mf.cell)
+    if dimension == 2:
+        # dimension 2 needs no dipole correction.
+        return mf
     # Mark the compensating gate before checking the slab's net charge.
     # The dipole factory adds its mixin only if absent, and resets parameters.
     # z0 = (cut+L/2) % L vanish the dipole potential constant shift.
@@ -170,51 +212,89 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                                   width=dipole_width, z0=(cut+length/2) % length)
 
 
-def _sheet_potential(z, zgate, length, area, charge, deriv=0):
+def _sheet_potential(z, zgate, length, area, charge, deriv=0, dimension=3):
+    '''Sheet electrostatic potential in the 3D or 2D reference.
+
+    The 2D branch uses the physical distance z-zgate, without periodic
+    wrapping or a compensating background, in PySCF's finite-part reference.
     '''
-    Electrostatic potential of a sheet and its neutralizing background.
-    '''
+    if dimension not in (2, 3):
+        raise NotImplementedError('Gate potential requires dimension=2 or 3')
     z = cp.asarray(z)
-    s = (z - zgate + length/2) % length - length/2
+    if dimension == 3:
+        s = (z - zgate + length/2) % length - length/2
+    else:
+        s = z - zgate
     factor = 2*np.pi*charge/area
+    if dimension == 2:
+        return -factor * (cp.sign(s) if deriv else cp.abs(s))
     if deriv:
         return factor * (-cp.sign(s) + 2*s/length)
     return factor * (-cp.abs(s) + s*s/length + length/6)
 
 
-def _barrier_potential(z, start, end, length, height, width, deriv=0):
-    '''
-    Periodic barrier with linear ramps inside its edges.
-    '''
+def _barrier_potential(z, start, end, length, height, width, deriv=0, dimension=3):
+    '''Barrier with linear ramps; periodic in 3D, an ordinary interval in 2D.'''
     z = cp.asarray(z)
-    t = (z - start) % length
-    span = (end - start) % length
+    if dimension == 3:
+        t = (z - start) % length
+        span = (end - start) % length
+    else:
+        t = z - start
+        span = end - start
     if width == 0:
         return cp.zeros_like(z) if deriv else height * ((t < span) & (t >= 0))
     if deriv:
-        return height/width * (cp.asarray(t < width, dtype=float)
+        return height/width * (cp.asarray((t >= 0) & (t < width), dtype=float)
                                - cp.asarray((t > span-width) & (t < span), dtype=float))
     return height * cp.maximum(0., cp.minimum(1., cp.minimum(t, span-t)/width))
+
+
+def _check_2d_gate(mf, cell):
+    from gpu4pyscf.pbc.scf.slabdipole import SlabDipoleCorrection
+    if isinstance(mf, SlabDipoleCorrection):
+        raise ValueError('A 2D gate cannot include a periodic dipole correction; '
+                         'create a new SCF object')
+    if cell.low_dim_ft_type == 'inf_vacuum':
+        raise NotImplementedError('2D gate requires the default truncated-Coulomb '
+                                  'reference, not inf_vacuum (often used for 0 or 1D). ')
 
 
 class SlabGateCharge:
     __name_mixin__ = 'Gate'
 
     _keys = {'gate_side', 'zgate', 'barrier', 'barrier_start',
-             'barrier_end', 'barrier_height', 'barrier_width'}
+             'barrier_end', 'barrier_height', 'barrier_width', '_gate_dimension'}
+
+    def reset(self, cell=None):
+        # Changing dimension would leave a 3D dipole mixin attached, or omit
+        # it for a 2D-to-3D transition. Require a new object in either case.
+        self._gate_parameters(self.cell if cell is None else cell)
+        return super().reset(cell)
 
     def _gate_parameters(self, cell):
-        length = _slab_length(cell)
-        zgate = self.zgate % length
-        start = self.barrier_start % length
-        end = self.barrier_end % length
+        if cell.dimension != self._gate_dimension:
+            raise ValueError('Changing gate dimensionality requires a new SCF object')
+        length = _slab_length(cell, allow_2d=True)
+        if cell.dimension == 3:
+            zgate = self.zgate % length
+            start = self.barrier_start % length
+            end = self.barrier_end % length
+        else:
+            _check_2d_gate(self, cell)
+            zgate, start, end = self.zgate, self.barrier_start, self.barrier_end
         width = self.barrier_width
         if self.barrier:
-            span = (end - start) % length
+            if cell.dimension == 3:
+                span = (end - start) % length
+            else:
+                span = end - start
             if span == 0 or not 0 <= width <= span/2:
                 raise ValueError('Barrier ramp width must lie between 0 and half the interval')
             if self.barrier_height < 0:
                 raise ValueError('Barrier height must be nonnegative')
+            if cell.dimension == 2 and not start < zgate < end:
+                raise ValueError('Gate plane must lie strictly inside the barrier interval')
         return length, zgate, start, end, self.barrier_height, width
 
     def _gate_matrices(self, cell, kpts):
@@ -233,8 +313,10 @@ class SlabGateCharge:
                 charge_matrix = cp.zeros(shape, dtype=ao_kpts.dtype)
                 barrier_matrix = cp.zeros_like(charge_matrix)
             z = coords[:, 2]
-            vc = -_sheet_potential(z, zgate, length, area, qc) # - for electron
-            vb = (_barrier_potential(z, start, end, length, height, width)
+            vc = -_sheet_potential(z, zgate, length, area, qc,
+                                   dimension=cell.dimension) # - for electron
+            vb = (_barrier_potential(z, start, end, length, height, width,
+                                     dimension=cell.dimension)
                   if self.barrier else cp.zeros_like(z))
             for k, ao in enumerate(ao_kpts):
                 charge_matrix[k] += ao.conj().T @ ((weight*vc)[:, None] * ao)
@@ -249,17 +331,22 @@ class SlabGateCharge:
         qc = -_slab_charge(self, cell)
         z = cell.atom_coords()[:, 2]
         egate = np.dot(cell.atom_charges(),
-                       _sheet_potential(z, zgate, length, area, qc).get())
-        egate += np.pi*qc**2*length/(6*area)
+                       _sheet_potential(z, zgate, length, area, qc,
+                                        dimension=cell.dimension).get())
+        # In the 2D finite-part reference phi(zgate)=0, hence no sheet self term.
+        if cell.dimension == 3:
+            egate += np.pi*qc**2*length/(6*area)
         ebarrier = 0.
         if self.barrier:
             # TODO: the following two terms may be modified.
             # if barrier interacts with atoms this will appear
             ebarrier = -np.dot(cell.atom_charges(),
-                               _barrier_potential(z, start, end, length, height, width).get())
+                               _barrier_potential(z, start, end, length, height, width,
+                                                  dimension=cell.dimension).get())
             # this term can be ignored for this is a constant.
             ebarrier -= qc * float(
-                _barrier_potential(zgate, start, end, length, height, width))
+                _barrier_potential(zgate, start, end, length, height, width,
+                                   dimension=cell.dimension))
         return float(egate), float(ebarrier)
 
     def get_hcore(self, cell=None, kpts=None, *, kpt=None):

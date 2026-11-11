@@ -122,9 +122,10 @@ def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5, width=0.):
     return mf
 
 
-def _slab_length(cell):
-    if cell.dimension != 3:
-        raise NotImplementedError('Slab corrections require a 3D cell')
+def _slab_length(cell, allow_2d=False):
+    if cell.dimension != 3 and not (allow_2d and cell.dimension == 2):
+        raise NotImplementedError('Slab corrections require a 3D cell; '
+                                  'gate_charge also supports a 2D cell')
     a = cell.lattice_vectors()
     if (a[2, 2] <= 0 or
             np.any(abs(a[2, :2]) > 1e-10) or
@@ -228,6 +229,9 @@ class SlabDipoleCorrection:
     }
 
     def reset(self, cell=None):
+        target = self.cell if cell is None else cell
+        if target.dimension != 3:
+            raise ValueError('Slab dipole correction requires a 3D cell')
         # Reset geometry-dependent values; an explicit cut in Bohr persists (.cut).
         self.dipole_cut = None
         self.dipole_z0 = None

@@ -244,7 +244,8 @@ class SCF(mol_hf.SCF):
 
         if isinstance(self._numint, multigrid.MultiGridNumIntBase):
             ni = self._numint
-        elif np.prod(cell.mesh) < ALLOWED_FFT_MESH_SIZE:
+        elif cell.dimension == 3 and np.prod(cell.mesh) < ALLOWED_FFT_MESH_SIZE:
+            # Automatic MultiGrid nuclear potentials are only available in 3D.
             # In the pseudo and all-electron mixed case, MultiGridNumInt is
             # still more efficient if Ecut is not too high.
             ni = multigrid_v3.MultiGridNumInt(cell)
