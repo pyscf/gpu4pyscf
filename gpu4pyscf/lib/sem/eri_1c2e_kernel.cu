@@ -18,7 +18,7 @@
 
 #include <stdio.h>
 #include <math.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 
 #define BINOM_DIM 30
 #define IDX2(r, c) ((r) * (BINOM_DIM) + (c))
@@ -36,7 +36,8 @@ __global__ void rsc_kernel(
     const double* __restrict__ b_table,  // Size 30*30 flattened
     double* __restrict__ out_val
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int idx = global_x;
     if (idx >= n_tasks) return;
 
     int k  = k_vec[idx];
@@ -110,7 +111,8 @@ __global__ void rsc_kernel(
 
 extern "C" {
 
-int launch_rsc_kernel_c(const int n_tasks,
+int launch_rsc_kernel_c(
+    const int n_tasks,
     const double hartree2ev,
     const int* k_vec,
     const int* na, const double* ea,
@@ -123,13 +125,12 @@ int launch_rsc_kernel_c(const int n_tasks,
 ) {
     int threads = 128;
     int blocks = (n_tasks + threads - 1) / threads;
-
-    rsc_kernel<<<blocks, threads, 0, stream>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL( rsc_kernel, grid, block, 0,
         n_tasks, hartree2ev, k_vec,
         na, ea, nb, eb, nc, ec, nd, ed,
-        fx_table, b_table, out_val
-    );
-    
+        fx_table, b_table, out_val, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

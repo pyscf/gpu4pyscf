@@ -16,6 +16,30 @@
 
 #pragma once
 
+#include "gpu_compat.h"
+
+// Kernel-side & launch-config macros to unify CUDA and SYCL in gdft.
+// Indexing, launch and shared-memory come from gpu_compat.h; only the
+// blocks.y mutator below still needs a backend branch (sycl::range and dim3
+// share no common accessor), kept here in this header, not in .cu files.
+#define MAKE_RANGE_2D(X, Y)  make_block((X), (Y))
+#define MAKE_RANGE_3D(X, Y, Z)  make_block((X), (Y), (Z))
+
+#ifdef USE_SYCL
+
+// make_grid(x, y, z) / make_block(x, y, z) return sycl::range<3>(z, y, x):
+// range index 1 is the CUDA y axis, index 0 is CUDA z, so the CUDA-y
+// (per-shell batch) extent must be written to blocks[1], not blocks[0].
+#define BLOCKS_SET_Y(val)  (blocks[1] = (val))
+#define BLOCKS_GET_Y()     (blocks[1])
+
+#else
+
+#define BLOCKS_SET_Y(val)  (blocks.y = (val))
+#define BLOCKS_GET_Y()     (blocks.y)
+
+#endif // USE_SYCL
+
 typedef struct {
     int natm;
     int nbas;

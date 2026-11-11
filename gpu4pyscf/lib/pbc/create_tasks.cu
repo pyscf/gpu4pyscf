@@ -53,8 +53,9 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                        int *swap,
                        JKMatrix& kmat, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int threads = blockDim.x * blockDim.y;
+    setup_context();
+    int thread_id = threadIdx_x + blockDim_x * threadIdx_y;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
@@ -181,7 +182,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+thread_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -197,8 +198,9 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                         int *swap,
                         JKEnergy& jk, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int threads = blockDim.x * blockDim.y;
+    setup_context();
+    int thread_id = threadIdx_x + blockDim_x * threadIdx_y;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
@@ -329,7 +331,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+thread_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();

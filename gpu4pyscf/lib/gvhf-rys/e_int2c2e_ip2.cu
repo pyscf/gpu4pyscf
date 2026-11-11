@@ -33,17 +33,25 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
                           int *gout_stride_lookup)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    setup_context();
+    int sp_block_id = blockIdx_x;
+    int thread_id = threadIdx_x;
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
     int *bas = envs.bas;
     double *env = envs.env;
     int nbas = envs.nbas;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, nroots;
-    __shared__ int iprim, jprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -70,7 +78,6 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
     int gout_id = thread_id / nsp_per_block;
 
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
@@ -297,10 +304,12 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
                   int nbatches_shl_pair, int *shl_pair_offsets,
                   uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
     cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    e_int2c2e_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            out, dm, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    LAUNCH_KERNEL( e_int2c2e_ip2_kernel, blocks, threads, shm_size,
+        out, dm, *envs, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));

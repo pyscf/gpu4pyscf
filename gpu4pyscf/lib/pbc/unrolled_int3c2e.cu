@@ -2,8 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
-#include <cuda.h>
+#include "gpu_compat.h"
 
 
 #define KERNEL_ARGS \

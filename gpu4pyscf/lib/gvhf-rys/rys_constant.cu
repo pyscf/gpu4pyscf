@@ -15,8 +15,7 @@
  */
 
 #pragma once
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #include <gvhf-rys/vhf.cuh>
 
 __constant__ int _c_cartesian_lexical_xyz[] = {
@@ -113,7 +112,9 @@ __constant__ int _c_cartesian_lexical_xyz[] = {
     0, 0, 6,
 };
 
+#ifndef USE_SYCL
 __constant__ GXYZOffset c_gxyz_offset[256];
+#endif
 
 __constant__ int c_nf[] = {
     1,

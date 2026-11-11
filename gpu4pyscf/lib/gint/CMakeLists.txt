@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
-
 set(CMAKE_VERBOSE_MAKEFILE ON)
-add_library(gint SHARED 
+
+set(GPU_SRCS
   g2e.c
   pair_data.c
   bpcache.cu
@@ -35,13 +34,26 @@ add_library(gint SHARED
   rys_roots_dat.cu
   cart2sph.cu
 )
+add_library(gint SHARED ${GPU_SRCS})
+
+set_target_properties(gint PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+if (USE_SYCL)
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
+  # also compile it as its own TU.
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
+    PROPERTIES HEADER_FILE_ONLY ON)
+  target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
+  target_link_libraries(gint PRIVATE sycl_compat gsycl)
+else()
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
+  set_target_properties(gint PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+endif()
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
 #option(ENABLE_STATIC "Enforce static library build" 0)
 #if(ENABLE_STATIC)
 #  set(BUILD_SHARED_LIBS 0)
 #endif()
-
-set_target_properties(gint PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-  CUDA_SEPARABLE_COMPILATION ON)

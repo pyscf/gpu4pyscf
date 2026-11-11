@@ -43,5 +43,19 @@ add_library(gecp SHARED
   nr_ecp_driver.cu
 )
 
+if (USE_SYCL)
+  set_source_files_properties(nr_ecp_driver.cu PROPERTIES LANGUAGE CXX)
+  # Use COMPILE_FLAGS for reliable per-target flags
+  set_target_properties(gecp PROPERTIES
+    COMPILE_FLAGS "-fsycl -x c++ -nocudainc -nocudalib -O2"
+  )
+  # No forced inlining of __device__ helpers here (sycl_device.hpp defaults
+  # to always_inline): fully flattened ECP kernels spill heavily and the
+  # general-path kernels make IGC's register allocator and the per-kernel AOT
+  # link take very long. Real calls keep it tractable.
+  target_compile_definitions(gecp PRIVATE GPU4PYSCF_DEVICE_ATTR=)
+  target_link_libraries(gecp PRIVATE sycl_compat gsycl)
+endif()
+
 set_target_properties(gecp PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})

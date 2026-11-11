@@ -16,9 +16,9 @@
 
 // nvcc -O3 -shared -Xcompiler -fPIC -arch=sm_70 fock.cu -o libfock.so
 
-#include <cuda_runtime.h>
 #include <math.h>
 #include <stdio.h>
+#include "gpu_compat.h"
 
 
 __global__
@@ -35,10 +35,11 @@ void build_jk_2c2e_kernel(
     const int* loc_row,
     const int* loc_col,
     int npairs,
-    int nao) 
+        int nao)
 {
     // Each block processes one pair of interacting atoms (Atom A and Atom B)
-    int p = blockIdx.x;
+    setup_context();
+    int p = blockIdx_x;
     if (p >= npairs) return;
     
     int A = pair_i[p];
@@ -59,18 +60,18 @@ void build_jk_2c2e_kernel(
 
     // Allocate shared memory. 
     // In PM6, the maximum number of orbitals per atom is 9 (s, p, d).
-    __shared__ double s_PAA[81];
-    __shared__ double s_PBB[81];
-    __shared__ double s_PAB[81];
-    __shared__ double s_PBA[81];
-    
-    __shared__ double s_JAA[81];
-    __shared__ double s_JBB[81];
-    __shared__ double s_KAB[81];
-    __shared__ double s_KBA[81];
-    
-    int tid = threadIdx.x;
-    int bdim = blockDim.x;
+    SHARED_ARRAY(double, s_PAA, [81]);
+    SHARED_ARRAY(double, s_PBB, [81]);
+    SHARED_ARRAY(double, s_PAB, [81]);
+    SHARED_ARRAY(double, s_PBA, [81]);
+
+    SHARED_ARRAY(double, s_JAA, [81]);
+    SHARED_ARRAY(double, s_JBB, [81]);
+    SHARED_ARRAY(double, s_KAB, [81]);
+    SHARED_ARRAY(double, s_KBA, [81]);
+
+    int tid = threadIdx_x;
+    int bdim = blockDim_x;
 
     // Initialize shared memory to zero
     for (int i = tid; i < 81; i += bdim) {
@@ -232,20 +233,21 @@ void build_jk_1c2e_kernel(
     const int* loc_col,
     int natm,
     int nao,
-    int num_d_pairs) 
+        int num_d_pairs)
 {
     // Grid handles 1 atom per block
-    int A = blockIdx.x;
+    setup_context();
+    int A = blockIdx_x;
     if (A >= natm) return;
     
     int offset = aoslice[A * 2]; 
     int nao_A = natorb[A];
     
-    __shared__ double s_P[81];
-    __shared__ double s_J[81];
-    __shared__ double s_K[81];
+    SHARED_ARRAY(double, s_P, [81]);
+    SHARED_ARRAY(double, s_J, [81]);
+    SHARED_ARRAY(double, s_K, [81]);
     
-    for (int i = threadIdx.x; i < 81; i += blockDim.x) {
+    for (int i = threadIdx_x; i < 81; i += blockDim_x) {
         s_J[i] = 0.0;
         s_K[i] = 0.0;
         int row = i / 9;
@@ -259,7 +261,7 @@ void build_jk_1c2e_kernel(
     __syncthreads();
     
     // Thread 0 handles the small number of s and p orbital integrals
-    if (threadIdx.x == 0) {
+    if (threadIdx_x == 0) {
         // s-orbital
         apply_eri_1c2e(0, 0, 0, 0, gss[A], s_P, s_J, s_K);
         
@@ -286,7 +288,7 @@ void build_jk_1c2e_kernel(
     
     // All threads cooperatively handle d-orbital combinations
     if (nao_A == 9 && num_d_pairs > 0) {
-        for (int idx = threadIdx.x; idx < num_d_pairs; idx += blockDim.x) {
+        for (int idx = threadIdx_x; idx < num_d_pairs; idx += blockDim_x) {
             int IJ = intij[idx];
             int KL = intkl[idx];
             int rp = intrep[idx];
@@ -309,7 +311,7 @@ void build_jk_1c2e_kernel(
     
     __syncthreads();
     
-    for (int i = threadIdx.x; i < 81; i += blockDim.x) {
+    for (int i = threadIdx_x; i < 81; i += blockDim_x) {
         int row = i / 9;
         int col = i % 9;
         if (row < nao_A && col < nao_A) {
@@ -325,7 +327,8 @@ void build_jk_1c2e_kernel(
 
 
 extern "C" {
-    int launch_build_jk_2c2e(const double* w_1d,
+    int launch_build_jk_2c2e(
+        const double* w_1d,
         const double* P,
         double* J,
         double* K,
@@ -346,13 +349,13 @@ extern "C" {
         int blocks = npairs;
         int threads = 256;
         
-        build_jk_2c2e_kernel<<<blocks, threads, 0, stream>>>(
-            w_1d, P, J, K, 
-            pair_i, pair_j, kr_offsets, 
-            aoslice, natorb, loc_row, loc_col, 
-            npairs, nao
-        );
-        
+        auto block = make_block(threads);
+        auto grid = make_grid(blocks);
+        LAUNCH_KERNEL( build_jk_2c2e_kernel, grid, block, 0,
+            w_1d, P, J, K,
+            pair_i, pair_j, kr_offsets,
+            aoslice, natorb, loc_row, loc_col,
+            npairs, nao, stream);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;
@@ -361,7 +364,8 @@ extern "C" {
         return 0;
     }
 
-    int launch_build_jk_1c2e(const double* P,
+    int launch_build_jk_1c2e(
+        const double* P,
         double* J,
         double* K,
         const double* gss,
@@ -388,14 +392,14 @@ extern "C" {
         // 64 threads per block is sufficient since max d-orbital combinations is 243
         int threads = 64; 
         
-        build_jk_1c2e_kernel<<<blocks, threads, 0, stream>>>(
-            P, J, K, 
-            gss, gsp, hsp, gpp, gp2, repd, 
+        auto block = make_block(threads);
+        auto grid = make_grid(blocks);
+        LAUNCH_KERNEL( build_jk_1c2e_kernel, grid, block, 0,
+            P, J, K,
+            gss, gsp, hsp, gpp, gp2, repd,
             intij, intkl, intrep,
             aoslice, natorb, loc_row, loc_col,
-            natm, nao, num_d_pairs
-        );
-        
+            natm, nao, num_d_pairs, stream);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;

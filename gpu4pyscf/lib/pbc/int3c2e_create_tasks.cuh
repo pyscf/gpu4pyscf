@@ -17,8 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 
 #define THREADS         256
 // WARP_SIZE: compile-time constant used for shared-memory sizing.
@@ -80,7 +79,8 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
                           uint32_t *bas_ij_idx, int *img_idx, uint32_t *sp_img_offsets,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
     int *bas = envs.bas;
@@ -189,7 +189,8 @@ __device__ inline
 void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
                        ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
     int tot_tasks = num_ijk_tasks;
     __syncthreads();
     if (thread_id == 0) {
@@ -222,7 +223,8 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
                      uint32_t *rem_task_idx, int num_ijk_tasks,
                      ShellTripletTaskInfo *ijk_tasks_info, int *swap)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
     __syncthreads();
     if (thread_id == 0) {
         num_sub_tasks = 0;
@@ -262,8 +264,9 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
                        int num_ijk_tasks, ShellTripletTaskInfo *ijk_tasks_info,
                        PBCIntEnvVars &envs, int *sp_img_idx)
 {
-    int thread_id = threadIdx.x;
-    __shared__ int task_head;
+    setup_context();
+    int thread_id = threadIdx_x;
+    SHARED_ARRAY(int, task_head);
     if (thread_id == 0) {
         task_head = THREADS;
     }
@@ -355,6 +358,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
 __device__ inline
 int warp_max(int val)
 {
+    setup_context();
     for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
         val = max(val, __shfl_down_sync(0xffffffff, val, offset));
     }
@@ -364,9 +368,10 @@ int warp_max(int val)
 __device__ inline
 void block_max(int val, int& out)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
     val = warp_max(val);
-    __shared__ int buf[WARPS];
+    SHARED_ARRAY(int, buf, [WARPS]);
     int lane = thread_id % warpSize;
     int warp_id = thread_id / warpSize;
     if (lane == 0) {

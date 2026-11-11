@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/build_rys_gxyz.cuh"
@@ -36,20 +34,36 @@ void ejk_int3c2e_deriv_kernel(double *ejk, double *sigma, double *dm, double *dm
                               float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                               int *head, int sp_blocks, int ksh_blocks)
 {
-    int thread_id = threadIdx.x;
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nao;
-    __shared__ int g_size, gout_stride, nst_per_block;
-    __shared__ int num_ijk_tasks;
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
-    __shared__ int sp_block_id, ksh_block_id;
-    uint32_t *img_pool = pool + blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    setup_context();
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, ksh_block_id);
+    SHARED_ARRAY(int, ksh0_cell0);
+    SHARED_ARRAY(int, ksh1_cell0);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
+
+    int thread_id = threadIdx_x;
+    uint32_t *img_pool = pool + blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -111,7 +125,6 @@ while (1) {
 
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
@@ -451,12 +464,14 @@ int PBCsr_ejk_int3c2e_deriv(double *ejk, double *sigma, double *dm, double *dm_a
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    ejk_int3c2e_deriv_kernel<<<workers, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( ejk_int3c2e_deriv_kernel, blocks, threads, shm_size,
             ejk, sigma, dm, dm_auxvec, omega, *envs, pool, task_pool,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, img_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, nauxbas, naux,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, nbatches_shl_pair, nbatches_ksh);
+            head, nbatches_shl_pair, nbatches_ksh, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));

@@ -36,22 +36,26 @@ __global__ __maxnreg__(128) static
 __global__ static
 #endif
 void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
-                           PBCIntEnvVars envs, int *shl_pair_offsets,
+                           int *shl_pair_offsets,
                            int64_t *bas_ij_idx, double *G_bases, double *L_bases,
                            int *mesh_cum, int *nimgs_cum, int ntiles,
-                           double factor)
+                           double factor, PBCIntEnvVars envs)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int sp_block_id = blockIdx_x / ntiles;
+    int tile_id = blockIdx_x % ntiles;
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
-    int sp_block_id = blockIdx.x / ntiles;
-    int tile_id = blockIdx.x % ntiles;
-    __shared__ double gx[NGV_PER_BLOCK*3*2*LMAX1*LMAX1];
-    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)];
-    __shared__ int mesh_start[3];
-    __shared__ int ri, rj;
-    __shared__ size_t ij_offset;
-    __shared__ double fac, ai, aj;
+    SHARED_ARRAY(double, gx, [NGV_PER_BLOCK*3*2*LMAX1*LMAX1]);
+    SHARED_ARRAY(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]);
+    SHARED_ARRAY(int, mesh_start, [3]);
+    SHARED_ARRAY(int, ri);
+    SHARED_ARRAY(int, rj);
+    SHARED_ARRAY(size_t, ij_offset);
+    SHARED_ARRAY(double, fac);
+    SHARED_ARRAY(double, ai);
+    SHARED_ARRAY(double, aj);
 
     int *bas = envs.bas;
     int nbas = envs.nbas;
@@ -229,9 +233,11 @@ int orth_contract_aopair_dm(double *outR, double *outI,
     int ntiles_y = (mesh_y + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
-    orth_aopair_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS, 0, stream>>>(
-        outR, outI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, ntiles, factor);
+    auto threads = make_block(THREADS);
+    auto grids = make_grid(ntiles*nbatches_shl_pair);
+    LAUNCH_KERNEL( orth_aopair_dm_kernel, grids, threads, 0,
+                    outR, outI, dm, shl_pair_offsets, bas_ij_idx, G_bases,
+                    L_bases, mesh_cum, nimgs_cum, ntiles, factor, *envs, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_aopair_dm_kernel: %s\n", cudaGetErrorString(err));

@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #include "multigrid.cuh"
 
 __device__ static

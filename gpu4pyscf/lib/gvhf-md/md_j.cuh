@@ -69,9 +69,21 @@ typedef struct {
 int offset_for_Rt2_idx(int lij, int lkl);
 int qd_offset_for_threads(int npairs, int threads);
 
+#ifdef USE_SYCL
+// SYCL has no cross-TU __device__ linkage: the lookup tables of
+// md_indices.cu (a TU of its own on CUDA) become inline constexpr here.
+#pragma push_macro("__device__")
+#undef __device__
+#define __device__ inline constexpr
+#include "md_indices.cu"
+#pragma pop_macro("__device__")
+#endif
+
+#ifndef USE_SYCL
 extern __device__ int Rt2_idx_offsets[];
 extern __device__ uint16_t Rt2_ij_kl[];
 extern __device__ uint16_t Rt2_kl_ij[];
 extern __constant__ int8_t c_Rt2_efg_phase[];
 extern __constant__ int8_t c_Rt_tuv_fac[];
 extern __constant__ uint16_t c_Rt_idx[];
+#endif

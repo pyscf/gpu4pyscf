@@ -16,7 +16,7 @@
 
 #include <stdio.h>
 #include <math.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 
 
 __global__ void calc_pair_e2e_kernel(
@@ -31,7 +31,8 @@ __global__ void calc_pair_e2e_kernel(
     double* __restrict__ E_2e_out,     // (n_pairs,)
     int n_pairs
 ) {
-    int p = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int p = global_x;
     if (p >= n_pairs) return;
     
     int A = pair_i[p];
@@ -75,7 +76,8 @@ __global__ void calc_pair_e2e_kernel(
 }
 
 extern "C" {
-int launch_calc_pair_e2e_c(const double* w_1d,
+int launch_calc_pair_e2e_c(
+    const double* w_1d,
     const double* P_AA,
     const double* P_BB,
     const double* P_AB,
@@ -88,10 +90,11 @@ int launch_calc_pair_e2e_c(const double* w_1d,
 ) {
     int threads = 256;
     int blocks = (n_pairs + threads - 1) / threads;
-    calc_pair_e2e_kernel<<<blocks, threads, 0, stream>>>(
+    auto block = make_block(threads);
+    auto grid = make_grid(blocks);
+    LAUNCH_KERNEL( calc_pair_e2e_kernel, grid, block, 0,
         w_1d, P_AA, P_BB, P_AB,
-        pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs
-    );
+        pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) return 1;
     return 0;

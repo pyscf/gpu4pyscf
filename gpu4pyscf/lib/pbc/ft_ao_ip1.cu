@@ -41,13 +41,15 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
                             int *bas_ij_idx, int *bas_ij_img_idx,
                             int *shl_pair_offsets, int permutation_symmetry)
 {
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     constexpr int nGv_per_block = NG_PER_BLOCK;
     constexpr int threads = NG_PER_BLOCK * NSP_PER_BLOCK;
-    int sp_block_id = blockIdx.x;
-    int Gv_block_id = blockIdx.y;
-    int Gv_id_in_block = threadIdx.x;
+    int sp_block_id = blockIdx_x;
+    int Gv_block_id = blockIdx_y;
+    int Gv_id_in_block = threadIdx_x;
 
-    int thread_id = threadIdx.x + threadIdx.y * blockDim.x;
+    int thread_id = threadIdx_x + threadIdx_y * blockDim_x;
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
@@ -69,8 +71,8 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
         gout_stride *= 2;
     }
     int nsp_per_block = NSP_PER_BLOCK / gout_stride;
-    int gout_id = threadIdx.y % gout_stride;
-    int sp_id = threadIdx.y / gout_stride;
+    int gout_id = threadIdx_y % gout_stride;
+    int sp_id = threadIdx_y / gout_stride;
     int Gv_gout_id = Gv_id_in_block + nGv_per_block * gout_id;
     int nGv_gout = nGv_per_block * gout_stride;
     int lij = li + lj + 1;
@@ -96,7 +98,6 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
     }
     double kk = kx * kx + ky * ky + kz * kz;
 
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + g_size * nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len*1;
     double *gyR = gxR + gx_len*2;
@@ -267,14 +268,14 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
                 if (dm == NULL) {
                     size_t addr = (ij_offset + j*nao+i) * (size_t)nGv + Gv_id;
                     double2 tmp_vG = dm_vG[addr];
-                    dm_vR = tmp_vG.x;
-                    dm_vI = tmp_vG.y;
+                    dm_vR = D2X(tmp_vG);
+                    dm_vI = D2Y(tmp_vG);
                 } else {
                     // Note the density matrix is assumed to be real in get_ej_ip1
                     double tmp = dm[ij_offset + j*nao+i];
                     double2 tmp_vG = dm_vG[Gv_id];
-                    dm_vR = tmp * tmp_vG.x;
-                    dm_vI = tmp * tmp_vG.y;
+                    dm_vR = tmp * D2X(tmp_vG);
+                    dm_vI = tmp * D2Y(tmp_vG);
                 }
                 int ix = idx_i[i*3+0];
                 int iy = idx_i[i*3+1];
@@ -410,11 +411,13 @@ __global__ static
 void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm_auxG,
                         double *Gv, RysIntEnvVars envs, int nGv)
 {
-    int sh_block_id = gridDim.y - blockIdx.y - 1;
-    int Gv_block_id = blockIdx.x;
+    setup_context();
+    SHARED_ARRAY(double, g, [(AUXL+2)*FT_AO_THREADS * 6]);
     int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
-    int sh_id_in_block = threadIdx.y;
-    int Gv_id_in_block = threadIdx.x;
+    int sh_block_id = gridDim_y - blockIdx_y - 1;
+    int Gv_block_id = blockIdx_x;
+    int sh_id_in_block = threadIdx_y;
+    int Gv_id_in_block = threadIdx_x;
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     if (sh_id >= envs.nbas || Gv_id >= nGv) {
@@ -432,7 +435,6 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
     constexpr int aux_l = AUXL + 1;
     int gx_len = (aux_l+1) * FT_AO_THREADS;
     int i_1 = NG_PER_BLOCK;
-    __shared__ double g[(aux_l+1)*FT_AO_THREADS * 6];
     double *gxR = g + (aux_l+1) * NG_PER_BLOCK * sh_id_in_block + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -530,13 +532,13 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
             if (auxvec == NULL) {
                 size_t addr = (i0+n) * (size_t)nGv + Gv_id;
                 double2 dm_v = dm_auxG[addr];
-                dm_vR = dm_v.x;
-                dm_vI = -dm_v.y;
+                dm_vR = D2X(dm_v);
+                dm_vI = -D2Y(dm_v);
             } else {
                 double tmp = auxvec[i0+n];
                 double2 dm_v = dm_auxG[Gv_id];
-                dm_vR = tmp * dm_v.x;
-                dm_vI = tmp * -dm_v.y;
+                dm_vR = tmp * D2X(dm_v);
+                dm_vI = tmp * -D2Y(dm_v);
             }
             int addrx = idx[n*3+0] * NG_PER_BLOCK;
             int addry = idx[n*3+1] * NG_PER_BLOCK;
@@ -618,12 +620,12 @@ int PBC_ft_ao_deriv(double *grad, double *sigma, double *auxvec, double2 *dm_aux
                     double *GvT, RysIntEnvVars *envs, int ngrids, cudaStream_t stream)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
-    dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
-    dim3 blocks(nbatches_grids, nbatches_shls);
-    ft_ao_deriv_kernel<<<blocks, threads, 0, stream>>>(
-            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids);
+    auto threads = make_block(NG_PER_BLOCK, nsh_per_block);
+    auto blocks = make_grid(nbatches_grids, nbatches_shls);
+    LAUNCH_KERNEL( ft_ao_deriv_kernel, blocks, threads, 0,
+            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_deriv: %s\n", cudaGetErrorString(err));
@@ -642,12 +644,12 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
         return 0;
     }
     cudaFuncSetAttribute(ft_aopair_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 threads(NG_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
-    dim3 blocks(nbatches_shl_pair, Gv_batches);
-    ft_aopair_deriv_kernel<<<blocks, threads, shm_size, stream>>>(
+    auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
+    auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
+    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_deriv: %s\n", cudaGetErrorString(err));
@@ -666,12 +668,12 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
         return 0;
     }
     cudaFuncSetAttribute(ft_aopair_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 threads(NG_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
-    dim3 blocks(nbatches_shl_pair, Gv_batches);
-    ft_aopair_deriv_kernel<<<blocks, threads, shm_size, stream>>>(
-            out, sigma, NULL, dm_vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
+    auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
+    auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
+    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
+            out, sigma, nullptr, dm_vG, GvT, *envs, ngrids, shm_size,
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_deriv: %s\n", cudaGetErrorString(err));

@@ -16,11 +16,68 @@
 
 #pragma once
 
+#include "gpu_compat.h"
 #include "gint.h"
 
+// CUDA and SYCL headers plus the backend-agnostic kernel macros (setup_context,
+// threadIdx_x, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*).
+
+#ifdef USE_SYCL
+
+extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_gint_bpcache;
+// Kernel bodies keep CUDA's `c_bpcache.member` spelling. device_global has
+// no member access and get() is device-only, so:
+//  * device pass: c_bpcache is the device_global's storage;
+//  * host pass: kernel bodies are parsed but never run, so c_bpcache is a
+//    typed placeholder.
+// Both passes parse the host uploads, so one overload turns the upstream call
+// cudaMemcpyToSymbolAsync(c_bpcache, ..., stream) into a copy to the device_global.
+#ifdef __SYCL_DEVICE_ONLY__
+#define c_bpcache (::s_gint_bpcache.get())
+#else
+inline BasisProdCache &gint_host_bpcache() {
+    static BasisProdCache placeholder;
+    return placeholder;
+}
+#define c_bpcache (gint_host_bpcache())
+#endif
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        BasisProdCache &, const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_gint_bpcache, src, count, offset, kind, stream);
+}
+
+// Generated with GINTinit_index1d_xyz
+// Look into constant.cu for details
+inline constexpr int c_idx[TOT_NF*3] = {
+  0, 1, 0, 0, 2, 1, 1, 0, 0, 0, 3, 2, 2, 1, 1, 1, 0, 0, 0, 0, 4, 3, 3,
+  2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 5, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1,
+  1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 6, 5, 5, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2,
+  2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 2,
+  1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4,
+  3, 2, 1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2,
+  1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1, 0,
+  6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 2, 0, 0, 1, 0, 1, 2,
+  0, 1, 2, 3, 0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 0, 1, 0,
+  1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 0, 1, 0, 1, 2,
+  0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6};
+
+inline constexpr int c_l_locs[GPU_LMAX+2] = {0, 1, 4, 10, 20, 35, 56, 84};
+
+#else // USE_SYCL
 //extern __constant__ GINTEnvVars c_envs;
 extern __constant__ BasisProdCache c_bpcache;
 //extern __constant__ int16_t c_idx4c[NFffff*3];
 
 extern __constant__ int c_idx[TOT_NF*3];
 extern __constant__ int c_l_locs[GPU_LMAX+2];
+#endif // USE_SYCL
+
+// Provides task_ij/task_kl grid indices for 3D-launched kernels. Backend-agnostic:
+// setup_context() + index math via threadIdx_x/blockDim_x macros (gpu_compat.h).
+// Launch with make_block(THREADSX, THREADSY) + make_grid(...) so x/y lanes match.
+#define KERNEL_SETUP() \
+    setup_context(); \
+    const int task_ij = blockIdx_x * blockDim_x + threadIdx_x; \
+    const int task_kl = blockIdx_y * blockDim_y + threadIdx_y;
+

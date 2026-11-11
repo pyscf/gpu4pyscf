@@ -15,6 +15,7 @@
  */
 
 #include <stdio.h>
+#include "gpu_compat.h"
 #include "ecp.h"
 #include "bessel.cu"
 #include "cart2sph.cu"
@@ -37,25 +38,25 @@ int ECP_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc, cudaStream_t stream){
     // one task per thread block
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
     if (lc >= 0){
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type) {
-        case 0:  type2_cart<0,0,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type2_cart<0,0,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type2_cart<0,0,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type2_cart<0,0,3><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 10:  type2_cart<0,1,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11:  type2_cart<0,1,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12:  type2_cart<0,1,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 110: type2_cart<1,1,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 111: type2_cart<1,1,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 112: type2_cart<1,1,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 20:  type2_cart<0,2,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 21:  type2_cart<0,2,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 30:  type2_cart<0,3,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 120: type2_cart<1,2,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 0:  LAUNCH_KERNEL((type2_cart<0,0,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 1:  LAUNCH_KERNEL((type2_cart<0,0,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 2:  LAUNCH_KERNEL((type2_cart<0,0,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 3:  LAUNCH_KERNEL((type2_cart<0,0,3>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 10:  LAUNCH_KERNEL((type2_cart<0,1,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 11:  LAUNCH_KERNEL((type2_cart<0,1,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 12:  LAUNCH_KERNEL((type2_cart<0,1,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 110: LAUNCH_KERNEL((type2_cart<1,1,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 111: LAUNCH_KERNEL((type2_cart<1,1,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 112: LAUNCH_KERNEL((type2_cart<1,1,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 20:  LAUNCH_KERNEL((type2_cart<0,2,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 21:  LAUNCH_KERNEL((type2_cart<0,2,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 30:  LAUNCH_KERNEL((type2_cart<0,3,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 120: LAUNCH_KERNEL((type2_cart<1,2,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
 
         // General kernel
         default: {
@@ -76,27 +77,27 @@ int ECP_cart(double *gctr,
             int smem_size4 = lj1*nfj*ljc1; // angj
             int smem_size = smem_size0 + smem_size1 + smem_size2 + smem_size3 + smem_size4;
 
-            type2_cart_general<<<blocks, threads, smem_size*sizeof(double), stream>>>(
+            LAUNCH_KERNEL(type2_cart_general, blocks, threads, smem_size*sizeof(double),
                 gctr,
                 li, lj, lc,
                 ao_loc, nao,
                 tasks, ntasks,
                 ecpbas, ecploc,
-                atm, bas, env);
+                atm, bas, env, stream);
         }}
     } else {
         int task_type = li * 10 + lj;
         switch (task_type)
         {
-        case 0:  type1_cart<0,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type1_cart<0,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11: type1_cart<1,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type1_cart<0,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type1_cart<0,3><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12: type1_cart<1,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 4:  type1_cart<0,4><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 13: type1_cart<1,3><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 22: type1_cart<2,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 0:  LAUNCH_KERNEL((type1_cart<0,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 1:  LAUNCH_KERNEL((type1_cart<0,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 11: LAUNCH_KERNEL((type1_cart<1,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 2:  LAUNCH_KERNEL((type1_cart<0,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 3:  LAUNCH_KERNEL((type1_cart<0,3>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 12: LAUNCH_KERNEL((type1_cart<1,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 4:  LAUNCH_KERNEL((type1_cart<0,4>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 13: LAUNCH_KERNEL((type1_cart<1,3>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 22: LAUNCH_KERNEL((type1_cart<2,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
         default: {
             const int lij1 = li+lj+1;
             const int lij3 = lij1*lij1*lij1;
@@ -104,12 +105,12 @@ int ECP_cart(double *gctr,
             int smem_size = 0;
             smem_size += lij3;      // rad_ang
             smem_size += lij1*lij1; // rad_all
-            type1_cart_general<<<blocks, threads, smem_size*sizeof(double), stream>>>(
+            LAUNCH_KERNEL(type1_cart_general, blocks, threads, smem_size*sizeof(double),
                 gctr, li, lj,
                 ao_loc, nao,
                 tasks, ntasks,
                 ecpbas, ecploc,
-                atm, bas, env);
+                atm, bas, env, stream);
         }
         }
     }
@@ -128,20 +129,20 @@ int ECP_ip_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc, cudaStream_t stream){
     // one task per thread block
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
     if (lc < 0){
         int task_type = li * 10 + lj;
         switch (task_type) {
-        case 0:  type1_cart_ip1<0,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type1_cart_ip1<0,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11: type1_cart_ip1<1,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type1_cart_ip1<0,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type1_cart_ip1<0,3><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12: type1_cart_ip1<1,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 4:  type1_cart_ip1<0,4><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 13: type1_cart_ip1<1,3><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 22: type1_cart_ip1<2,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 0:  LAUNCH_KERNEL((type1_cart_ip1<0,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 1:  LAUNCH_KERNEL((type1_cart_ip1<0,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 11: LAUNCH_KERNEL((type1_cart_ip1<1,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 2:  LAUNCH_KERNEL((type1_cart_ip1<0,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 3:  LAUNCH_KERNEL((type1_cart_ip1<0,3>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 12: LAUNCH_KERNEL((type1_cart_ip1<1,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 4:  LAUNCH_KERNEL((type1_cart_ip1<0,4>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 13: LAUNCH_KERNEL((type1_cart_ip1<1,3>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 22: LAUNCH_KERNEL((type1_cart_ip1<2,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
         default: {
             const int lij1 = li+lj+2;
             const int lij3 = lij1*lij1*lij1;
@@ -149,30 +150,30 @@ int ECP_ip_cart(double *gctr,
             int smem_size = 0;
             smem_size += lij3;      // rad_ang
             smem_size += lij1*lij1; // rad_all
-            type1_cart_ip1_general<<<blocks, threads, smem_size*sizeof(double), stream>>>(
+            LAUNCH_KERNEL((type1_cart_ip1_general), blocks, threads, smem_size*sizeof(double),
                 gctr, li, lj,
                 ao_loc, nao,
                 tasks, ntasks,
                 ecpbas, ecploc,
-                atm, bas, env);
+                atm, bas, env, stream);
         }}
     } else {
         int task_type = li * 100 + lj * 10 + lc;
         switch (task_type) {
-        case 0:  type2_cart_ip1<0,0,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 1:  type2_cart_ip1<0,0,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 2:  type2_cart_ip1<0,0,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 3:  type2_cart_ip1<0,0,3><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 10:  type2_cart_ip1<0,1,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 11:  type2_cart_ip1<0,1,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 12:  type2_cart_ip1<0,1,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 110: type2_cart_ip1<1,1,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 111: type2_cart_ip1<1,1,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 112: type2_cart_ip1<1,1,2><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 20:  type2_cart_ip1<0,2,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 21:  type2_cart_ip1<0,2,1><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 30:  type2_cart_ip1<0,3,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
-        case 120: type2_cart_ip1<1,2,0><<<blocks, threads, 0, stream>>>(gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env); break;
+        case 0:  LAUNCH_KERNEL((type2_cart_ip1<0,0,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 1:  LAUNCH_KERNEL((type2_cart_ip1<0,0,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 2:  LAUNCH_KERNEL((type2_cart_ip1<0,0,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 3:  LAUNCH_KERNEL((type2_cart_ip1<0,0,3>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 10:  LAUNCH_KERNEL((type2_cart_ip1<0,1,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 11:  LAUNCH_KERNEL((type2_cart_ip1<0,1,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 12:  LAUNCH_KERNEL((type2_cart_ip1<0,1,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 110: LAUNCH_KERNEL((type2_cart_ip1<1,1,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 111: LAUNCH_KERNEL((type2_cart_ip1<1,1,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 112: LAUNCH_KERNEL((type2_cart_ip1<1,1,2>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 20:  LAUNCH_KERNEL((type2_cart_ip1<0,2,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 21:  LAUNCH_KERNEL((type2_cart_ip1<0,2,1>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 30:  LAUNCH_KERNEL((type2_cart_ip1<0,3,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
+        case 120: LAUNCH_KERNEL((type2_cart_ip1<1,2,0>), blocks, threads, 0, gctr, ao_loc, nao, tasks, ntasks, ecpbas, ecploc, atm, bas, env, stream); break;
 
         // General kernel
         default: {
@@ -204,12 +205,12 @@ int ECP_ip_cart(double *gctr,
                 return 1;
             }
 
-            type2_cart_ip1_general<<<blocks, threads, dynamic_smem_size*sizeof(double), stream>>>(
+            LAUNCH_KERNEL((type2_cart_ip1_general), blocks, threads, dynamic_smem_size*sizeof(double),
                 gctr, li, lj, lc,
                 ao_loc, nao,
                 tasks, ntasks,
                 ecpbas, ecploc,
-                atm, bas, env);
+                atm, bas, env, stream);
         }}
     }
     cudaError_t err = cudaGetLastError();
@@ -227,8 +228,8 @@ int ECP_ipipv_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc, cudaStream_t stream){
     // one task per thread block
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
     
     if (lc < 0){
         const int lij1 = li+lj+3; //
@@ -237,12 +238,12 @@ int ECP_ipipv_cart(double *gctr,
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
-        type1_cart_ipipv<<<blocks, threads, smem_size*sizeof(double), stream>>>(
+        LAUNCH_KERNEL((type1_cart_ipipv), blocks, threads, smem_size*sizeof(double),
             gctr, li, lj,
             ao_loc, nao,
             tasks, ntasks,
             ecpbas, ecploc,
-            atm, bas, env);
+            atm, bas, env, stream);
 
     } else {
         const int li1 = li+3;
@@ -278,12 +279,12 @@ int ECP_ipipv_cart(double *gctr,
             return 1;
         }
 
-        type2_cart_ipipv<<<blocks, threads, dynamic_smem_size*sizeof(double), stream>>>(
+        LAUNCH_KERNEL((type2_cart_ipipv), blocks, threads, dynamic_smem_size*sizeof(double),
             gctr, li, lj, lc,
             ao_loc, nao,
             tasks, ntasks,
             ecpbas, ecploc,
-            atm, bas, env);
+            atm, bas, env, stream);
 
     }
     cudaError_t err = cudaGetLastError();
@@ -301,8 +302,8 @@ int ECP_ipvip_cart(double *gctr,
             const int *atm, const int *bas, const double *env,
             const int li, const int lj, const int lc, cudaStream_t stream){
     // one task per thread block
-    dim3 threads(THREADS);
-    dim3 blocks(ntasks);
+    auto threads = make_block(THREADS);
+    auto blocks = make_grid(ntasks);
 
     if (lc < 0){
         const int lij1 = li+lj+3; //
@@ -311,12 +312,12 @@ int ECP_ipvip_cart(double *gctr,
         int smem_size = 0;
         smem_size += lij3;      // rad_ang
         smem_size += lij1*lij1; // rad_all
-        type1_cart_ipvip<<<blocks, threads, smem_size*sizeof(double), stream>>>(
+        LAUNCH_KERNEL((type1_cart_ipvip), blocks, threads, smem_size*sizeof(double),
             gctr, li, lj,
             ao_loc, nao,
             tasks, ntasks,
             ecpbas, ecploc,
-            atm, bas, env);
+            atm, bas, env, stream);
     } else {
         const int li1 = li+2;
         const int lj1 = lj+2;
@@ -351,12 +352,12 @@ int ECP_ipvip_cart(double *gctr,
             return 1;
         }
 
-        type2_cart_ipvip<<<blocks, threads, dynamic_smem_size*sizeof(double), stream>>>(
+        LAUNCH_KERNEL((type2_cart_ipvip), blocks, threads, dynamic_smem_size*sizeof(double),
             gctr, li, lj, lc,
             ao_loc, nao,
             tasks, ntasks,
             ecpbas, ecploc,
-            atm, bas, env);
+            atm, bas, env, stream);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

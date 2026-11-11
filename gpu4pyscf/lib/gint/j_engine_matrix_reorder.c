@@ -102,6 +102,9 @@ int hermite_xyz_to_t_index(const int x, const int y, const int z, const int l)
     return ((l + 1) * (l + 2) * (l + 3) - (l + 1 - x) * (l + 2 - x) * (l + 3 - x)) / 6 + ((l - x + 1) * (l - x + 2) - (l - x + 1 - y) * (l - x + 2 - y)) / 2 + z;
 }
 
+#ifdef __cplusplus
+extern "C"
+#endif
 void GINTinit_J_density_rys_preprocess(const double* D_matrix, double* D_pair_ordered, const int n_dm, const int n_ao, const int n_pair_type,
                                        const int* bas_pair2shls, const int* bas_pairs_locs, const int* l_ij, const int* density_offset, const int* ao_loc,
                                        const double* bas_coords, const bool symmetric)
