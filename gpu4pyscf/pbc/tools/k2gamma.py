@@ -23,7 +23,7 @@ from pyscf.pbc.tools.k2gamma import translation_map
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
 from gpu4pyscf.lib.cupy_helper import asarray
 
-def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
+def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False):
     '''Infer a mesh for constructing a BvK supercell with periodic boundary
     conditions for the given k-points.
 

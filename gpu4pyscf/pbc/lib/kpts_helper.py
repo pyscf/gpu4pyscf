@@ -106,37 +106,49 @@ def reset_kpts(kpts, cell):
                    time_reversal_symmetry=kpts.time_reversal)
     return kpts
 
-def fft_matrix(kmesh, with_gamma_point=True):
-    '''
-    A square matrix for the 3D Fourier transform coefficients. This matrix can
-    be used to transform the integral from the BvK super-cell representation to
-    unit-cell k-points representation:
+def fft_matrix(mp_mesh, with_gamma_point=True):
+    '''Fourier coefficients from a periodic BvK supercell to MP k-points.
+
+    mp_mesh gives the Monkhorst-Pack sampling dimensions, not the larger
+    periodic BvK mesh used by integral routines. If with_gamma_point is False,
+    each even dimension is doubled to form the periodic supercell. Odd
+    dimensions are unchanged.
+
+    The result has shape (bvk_ncells, nkpts). For example, shifted [2, 3, 1]
+    sampling gives a (12, 6) matrix. Its coefficients are exp(1j*L.dot(k)),
+    with no normalization factor, and transform integrals as
 
     S_k = einsum('iLj,LK->Kij', S_bvk, fft_matrix)
 
-    The transformation matrix is identical to
-    Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh)
-    exp(1j*Ls.dot(cell.make_kpts(kmesh, with_gamma_point=True).T))
-
-    This function only works for the gamma-point included k-point mesh.
+    Rows follow translation_vectors_for_kmesh for the periodic supercell.
+    Columns follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point).
     '''
-    assert with_gamma_point
-    kmesh = np.asarray(kmesh)
-    nkpts = np.prod(kmesh)
-    nx, ny, nz = kmesh
-    kx = cp.fft.fftfreq(nx)
-    ky = cp.fft.fftfreq(ny)
-    kz = cp.fft.fftfreq(nz)
-    Lx = cp.arange(nx)
-    Ly = cp.arange(ny)
-    Lz = cp.arange(nz)
-    Fx = cp.exp(2j*np.pi * Lx[:,None] * kx)
-    Fy = cp.exp(2j*np.pi * Ly[:,None] * ky)
-    Fz = cp.exp(2j*np.pi * Lz[:,None] * kz)
+    mp_mesh = np.asarray(mp_mesh)
+    nkpts = np.prod(mp_mesh)
+    nx, ny, nz = mp_mesh
+    if with_gamma_point:
+        bvk_kmesh = mp_mesh
+        kx = np.fft.fftfreq(nx)
+        ky = np.fft.fftfreq(ny)
+        kz = np.fft.fftfreq(nz)
+    else:
+        # For even n, kpts_to_kmesh creates larger BvK mesh, which requires
+        # twice cells for periodic boundaries
+        bvk_kmesh = np.where(mp_mesh % 2 == 0, 2*mp_mesh, mp_mesh)
+        # cell.make_kpts(with_gamma_point=False) uses this ks ordering
+        kx = (np.arange(nx) + .5) / nx - .5
+        ky = (np.arange(ny) + .5) / ny - .5
+        kz = (np.arange(nz) + .5) / nz - .5
+    Lx = np.arange(bvk_kmesh[0])
+    Ly = np.arange(bvk_kmesh[1])
+    Lz = np.arange(bvk_kmesh[2])
+    Fx = cp.exp(cp.asarray(2j*np.pi * Lx[:,None] * kx))
+    Fy = cp.exp(cp.asarray(2j*np.pi * Ly[:,None] * ky))
+    Fz = cp.exp(cp.asarray(2j*np.pi * Lz[:,None] * kz))
     expLk = (Fx[:,None,None,:,None,None] *
              Fy[None,:,None,None,:,None] *
              Fz[None,None,:,None,None,:])
-    return expLk.reshape(nkpts, nkpts)
+    return expLk.reshape(np.prod(bvk_kmesh), nkpts)
 
 def _normalize_kpts(kpts):
     '''Normalize k-points to an (nkpts, 3) array and flag single-point input.

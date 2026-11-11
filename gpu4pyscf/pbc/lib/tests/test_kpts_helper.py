@@ -72,3 +72,15 @@ def test_fft_matrix():
             ref = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
             dat = kpts_helper.fft_matrix(kmesh)
             assert abs(ref - dat).max() < 1e-14
+
+def test_fft_matrix_off_gamma():
+    cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
+                   a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    Ls = k2gamma.translation_vectors_for_kmesh(cell, [4, 3, 1], True)
+    ref = np.exp(1j * Ls.dot(kpts.T))
+    dat = kpts_helper.fft_matrix([2, 3, 1], with_gamma_point=False).get()
+    assert dat.shape == (12, 6)
+    np.testing.assert_allclose(dat, ref, atol=1e-14, rtol=0)
+    np.testing.assert_allclose(dat.conj().T.dot(dat), 12*np.eye(6),
+                               atol=1e-14, rtol=0)
