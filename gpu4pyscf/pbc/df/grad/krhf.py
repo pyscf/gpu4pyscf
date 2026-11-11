@@ -43,7 +43,7 @@ from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    fft_matrix, kk_adapted_iter, conj_images_in_bvk_cell)
+    fft_matrix, kk_adapted_iter, conj_kpts)
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff
 
@@ -120,7 +120,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     nkpts_uniq = len(uniq_kpts)
 
     conj_mapping = cp.asarray(
-        conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+        conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
     batch_size = blksize = 0

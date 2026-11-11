@@ -38,7 +38,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE, _check_rsh_factors
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _normalize_kpts
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
@@ -140,7 +140,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     if bvk_ncells == nkpts:
         kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
                      for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(bvk_kmesh))
-        t_rev_pairs = conj_images_in_bvk_cell(bvk_kmesh, return_pair=True)
+        t_rev_pairs = conj_kpts(bvk_kmesh, return_pair=True)
     else:
         kpt_iters = kk_adapted_iter(cell, kpts)
         t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)

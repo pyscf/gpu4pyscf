@@ -42,7 +42,8 @@ from gpu4pyscf.df.int3c2e_bdiv import (
 from gpu4pyscf.pbc.df.ft_ao import (
     libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts)
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -120,7 +121,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         conj_mapping = cp.asarray(
-            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+            conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
         nkpts = len(kpts)
         out = _unpack_cderi_v2(j3c, pair_address, np.arange(nkpts),
                                conj_mapping, expLk, nao, axis=1)
@@ -133,7 +134,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
         conj_mapping = cp.asarray(
-            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+            conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
 
         axis = 0 # Transform index i
         expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)

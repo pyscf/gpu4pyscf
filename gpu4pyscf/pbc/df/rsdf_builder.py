@@ -42,7 +42,7 @@ from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao, int3c2e
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, conj_images_in_bvk_cell, _normalize_kpts)
+    kk_adapted_iter, conj_kpts, _normalize_kpts)
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
@@ -108,7 +108,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = cp.asarray(conj_images_in_bvk_cell(kmesh), dtype=np.int32)
+    conj_mapping = cp.asarray(conj_kpts(kmesh), dtype=np.int32)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao
@@ -954,9 +954,8 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             The indices can be extracted via
             ki_idx, kj_idx = np.where(kk_conserv == k_idx)
         conj_mapping (ndarray):
-            Given image index k in BvK cell, conj_mapping[k] shows the
-            associated (-k) image in BvK cell. This table can be created by
-            the pbc.lib.kpts_helper.conj_images_in_bvk_cell(kmesh) function.
+            Orbital k-point indices mapping k to -k modulo reciprocal lattice
+            vectors, as returned by pbc.lib.kpts_helper.conj_kpts.
         axis (int):
             which index to apply the real-space to k-index transformation.
             If axis=0, transform i in (ij|k) with conj(exp(L*k)). If axis=1,

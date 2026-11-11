@@ -44,7 +44,7 @@ from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import AFTDF
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    reset_kpts, fft_matrix, conj_images_in_bvk_cell, _normalize_kpts)
+    reset_kpts, fft_matrix, conj_kpts, _normalize_kpts)
 from gpu4pyscf.__config__ import num_devices
 
 DEBUG = False
@@ -189,7 +189,7 @@ class GDF(lib.StreamObject):
             expLk = fft_matrix(self.kmesh)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
-            conj_mapping = cp.asarray(conj_images_in_bvk_cell(self.kmesh), dtype=np.int32)
+            conj_mapping = cp.asarray(conj_kpts(self.kmesh), dtype=np.int32)
             out_buf = out
 
         cderi_buf = out

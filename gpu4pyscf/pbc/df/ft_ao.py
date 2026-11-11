@@ -40,7 +40,8 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts)
 from gpu4pyscf.gto.mole import (
     group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
@@ -500,10 +501,10 @@ class FTOpt:
         pair_address = cp.asarray(pair_address, dtype=np.int32)
         bvk_ncells = len(self.bvkmesh_Ls)
         if bvk_ncells == 1:
-            conj_mapping = cp.zeros(1, dtype=np.int32)
+            image_conj_mapping = cp.zeros(1, dtype=np.int32)
         else:
-            conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
-            conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
+            image_conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
+            image_conj_mapping = cp.asarray(image_conj_mapping, dtype=np.int32)
 
         cell = self.cell
         if transform_ao:
@@ -563,13 +564,14 @@ class FTOpt:
             if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
                 fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
-                              pair_address, conj_mapping, bvk_axis=1)
+                              pair_address, image_conj_mapping, bvk_axis=1)
 
             if kpts_is_gamma_point:
                 if bvk_ncells != 1:
                     tmp = ndarray((nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
                     out = out.sum(axis=1, out=tmp)[:,None]
                 if self.permutation_symmetry and not symmetric_for_bvk_orbitals:
+                    conj_mapping = cp.asarray(conj_kpts([1, 1, 1]), dtype=np.int32)
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
@@ -602,6 +604,7 @@ class FTOpt:
                     # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
                     # which is stored in `conj_mapping_ki`.
                     assert bvk_ncells == nkpts
+                    conj_mapping = cp.asarray(conj_kpts(self.bvk_kmesh), dtype=np.int32)
                     conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
                     conj_mapping_ki[kj_idx] = conj_mapping
                     libpbc.fill_indexed_triu(

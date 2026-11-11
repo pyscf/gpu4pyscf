@@ -44,7 +44,8 @@ from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts)
 from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
@@ -484,7 +485,7 @@ class PBCJKMatrixOpt:
         if bvk_ncells == nkpts:
             kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
                          for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(kmesh))
-            t_rev_pairs = conj_images_in_bvk_cell(kmesh, return_pair=True)
+            t_rev_pairs = conj_kpts(kmesh, return_pair=True)
         else:
             raise NotImplementedError
         log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))

@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.df.fft_jk import (
     _ewald_exxdiv_for_G0, _format_dms, _format_jks, _factorize_dm)
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, fft_matrix, conj_images_in_bvk_cell)
+    kk_adapted_iter, fft_matrix, conj_kpts)
 
 def density_fit(mf, auxbasis=None, with_df=None):
     '''Generate density-fitting SCF object
@@ -108,7 +108,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
 
     kj_idx = np.arange(nkpts)
-    conj_mapping = conj_images_in_bvk_cell(mydf.kmesh)
+    conj_mapping = conj_kpts(mydf.kmesh)
     # The ao-pair in vj_packed has the same storage order like the ao-pair in
     # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
     # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple

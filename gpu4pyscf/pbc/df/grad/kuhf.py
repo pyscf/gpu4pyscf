@@ -43,7 +43,7 @@ from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, conj_images_in_bvk_cell)
+    kk_adapted_iter, conj_kpts)
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -120,7 +120,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     nkpts_uniq = len(uniq_kpts)
 
     conj_mapping = cp.asarray(
-        conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+        conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
     batch_size = blksize = 0

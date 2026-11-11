@@ -84,3 +84,19 @@ def test_fft_matrix_off_gamma():
     np.testing.assert_allclose(dat, ref, atol=1e-14, rtol=0)
     np.testing.assert_allclose(dat.conj().T.dot(dat), 12*np.eye(6),
                                atol=1e-14, rtol=0)
+
+def test_conj_kpts():
+    cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
+                   a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
+    mp_mesh = [2, 3, 1]
+    kpts = cell.make_kpts(mp_mesh, with_gamma_point=True)
+    mapping = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=True)
+    np.testing.assert_array_equal(mapping, [0, 2, 1, 3, 5, 4])
+    pairs = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=True, return_pair=True)
+    np.testing.assert_array_equal(pairs, [[0, 0], [1, 2], [3, 3], [4, 5]])
+
+    kpts = cell.make_kpts(mp_mesh, with_gamma_point=False)
+    mapping = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=False)
+    np.testing.assert_array_equal(mapping, [5, 4, 3, 2, 1, 0])
+    pairs = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=False, return_pair=True)
+    np.testing.assert_array_equal(pairs, [[0, 5], [1, 4], [2, 3]])

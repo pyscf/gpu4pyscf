@@ -22,7 +22,7 @@ from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts
 import pytest
 
 def test_gamma_point():
@@ -291,7 +291,7 @@ C    D
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],
-            conj_images_in_bvk_cell(kmesh), expLk, nao)
+            conj_kpts(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -322,7 +322,7 @@ def test_kpts_compressed1():
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],
-            conj_images_in_bvk_cell(kmesh), expLk, nao)
+            conj_kpts(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -363,7 +363,7 @@ C  D
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],
-            conj_images_in_bvk_cell(kmesh), expLk, nao)
+            conj_kpts(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -395,7 +395,7 @@ def test_kpts_compressed2():
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],
-            conj_images_in_bvk_cell(kmesh), expLk, nao)
+            conj_kpts(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -507,7 +507,7 @@ C    D
 
     out = rsdf_builder._unpack_cderi_v2(
         dat[0], idx[0], np.where(kk_conserv == 0)[1],
-        conj_images_in_bvk_cell(kmesh), expLk, nao)
+        conj_kpts(kmesh), expLk, nao)
     for ki in range(nkpts):
         _ref = ref[ki, ki]
         assert abs(_ref - out[ki]).max() < 1e-11
@@ -682,7 +682,7 @@ def test_kpts_compressed_linear_dep():
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],
-            conj_images_in_bvk_cell(kmesh), expLk, nao)
+            conj_kpts(kmesh), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:

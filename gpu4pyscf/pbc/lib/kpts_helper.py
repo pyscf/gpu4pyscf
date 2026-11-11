@@ -19,13 +19,11 @@ from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
 
 def conj_images_in_bvk_cell(kmesh, return_pair=False):
-    '''
-    When BvK super-cell is constructed by the pbc.tools.super_cell function,
-    images within the BvK cell has certain symmetry correspondence. These images
-    correspond to the Monkhorst-Pack (MP) k-point grids. This function finds the
-    mapping: given image index k, mapping[k] shows the conjugation image in MP grids.
-    When return_pair is enabled, each entry in the pair shows the corresponding
-    image indices, i.e. pair[i,0] and pair[i,1] are conjugated images.
+    '''Map BvK images from L to -L modulo the supercell lattice.
+
+    kmesh gives the periodic BvK dimensions. Image order follows super_cell.
+    If return_pair is True, return each pair once, including self-pairs.
+    For orbital k-point conjugation, use conj_kpts instead.
     '''
     nx, ny, nz = kmesh
     kx = np.arange(nx)
@@ -45,6 +43,34 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
     Ls_idx = kx[:,None,None]*nyz + ky[:,None]*nz + kz
     mask = Ls_idx <= Ls_idx_conj
     return np.vstack((Ls_idx[mask], Ls_idx_conj[mask])).T
+
+def conj_kpts(mp_mesh, with_gamma_point=True, return_pair=False):
+    '''Map each MP k-point to its -k partner
+
+    mp_mesh gives the sampling dimensions, not the periodic BvK dimensions.
+    Points must follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point)
+    ordering, with no additional shift or symmetry reduction. Wrapping points
+    into the first Brillouin zone does not change the map.
+
+    Return an integer array of length prod(mp_mesh). If return_pair is True,
+    return an (npairs, 2) array with each pair once, including self-pairs.
+    '''
+    indices = [np.arange(n) for n in mp_mesh]
+    if with_gamma_point:
+        partners = [(-idx) % n for idx, n in zip(indices, mp_mesh)]
+    else:
+        # For k_j = (j + .5)/n - .5, negating k_j gives index n-1-j.
+        partners = [n-1-idx for idx, n in zip(indices, mp_mesh)]
+    nx, ny, nz = mp_mesh
+    conj_kx, conj_ky, conj_kz = partners
+    mapping = (conj_kx[:,None,None]*(ny*nz) +
+               conj_ky[None,:,None]*nz + conj_kz).ravel()
+    if not return_pair:
+        return mapping
+
+    idx = np.arange(len(mapping))
+    mask = idx <= mapping
+    return np.stack((idx[mask], mapping[mask])).T
 
 def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     '''Generates kpt which is adapted to the kpt_aux of the metric in RI
