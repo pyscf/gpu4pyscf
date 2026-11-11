@@ -261,6 +261,13 @@ class DF(lib.StreamObject):
             io_stream = cp.cuda.stream.Stream(non_blocking=True)
             io_event = cp.cuda.Event()
 
+            # Issue #1031: buf_prefetch may reuse memory from CuPy's pool.
+            # When buf_prefetch.set() is launched on the non-blocking io_stream,
+            # this memory may still be in use by the main stream (comput_stream).
+            # io_stream must not access buf_prefetch until the main stream
+            # finishes accessing the reused memory pool.
+            compute_event.record(comput_stream)
+            io_stream.wait_event(compute_event)
             buf_prefetch.set(cderi_sparse[:blksize], stream=io_stream)
             io_event.record(io_stream)
 

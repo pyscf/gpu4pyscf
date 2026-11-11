@@ -15,6 +15,7 @@
 
 import unittest
 import numpy
+import cupy
 import os
 from pathlib import Path
 from pyscf import gto, dft
@@ -107,6 +108,20 @@ class KnownValues(unittest.TestCase):
         hessobj.base.cphf_grids = hessobj.base.grids
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+
+    # Issue #1031
+    def test_df_rsh_host_memory(self):
+        mf = mol.RKS(xc='wb97x').to_gpu().density_fit()
+        mf.grids.level = 1
+        mf.kernel()
+        hess_ref = mf.Hessian().kernel()
+
+        mf = mol.RKS(xc='wb97x').to_gpu().density_fit()
+        mf.grids.level = 1
+        mf.with_df.use_gpu_memory = False
+        hess_host = mf.Hessian().kernel()
+        self.assertTrue(isinstance(mf.with_df._cderi[0], numpy.ndarray))
+        numpy.testing.assert_allclose(hess_host, hess_ref, atol=1e-7, rtol=0)
 
     @pytest.mark.slow
     def test_bugfix_Pb_hessian_large_difference(self):
