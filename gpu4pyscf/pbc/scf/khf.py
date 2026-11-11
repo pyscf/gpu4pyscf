@@ -39,7 +39,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts
 
 def _check_kpts(kpts):
     if len(member(np.zeros(3), kpts)) == 0:
@@ -515,9 +515,11 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
+        # TODO: Use the MP mesh and off-Gamma flag from the KPoints class to
+        # call conj_kpts(mp_mesh, with_gamma_point=...)
         kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
         if nkpts == np.prod(kmesh):
-            return [x[:2] for x in kk_adapted_iter(kmesh, return_pair_index=False)]
+            return conj_kpts(kmesh, return_pair=True)
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 

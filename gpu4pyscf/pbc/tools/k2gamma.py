@@ -20,7 +20,7 @@ import cupy as cp
 from pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_map
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, conj_kpts
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False):
@@ -110,16 +110,32 @@ def double_translation_indices(kmesh):
     nk = np.prod(kmesh)
     return idx.reshape(nk, nk)
 
-def gamma2k_phase(kmesh, with_gamma_point=True):
+def gamma2k_phase(mp_mesh, with_gamma_point=True):
+    '''Mix conjugate k-point orbitals into real supercell orbitals.
+
+    The returned phase matrix has shape (nkpts, nkpts), with nkpts = prod(mp_mesh).
+    Together with expLk[L,k] = exp(i L.k) for translations L in the *minimal*
+    BvK supercell, it transforms the k-sampled orbitals as
+
+    C_super = np.einsum('Rk,kum,kh->Ruhm', expLk, C_k, k_phase)
+
+    Orbitals at conjugate points must be complex conjugates. Self-conjugate
+    points are left unchanged and their orbitals must already be real.
+
+    mp_mesh gives the MP sampling dimensions. The k-points must follow
+    cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point) ordering.
+
+    For with_gamma_point=True, the *minimal* supercell has periodic boundaries
+    and is sampled at Gamma. For with_gamma_point=False, its boundaries are
+    antiperiodic along even MP dimensions and periodic along odd dimensions.
+    This corresponds to one supercell k-point calculation with k=1/2 along
+    each even dimension.
     '''
-    The k_phase can transform the k-points MOs to gamma-point MOs:
-    C_gamma = np.einsum('Rk,kum,kh->Ruhm', fft_matrix(kmesh), C_k, k_phase)
-    '''
-    Nk = np.prod(kmesh)
+    Nk = np.prod(mp_mesh)
     k_phase = np.eye(Nk, dtype=np.complex128)
     r2x2 = np.array([[1., 1j], [1., -1j]]) * .5**.5
-    pairs = [[k, k_conj] for k, k_conj, _, _ in kk_adapted_iter(kmesh, with_gamma_point)
-             if k != k_conj]
-    for idx in np.array(pairs):
-        k_phase[idx[:,None],idx] = r2x2
+    pairs = conj_kpts(mp_mesh, with_gamma_point, return_pair=True)
+    for idx in pairs:
+        if idx[0] != idx[1]:
+            k_phase[idx[:,None],idx] = r2x2
     return asarray(k_phase)

@@ -15,7 +15,8 @@
 import numpy as np
 import pytest
 from pyscf.pbc import gto
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, gamma2k_phase
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 
 
 @pytest.mark.parametrize('sampling_mesh, shifted_embedding', [
@@ -37,3 +38,19 @@ def test_kpts_to_kmesh(sampling_mesh, shifted_embedding):
                                1., atol=1e-12, rtol=0)
     assert not np.any(np.linalg.norm(kpts, axis=1) < 1e-12)
     assert np.prod(kmesh) > len(kpts)
+
+
+def test_gamma2k_phase():
+    phase = gamma2k_phase([2, 3, 1]).get()
+    fourier = fft_matrix([2, 3, 1]).get()
+    np.testing.assert_allclose(phase.conj().T.dot(phase), np.eye(6),
+                               atol=1e-14, rtol=0)
+    # Conjugate Bloch phases should produce real supercell coefficients.
+    np.testing.assert_allclose(fourier.dot(phase).imag, 0, atol=1e-14, rtol=0)
+
+    phase = gamma2k_phase([2, 3, 1], with_gamma_point=False).get()
+    np.testing.assert_allclose(phase.conj().T.dot(phase), np.eye(6),
+                               atol=1e-14, rtol=0)
+    # The rectangular spatial transform also gives real conjugate combinations.
+    fourier = fft_matrix([2, 3, 1], with_gamma_point=False).get()
+    np.testing.assert_allclose(fourier.dot(phase).imag, 0, atol=1e-14, rtol=0)
