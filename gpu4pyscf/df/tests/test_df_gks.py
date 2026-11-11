@@ -85,8 +85,12 @@ class KnownValues(unittest.TestCase):
         mf = cpu_dft.GKS(mol, xc='b3lyp').density_fit()
         mf.collinear = 'm'
         mf._numint.spin_samples = 6
+        ni = mf._numint
+        if not hasattr(ni, 'to_gpu') or ni.to_gpu().collinear != ni.collinear:
+            self.skipTest('Installed PySCF cannot transfer the GKS spin mode to GPU')
         e_cpu = mf.kernel()
         mf = mf.to_gpu()
+        self.assertEqual((mf.collinear, mf._numint.spin_samples), ('m', 6))
         e_gpu = mf.kernel()
         assert isinstance(mf, gpu_df_jk._DFHF)
         assert np.abs(e_gpu - e_cpu) < 1e-5
