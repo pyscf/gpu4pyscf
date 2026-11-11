@@ -21,28 +21,16 @@ from pyscf.pbc.tools import k2gamma
 def conj_images_in_bvk_cell(kmesh, return_pair=False):
     '''Map BvK images from L to -L modulo the supercell lattice.
 
-    kmesh gives the periodic BvK dimensions. Image order follows super_cell.
-    If return_pair is True, return each pair once, including self-pairs.
-    For orbital k-point conjugation, use conj_kpts instead.
+    kmesh gives the number of primitive cells along each direction in
+    the periodic BvK supercell (returned by kpts_to_kmesh). It can differ
+    from MP mesh.
+
+    Return an integer array of length prod(kmesh), in super_cell image order.
+    If return_pair is True, return each image pair once, including self-pairs.
     '''
-    nx, ny, nz = kmesh
-    kx = np.arange(nx)
-    ky = np.arange(ny)
-    kz = np.arange(nz)
-    conj_kx = (-kx) % nx
-    conj_ky = (-ky) % ny
-    conj_kz = (-kz) % nz
-
-    nyz = ny * nz
-    # When constructing super-cell in pbc.tools.super_cell, images are placed in
-    # the cartesian_prod order, the image indices can be generated as:
-    Ls_idx_conj = conj_kx[:,None,None]*nyz + conj_ky[:,None]*nz + conj_kz
-    if not return_pair:
-        return Ls_idx_conj.ravel()
-
-    Ls_idx = kx[:,None,None]*nyz + ky[:,None]*nz + kz
-    mask = Ls_idx <= Ls_idx_conj
-    return np.vstack((Ls_idx[mask], Ls_idx_conj[mask])).T
+    # Periodic image inversion happens to be identical to the conj_kpts for ther
+    # larger MP mesh with gamma point.
+    return conj_kpts(kmesh, with_gamma_point=True, return_pair=return_pair)
 
 def conj_kpts(mp_mesh, with_gamma_point=True, return_pair=False):
     '''Map each MP k-point to its -k partner
