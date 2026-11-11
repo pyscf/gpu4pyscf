@@ -14,6 +14,7 @@
 
 
 import unittest
+import pytest
 import numpy as np
 import cupy as cp
 import pyscf, gpu4pyscf
@@ -388,6 +389,21 @@ class KnownValues(unittest.TestCase):
             assert test_n_cycle <= ref_n_cycle + 5
         finally:
             gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
+
+    def test_gdm_rohf_disabled(self):
+        mol = pyscf.M(
+            atom = """
+                Li 0 0 0
+            """,
+            basis = "def2-tzvp",
+            spin = 1,
+            verbose = 0,
+        )
+        mf = mol.RHF().to_gpu()
+        assert mf.istype('ROHF')
+
+        with pytest.raises(NotImplementedError, match="GDM does not support ROHF yet"):
+            mf = gdm(mf)
 
 if __name__ == "__main__":
     print("Full Tests for GDM")

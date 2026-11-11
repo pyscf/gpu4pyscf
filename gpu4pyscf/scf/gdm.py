@@ -806,6 +806,7 @@ def _kernel(mf, dm0,
             line_search_tau,
             max_n_line_search_attempt,
             line_search_initial_scale,
+            check_occupation_change,
             check_occupation_per_n_iteration):
     """
         Geometric Direct Minimization
@@ -831,6 +832,7 @@ def _kernel(mf, dm0,
     fock0 = mf.get_fock(h1e, s1e, vhf0, dm0)
     x_orth = mf.check_linear_dependency(s1e, log)
     mo_energy, mo_coeff = mf.eig(fock0, s1e, x=x_orth) # The initial density is converted to orbitals by one Roothaan diagonalization.
+    del x_orth
     del vhf0, fock0
     mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
     e_tot, fock = get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e)
@@ -896,7 +898,7 @@ def _kernel(mf, dm0,
         if nkpts is not None:
             gradient_norm *= cp.sqrt(nkpts) # gradient_norm = sqrt(1/nkpts * sum_k g_k^2), and g_k already includes a factor of 1/nkpts
 
-        if nkpts is not None and cycle % check_occupation_per_n_iteration == 0:
+        if (nkpts is not None) and (check_occupation_change) and (cycle % check_occupation_per_n_iteration == 0):
             new_mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
             if cp.max(cp.abs(new_mo_occ - mo_occ)) > 1e-10:
                 log.info("MO occupation pattern changed. GDM reset.")
@@ -1000,7 +1002,7 @@ def _kernel(mf, dm0,
     mo_energy, mo_coeff, _ = pseudo_canonicalize(fock, mo_coeff, nocc, nmo, [], nkpts, conj_k_idx)
     e_tot, fock = get_energy_and_fock(mf, mo_coeff, mo_occ, h1e, s1e)
 
-    if nkpts is not None:
+    if (nkpts is not None) and (check_occupation_change):
         new_mo_occ = cp.asarray(mf.get_occ(mo_energy, mo_coeff))
         if cp.max(cp.abs(new_mo_occ - mo_occ)) > 1e-10:
             log.warn("MO occupation number changed after the fixed-occupation GDM converged. "
@@ -1037,6 +1039,7 @@ class GDM:
         self.line_search_initial_scale = 1.0
 
         # PBC related parameters
+        self.check_occupation_change = True
         self.check_occupation_per_n_iteration = 10
 
     to_gpu = utils.to_gpu
@@ -1072,6 +1075,7 @@ class GDM:
                        self.line_search_tau,
                        self.max_n_line_search_attempt,
                        self.line_search_initial_scale,
+                       self.check_occupation_change,
                        self.check_occupation_per_n_iteration)
 
 def gdm(mf):
@@ -1081,9 +1085,7 @@ def gdm(mf):
     from gpu4pyscf.scf.hf import SCF
     assert isinstance(mf, SCF)
 
-    if mf.istype('RHF'):
-        pass
-    elif mf.istype('ROHF'):
+    if mf.istype('ROHF'):
         raise NotImplementedError("GDM does not support ROHF yet")
     elif mf.istype('UHF'):
         pass
@@ -1093,6 +1095,8 @@ def gdm(mf):
         raise NotImplementedError("GDM does not support RDHF yet")
     elif mf.istype('DHF'):
         raise NotImplementedError("GDM does not support DHF yet")
+    elif mf.istype('RHF'):
+        pass
     elif mf.istype('KRHF'):
         pass
     elif mf.istype('KUHF'):

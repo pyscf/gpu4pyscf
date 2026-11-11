@@ -586,7 +586,7 @@ class KnownValues(unittest.TestCase):
         step = 1e-4
         gradients = []
         for displacement in (-step, step):
-            mo = apply_exp_U(mf.mo_coeff, nocc, displacement * kappa)
+            mo = apply_exp_U(mf.mo_coeff, nocc, nmo, displacement * kappa)
             dm = mf.make_rdm1(mo, mf.mo_occ)
             fock = mf.get_fock(None, None, None, dm)
             gradients.append(2 * (mo[:, nocc:].T @ fock @ mo[:, :nocc]).ravel())
@@ -1262,7 +1262,7 @@ class KnownValues(unittest.TestCase):
         step = 1e-4
         gradients = []
         for displacement in (-step, step):
-            mo = cp.stack([apply_exp_U(c, nocc, displacement * kappa)
+            mo = cp.stack([apply_exp_U(c, nocc, nmo, displacement * kappa)
                            for c, nocc, kappa in zip(mf.mo_coeff, (nocca, noccb), kappas)])
             dm = mf.make_rdm1(mo, mf.mo_occ)
             fock = mf.get_fock(None, None, None, dm)
