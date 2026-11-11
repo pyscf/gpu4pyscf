@@ -24,11 +24,34 @@ from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, kk_adapted_iter
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
-    '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh
+    '''Infer a mesh for constructing a BvK supercell with periodic boundary
+    conditions for the given k-points.
 
-    bound_by_supmol:
-        If True, the largest k-mesh is constrained within the supmol.
-        If False, the k-mesh must exactly reproduce the provided k-points.
+    The k-points need not include Gamma, and prod(kmesh) need not equal
+    len(kpts). For example, a shifted [2, 2, 2] Monkhorst-Pack mesh can be
+    represented by a [2, 2, 2] supercell with antiperiodic boundary conditions.
+    However, this function returns [4, 4, 4], corresponding to a larger
+    supercell with periodic boundary conditions.
+
+    Args:
+        cell : Cell
+            Provides the reciprocal lattice and lattice-sum cutoff.
+        kpts : ndarray of shape (nkpts, 3) or None
+            Absolute k-points in Bohr^-1. None selects Gamma.
+
+    Kwargs:
+        precision : float
+            Tolerance for fractional k-point reconstruction. Defaults to
+            max(1e-6, cell.precision * 1e2).
+        rcut : float
+            Lattice-sum radius used to set the rational-search denominator
+            limit and fallback mesh. Defaults to using cell.nimgs.
+        bound_by_supmol : bool
+            If True, the k-mesh is bound by the radius cutoff.
+            If False, the k-mesh are not capped by the radius cutoff.
+
+    Returns:
+        Integer ndarray of shape (3,) giving the BvK replication counts.
     '''
     if kpts is None:
         return np.ones(3, dtype=int)
