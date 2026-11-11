@@ -1,0 +1,1200 @@
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:156:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  156 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:168:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  168 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:192:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  192 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:220:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  220 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+17 warnings generated.
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:31:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   31 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:37:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   37 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:44:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   44 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:67:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   67 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:106:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  106 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:133:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  133 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:160:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  160 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:190:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  190 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:209:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  209 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:23:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh:24:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   24 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:23:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh:33:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   33 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:19:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   19 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:89:43: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   89 | template <int LI, int LJ> __forceinline__ __device__
+      |                                           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:156:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  156 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:168:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  168 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:192:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  192 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:220:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  220 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+17 warnings generated.
+[ 72%] Building CXX object multigrid/CMakeFiles/mgrid_v3.dir/multigrid_v3/aft_eval_mgga_mat.cu.o
+[ 73%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/unrolled_ejk_ip2_type12.cu.o
+[ 73%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/unrolled_ejk_ip2_type3.cu.o
+[ 74%] Building CXX object pbc/CMakeFiles/pbc.dir/ppnl.cu.o
+[ 75%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/contract_int3c2e.cu.o
+[ 76%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/mole_helper.cu.o
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:31:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   31 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:37:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   37 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:44:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   44 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:67:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   67 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:106:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  106 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:133:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  133 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:160:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  160 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:190:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  190 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:209:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  209 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:23:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh:24:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   24 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:23:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh:33:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   33 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:19:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   19 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:89:43: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   89 | template <int LI, int LJ> __forceinline__ __device__
+      |                                           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:156:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  156 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:168:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  168 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:192:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  192 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:220:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  220 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+17 warnings generated.
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:31:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   31 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:37:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   37 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:44:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   44 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:67:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   67 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:106:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  106 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:133:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  133 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:160:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  160 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:190:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  190 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:22:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh:209:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  209 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:23:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh:24:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   24 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:23:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh:33:12: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   33 | __device__ __forceinline__
+      |            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:38:25: note: expanded from macro '__forceinline__'
+   38 | #define __forceinline__ inline __attribute__((always_inline))
+      |                         ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:19:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   19 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:89:43: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+   89 | template <int LI, int LJ> __forceinline__ __device__
+      |                                           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:156:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  156 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:168:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  168 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:192:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  192 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu:24:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh:220:17: warning: duplicate 'inline' declaration specifier [-Wduplicate-decl-specifier]
+  220 | __forceinline__ __device__
+      |                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+<command line>:2:31: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+    2 | #define GPU4PYSCF_DEVICE_ATTR inline __attribute__((always_inline))
+      |                               ^
+17 warnings generated.
+[ 77%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/libmgrid_v3.so
+[ 78%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/ejk_int3c2e_ip1.cu.o
+[ 78%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/fill_int3c2e.cu.o
+[ 79%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/int3c2e_recontract.cu.o
+[ 80%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/decompress.cu.o
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[ 81%] Building CXX object pbc/CMakeFiles/pbc.dir/supmol_sr_estimator.cu.o
+[ 81%] Built target mgrid_v3
+[ 81%] Building CXX object pbc/CMakeFiles/pbc.dir/rys_contract_k.cu.o
+[ 82%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/utils.c.o
+[ 83%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/ejk_int3c2e_ip2.cu.o
+[100%] Linking CXX shared library libexchcxx.so
+[ 83%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/fill_int3c2e_ip1.cu.o
+[ 84%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/e_int2c2e_ip2.cu.o
+[ 85%] Building CXX object gvhf-rys/CMakeFiles/gvhf_rys.dir/fill_int4c2e.cu.o
+[ 86%] Building CXX object pbc/CMakeFiles/pbc.dir/rys_contract_jk_ip1.cu.o
+[ 87%] Building CXX object pbc/CMakeFiles/pbc.dir/rys_contract_j.cu.o
+[ 88%] Building CXX object pbc/CMakeFiles/pbc.dir/unrolled_rys_k.cu.o
+[ 88%] Building CXX object pbc/CMakeFiles/pbc.dir/nr_eval_gto.cu.o
+[ 89%] Building CXX object pbc/CMakeFiles/pbc.dir/sorting.c.o
+[ 90%] Building CXX object pbc/CMakeFiles/pbc.dir/write_cderi.c.o
+[ 91%] Building CXX object pbc/CMakeFiles/pbc.dir/int3c2e_recontract.c.o
+[ 92%] Building CXX object pbc/CMakeFiles/pbc.dir/screen.cu.o
+[ 92%] Building CXX object pbc/CMakeFiles/pbc.dir/fill_triu.cu.o
+[ 93%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/libgvhf_rys.so
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/pbc/screen.cu:21:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/vhf.cuh:10:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:32:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:136:9: warning: 'NAN' macro redefined [-Wmacro-redefined]
+  136 | #define NAN std::numeric_limits<float>::quiet_NaN()
+      |         ^
+/usr/include/math.h:98:11: note: previous definition is here
+   98 | #  define NAN (__builtin_nanf (""))
+      |           ^
+1 warning generated.
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/pbc/screen.cu:21:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gvhf-rys/vhf.cuh:10:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:32:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:136:9: warning: 'NAN' macro redefined [-Wmacro-redefined]
+  136 | #define NAN std::numeric_limits<float>::quiet_NaN()
+      |         ^
+/usr/include/math.h:98:11: note: previous definition is here
+   98 | #  define NAN (__builtin_nanf (""))
+      |           ^
+1 warning generated.
+[ 94%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/libpbc.so
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[ 94%] Built target pbc
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[ 94%] Built target gvhf_rys
+[100%] Built target exchcxx
+[ 94%] Performing install step for 'ExchCXX'
+[ 11%] Linking CXX shared library libexchcxx.so
+[100%] Built target exchcxx
+Install the project...
+-- Install configuration: "Release"
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/libexchcxx.so
+-- Up-to-date: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/boilerplate.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/bidirectional_map.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/div_ceil.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/unused.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/exchcxx_macros.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/param_macros.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/named_type.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/xc_kernel.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exceptions
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exceptions/exchcxx_exception.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/xc_functional.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exchcxx.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/functionals.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/backend.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/enums.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/kernels.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/spin.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/factory
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/factory/xc_kernel.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/xc_kernel.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/xc_kernel_fwd.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/libxc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/util.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/cf22d_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scan_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/tpss_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bmk_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/p86vwn_ft_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mpw91_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_2x_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pc07_k.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rscan_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scanl_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pz81.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rpbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hjs_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scan_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/slater_exchange.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_v_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_sx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lrcwpbeh_hjs_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scanl_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/screening_interface.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_sx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_sx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/n12_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lrcwpbe_hjs_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rscan_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw86_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lyp.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m11_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ft98_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scan_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_2x_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bmk_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mbeef_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc18_2.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x_015.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pkzb_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_2x_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pkzb_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bc95_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x_033.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/sogga11_x_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lcwpbe_wpbeh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda_rpa.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/optx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/b97_d.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_so_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_m06_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_d_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda_mod.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_hf_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc17_1.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scanl_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pc07opt_k.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc17_2.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/cf22d_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_d3_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_sol_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_hf_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hse03_wpbeh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pz81_mod.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wpbeh_x_default0.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hse06_wpbeh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_hx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/revtpss_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_hx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/p86_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/tpss_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scanl_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_sx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/revtpss_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/n12_sx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_so_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scan_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn3.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/b88.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_m06_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/sogga11_x_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m11_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn_rpa.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc18_1.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_2x_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/interface.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernel_type.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/constants.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/fwd.hpp
+-- Up-to-date: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include
+-- Up-to-date: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exchcxx_config.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXTargets.cmake
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXTargets-release.cmake
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXConfig.cmake
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXConfigVersion.cmake
+[ 94%] Completed 'ExchCXX'
+[ 94%] Built target ExchCXX
+[ 95%] Building CXX object gdft/CMakeFiles/exchcxx_shim.dir/exchcxx.cpp.o
+[ 95%] Built target exchcxx_shim
+[ 95%] Building CXX object gdft/CMakeFiles/gdft.dir/nr_eval_gto.cu.o
+[ 97%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/libxc.so
+[ 97%] Building CXX object gdft/CMakeFiles/gdft.dir/contract_rho.cu.o
+[ 98%] Building CXX object gdft/CMakeFiles/gdft.dir/nr_numint_sparse.cu.o
+[ 99%] Building CXX object gdft/CMakeFiles/gdft.dir/gen_grids.cu.o
+[ 99%] Building CXX object gdft/CMakeFiles/gdft.dir/vv10.cu.o
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[ 99%] Built target xc
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gdft/gen_grids.cu:20:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:32:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:136:9: warning: 'NAN' macro redefined [-Wmacro-redefined]
+  136 | #define NAN std::numeric_limits<float>::quiet_NaN()
+      |         ^
+/usr/include/math.h:98:11: note: previous definition is here
+   98 | #  define NAN (__builtin_nanf (""))
+      |           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gdft/gen_grids.cu:398:1: warning: 'always_inline' attribute only applies to functions and statements [-Wignored-attributes]
+  398 | __device__ constexpr double9 identity_3 = { {1,0,0}, {0,1,0}, {0,0,1} };
+      | ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:95:46: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+   95 | #define GPU4PYSCF_DEVICE_ATTR __attribute__((always_inline))
+      |                                              ^
+2 warnings generated.
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gdft/gen_grids.cu:20:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:32:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:136:9: warning: 'NAN' macro redefined [-Wmacro-redefined]
+  136 | #define NAN std::numeric_limits<float>::quiet_NaN()
+      |         ^
+/usr/include/math.h:98:11: note: previous definition is here
+   98 | #  define NAN (__builtin_nanf (""))
+      |           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gdft/gen_grids.cu:398:1: warning: 'always_inline' attribute only applies to functions and statements [-Wignored-attributes]
+  398 | __device__ constexpr double9 identity_3 = { {1,0,0}, {0,1,0}, {0,0,1} };
+      | ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:97:20: note: expanded from macro '__device__'
+   97 | #define __device__ GPU4PYSCF_DEVICE_ATTR
+      |                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:95:46: note: expanded from macro 'GPU4PYSCF_DEVICE_ATTR'
+   95 | #define GPU4PYSCF_DEVICE_ATTR __attribute__((always_inline))
+      |                                              ^
+2 warnings generated.
+[100%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/libgdft.so
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[100%] Built target gdft
+creating build/lib/gpu4pyscf
+copying gpu4pyscf/__config__.py -> build/lib/gpu4pyscf
+copying gpu4pyscf/_patch_pyscf.py -> build/lib/gpu4pyscf
+copying gpu4pyscf/__init__.py -> build/lib/gpu4pyscf
+creating build/lib/gpu4pyscf/tools
+copying gpu4pyscf/tools/method_config.py -> build/lib/gpu4pyscf/tools
+copying gpu4pyscf/tools/ase_interface.py -> build/lib/gpu4pyscf/tools
+copying gpu4pyscf/tools/__init__.py -> build/lib/gpu4pyscf/tools
+creating build/lib/gpu4pyscf/sem
+copying gpu4pyscf/sem/__init__.py -> build/lib/gpu4pyscf/sem
+copying gpu4pyscf/sem/lib.py -> build/lib/gpu4pyscf/sem
+creating build/lib/gpu4pyscf/fci
+copying gpu4pyscf/fci/__init__.py -> build/lib/gpu4pyscf/fci
+copying gpu4pyscf/fci/direct_spin1.py -> build/lib/gpu4pyscf/fci
+creating build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/external_field.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/itrf.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/__init__.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/chelpg.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/hirshfeld.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/mbis.py -> build/lib/gpu4pyscf/qmmm
+creating build/lib/gpu4pyscf/cupy
+copying gpu4pyscf/cupy/__init__.py -> build/lib/gpu4pyscf/cupy
+copying gpu4pyscf/cupy/rawkernel.py -> build/lib/gpu4pyscf/cupy
+copying gpu4pyscf/cupy/cuda.py -> build/lib/gpu4pyscf/cupy
+creating build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tdrhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tduhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/rhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/uks.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tdrks.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/dispersion.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/rkspu.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tdrks_ris.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/__init__.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/ucdft.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tduks_sf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tduks.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/ukspu.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/uhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/rks.py -> build/lib/gpu4pyscf/grad
+creating build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/rhf.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/math_helper.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/uks.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/parameter.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/_krylov_tools.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/_lr_eig.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/__init__.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/ris.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/_uhf_resp_sf.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/uhf.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/spectralib.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/rks.py -> build/lib/gpu4pyscf/tdscf
+creating build/lib/gpu4pyscf/pbc
+copying gpu4pyscf/pbc/__init__.py -> build/lib/gpu4pyscf/pbc
+creating build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/wigner_sampling.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/fssh_tddft.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/__init__.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/fssh_tully.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/fssh.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/distributions.py -> build/lib/gpu4pyscf/md
+creating build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/casci.py -> build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/df.py -> build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/__init__.py -> build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/casscf.py -> build/lib/gpu4pyscf/mcscf
+creating build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/rhf.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/uks.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/dispersion.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/__init__.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/uhf.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/rks.py -> build/lib/gpu4pyscf/hessian
+creating build/lib/gpu4pyscf/cupyx
+copying gpu4pyscf/cupyx/__init__.py -> build/lib/gpu4pyscf/cupyx
+creating build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/cphf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/int4c2e.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/ucphf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/smearing.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/soscf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/j_engine.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/_response_functions.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/ghf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/gdm.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/dispersion.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/jk.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/hf_symm.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/addons.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/hf_lowmem.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/__init__.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/rohf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/uhf_symm.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/stability.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/diis.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/hf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/uhf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/gcp.py -> build/lib/gpu4pyscf/scf
+creating build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2_addons.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/mp2.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2_drivers.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/__init__.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2_old.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfump2.py -> build/lib/gpu4pyscf/mp
+creating build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/ir.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/c6.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/raman.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/eda.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/__init__.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/polarizability.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/shielding.py -> build/lib/gpu4pyscf/properties
+creating build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/df_jk.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/j_engine_3c2e.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/int3c2e_bdiv.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/df.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/__init__.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/int3c2e.py -> build/lib/gpu4pyscf/df
+creating build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/pcm.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/smd_experiment.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/_solvent_data.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/__init__.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/smd.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/_attach_solvent.py -> build/lib/gpu4pyscf/solvent
+creating build/lib/gpu4pyscf/drivers
+copying gpu4pyscf/drivers/dft_3c_driver.py -> build/lib/gpu4pyscf/drivers
+copying gpu4pyscf/drivers/__init__.py -> build/lib/gpu4pyscf/drivers
+creating build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/int3c1e.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/mole.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/int3c1e_ip.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/__init__.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/ecp.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/int3c1e_ipip.py -> build/lib/gpu4pyscf/gto
+creating build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/onemkl_lapack.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/utils.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cutensor.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cupy_helper.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/memcpy.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cuest_wrapper.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/dpnp_helper.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/__init__.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/diis.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cusolver.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/logger.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/multi_gpu.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cublas.py -> build/lib/gpu4pyscf/lib
+creating build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrhf.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/mecp.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrhf_grad_nacv.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks_ris.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/__init__.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tduks_sf.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks_ris_grad_nacv.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks_grad_nacv.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/finite_diff.py -> build/lib/gpu4pyscf/nac
+creating build/lib/gpu4pyscf/x2c
+copying gpu4pyscf/x2c/sfx2c1e.py -> build/lib/gpu4pyscf/x2c
+copying gpu4pyscf/x2c/x2c.py -> build/lib/gpu4pyscf/x2c
+copying gpu4pyscf/x2c/__init__.py -> build/lib/gpu4pyscf/x2c
+creating build/lib/gpu4pyscf/gw
+copying gpu4pyscf/gw/rpa.py -> build/lib/gpu4pyscf/gw
+copying gpu4pyscf/gw/__init__.py -> build/lib/gpu4pyscf/gw
+copying gpu4pyscf/gw/gw_ac.py -> build/lib/gpu4pyscf/gw
+creating build/lib/gpu4pyscf/cc
+copying gpu4pyscf/cc/ccsd_incore.py -> build/lib/gpu4pyscf/cc
+copying gpu4pyscf/cc/__init__.py -> build/lib/gpu4pyscf/cc
+creating build/lib/gpu4pyscf/pop
+copying gpu4pyscf/pop/__init__.py -> build/lib/gpu4pyscf/pop
+copying gpu4pyscf/pop/esp.py -> build/lib/gpu4pyscf/pop
+creating build/lib/gpu4pyscf/geomopt
+copying gpu4pyscf/geomopt/ase_solver.py -> build/lib/gpu4pyscf/geomopt
+copying gpu4pyscf/geomopt/__init__.py -> build/lib/gpu4pyscf/geomopt
+creating build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/libxc.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/rks_lowmem.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/roks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/uks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/xc_alias.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/numint2c.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/rkspu.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/gen_grid.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/gks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/cdft_soscf.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/__init__.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/ucdft.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/libxc_structs.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/mcfun_gpu.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/cdft_soscf_full.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/numint.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/ukspu.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/xc_deriv.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/rks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/radi.py -> build/lib/gpu4pyscf/dft
+creating build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/dftd3.py -> build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/dftd4.py -> build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/__init__.py -> build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/gcp.py -> build/lib/gpu4pyscf/dispersion
+creating build/lib/gpu4pyscf/sem/grad
+copying gpu4pyscf/sem/grad/rhf.py -> build/lib/gpu4pyscf/sem/grad
+copying gpu4pyscf/sem/grad/__init__.py -> build/lib/gpu4pyscf/sem/grad
+creating build/lib/gpu4pyscf/sem/dmp
+copying gpu4pyscf/sem/dmp/sp2_purification.py -> build/lib/gpu4pyscf/sem/dmp
+copying gpu4pyscf/sem/dmp/__init__.py -> build/lib/gpu4pyscf/sem/dmp
+creating build/lib/gpu4pyscf/sem/scf
+copying gpu4pyscf/sem/scf/__init__.py -> build/lib/gpu4pyscf/sem/scf
+copying gpu4pyscf/sem/scf/diis.py -> build/lib/gpu4pyscf/sem/scf
+copying gpu4pyscf/sem/scf/hf.py -> build/lib/gpu4pyscf/sem/scf
+creating build/lib/gpu4pyscf/sem/gto
+copying gpu4pyscf/sem/gto/mole.py -> build/lib/gpu4pyscf/sem/gto
+copying gpu4pyscf/sem/gto/__init__.py -> build/lib/gpu4pyscf/sem/gto
+copying gpu4pyscf/sem/gto/params.py -> build/lib/gpu4pyscf/sem/gto
+creating build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/atomic.py -> build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/electron_repulsion.py -> build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/__init__.py -> build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/corrections.py -> build/lib/gpu4pyscf/sem/data
+creating build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/eri_2c2e.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/hcore2c1e.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/fock.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/__init__.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/eri_1c2e.py -> build/lib/gpu4pyscf/sem/integral
+creating build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/mm_mole.py -> build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/tools.py -> build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/itrf.py -> build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/__init__.py -> build/lib/gpu4pyscf/qmmm/pbc
+creating build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/pbc.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/discretization.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/magmom.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/__init__.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/k2gamma.py -> build/lib/gpu4pyscf/pbc/tools
+creating build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/rhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krkspu.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/uks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kucdft.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krks_stress.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kuks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/slabgate.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/__init__.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/slabdipole.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kukspu.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/uhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/pp.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kuhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/rks.py -> build/lib/gpu4pyscf/pbc/grad
+creating build/lib/gpu4pyscf/pbc/hessian
+copying gpu4pyscf/pbc/hessian/gamma_hessian.py -> build/lib/gpu4pyscf/pbc/hessian
+copying gpu4pyscf/pbc/hessian/__init__.py -> build/lib/gpu4pyscf/pbc/hessian
+creating build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/smearing.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/soscf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/j_engine.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/ghf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/slabgate.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/kghf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/addons.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/__init__.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/khf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/slabdipole.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/hf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/uhf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/kuhf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/rsjk.py -> build/lib/gpu4pyscf/pbc/scf
+creating build/lib/gpu4pyscf/pbc/properties
+copying gpu4pyscf/pbc/properties/__init__.py -> build/lib/gpu4pyscf/pbc/properties
+creating build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/df_jk.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/fft_jk.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/aft.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/rsdf_builder.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/df_jk_real.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/df.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/ft_ao.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/__init__.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/fft.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/int3c2e.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/aft_jk.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/int2c2e.py -> build/lib/gpu4pyscf/pbc/df
+creating build/lib/gpu4pyscf/pbc/gto
+copying gpu4pyscf/pbc/gto/cell.py -> build/lib/gpu4pyscf/pbc/gto
+copying gpu4pyscf/pbc/gto/int1e.py -> build/lib/gpu4pyscf/pbc/gto
+copying gpu4pyscf/pbc/gto/__init__.py -> build/lib/gpu4pyscf/pbc/gto
+creating build/lib/gpu4pyscf/pbc/lib
+copying gpu4pyscf/pbc/lib/__init__.py -> build/lib/gpu4pyscf/pbc/lib
+copying gpu4pyscf/pbc/lib/kpts_helper.py -> build/lib/gpu4pyscf/pbc/lib
+creating build/lib/gpu4pyscf/pbc/x2c
+copying gpu4pyscf/pbc/x2c/sfx2c1e.py -> build/lib/gpu4pyscf/pbc/x2c
+copying gpu4pyscf/pbc/x2c/x2c1e.py -> build/lib/gpu4pyscf/pbc/x2c
+copying gpu4pyscf/pbc/x2c/__init__.py -> build/lib/gpu4pyscf/pbc/x2c
+creating build/lib/gpu4pyscf/pbc/gw
+copying gpu4pyscf/pbc/gw/krgw_ac.py -> build/lib/gpu4pyscf/pbc/gw
+copying gpu4pyscf/pbc/gw/krpa.py -> build/lib/gpu4pyscf/pbc/gw
+copying gpu4pyscf/pbc/gw/__init__.py -> build/lib/gpu4pyscf/pbc/gw
+creating build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/multigrid_v2.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/multigrid_v3.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/krkspu.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/uks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kucdft.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kuks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/numint2c.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/multigrid.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/gen_grid.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/gks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/__init__.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/krks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/numint.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kukspu.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kgks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/rks.py -> build/lib/gpu4pyscf/pbc/dft
+creating build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/polarization.py -> build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/__init__.py -> build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/overlap.py -> build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/berry_phase.py -> build/lib/gpu4pyscf/pbc/properties/berry
+creating build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/rhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/__init__.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/uhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/kuhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/krhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+creating build/lib/gpu4pyscf/pbc/gto/pseudo
+copying gpu4pyscf/pbc/gto/pseudo/pp_int.py -> build/lib/gpu4pyscf/pbc/gto/pseudo
+copying gpu4pyscf/pbc/gto/pseudo/__init__.py -> build/lib/gpu4pyscf/pbc/gto/pseudo
+creating build/lib/gpu4pyscf/cupyx/scipy
+copying gpu4pyscf/cupyx/scipy/cupyx_linalg.py -> build/lib/gpu4pyscf/cupyx/scipy
+copying gpu4pyscf/cupyx/scipy/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy
+copying gpu4pyscf/cupyx/scipy/linalg.py -> build/lib/gpu4pyscf/cupyx/scipy
+creating build/lib/gpu4pyscf/cupyx/scipy/sparse
+copying gpu4pyscf/cupyx/scipy/sparse/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/sparse
+copying gpu4pyscf/cupyx/scipy/sparse/linalg.py -> build/lib/gpu4pyscf/cupyx/scipy/sparse
+creating build/lib/gpu4pyscf/cupyx/scipy/spatial
+copying gpu4pyscf/cupyx/scipy/spatial/distance.py -> build/lib/gpu4pyscf/cupyx/scipy/spatial
+copying gpu4pyscf/cupyx/scipy/spatial/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/spatial
+creating build/lib/gpu4pyscf/cupyx/scipy/fft
+copying gpu4pyscf/cupyx/scipy/fft/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/fft
+creating build/lib/gpu4pyscf/cupyx/scipy/special
+copying gpu4pyscf/cupyx/scipy/special/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/special
+copying gpu4pyscf/cupyx/scipy/special/linalg.py -> build/lib/gpu4pyscf/cupyx/scipy/special
+creating build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tdrhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tduhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/rhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/uks.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tdrks.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tdrks_ris.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/__init__.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/ucdft.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tduks_sf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tduks.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/uhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/rks.py -> build/lib/gpu4pyscf/df/grad
+creating build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/rhf.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/uks.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/__init__.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/uhf.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/rks.py -> build/lib/gpu4pyscf/df/hessian
+creating build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrhf.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrhf_grad_nacv.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks_ris.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/__init__.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tduks_sf.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks_ris_grad_nacv.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks_grad_nacv.py -> build/lib/gpu4pyscf/df/nac
+creating build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/pcm.py -> build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/smd_experiment.py -> build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/__init__.py -> build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/smd.py -> build/lib/gpu4pyscf/solvent/grad
+creating build/lib/gpu4pyscf/solvent/tdscf
+copying gpu4pyscf/solvent/tdscf/pcm.py -> build/lib/gpu4pyscf/solvent/tdscf
+copying gpu4pyscf/solvent/tdscf/__init__.py -> build/lib/gpu4pyscf/solvent/tdscf
+creating build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/pcm.py -> build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/smd_experiment.py -> build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/__init__.py -> build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/smd.py -> build/lib/gpu4pyscf/solvent/hessian
+creating build/lib/gpu4pyscf/gw/utils
+copying gpu4pyscf/gw/utils/gw_cp_helper.py -> build/lib/gpu4pyscf/gw/utils
+copying gpu4pyscf/gw/utils/__init__.py -> build/lib/gpu4pyscf/gw/utils
+running egg_info
+creating gpu4pyscf_sycl2026.2.0.egg-info
+writing gpu4pyscf_sycl2026.2.0.egg-info/PKG-INFO
+writing dependency_links to gpu4pyscf_sycl2026.2.0.egg-info/dependency_links.txt
+writing requirements to gpu4pyscf_sycl2026.2.0.egg-info/requires.txt
+writing top-level names to gpu4pyscf_sycl2026.2.0.egg-info/top_level.txt
+writing manifest file 'gpu4pyscf_sycl2026.2.0.egg-info/SOURCES.txt'
+reading manifest file 'gpu4pyscf_sycl2026.2.0.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+warning: no files found matching 'AUTHORS'
+warning: no files found matching 'NOTICE'
+warning: no previously-included files matching '*.py[cod]' found anywhere in distribution
+warning: no previously-included files matching '*~' found anywhere in distribution
+no previously-included directories found matching '*/__pycache__'
+warning: no previously-included files matching '*' found under directory '*/__pycache__'
+no previously-included directories found matching 'gpu4pyscf/lib/build'
+no previously-included directories found matching 'bytedance'
+no previously-included directories found matching 'benchmarks'
+no previously-included directories found matching 'builder'
+no previously-included directories found matching 'dockerfiles'
+no previously-included directories found matching 'docker'
+no previously-included directories found matching 'examples'
+no previously-included directories found matching 'wheelhouse'
+warning: manifest_maker: MANIFEST.in, line 20: 'recursive-exclude' expects <dir> <pattern1> <pattern2> ...
+
+warning: no files found matching '*.dat' under directory 'gpu4pyscf'
+warning: no previously-included files found matching 'gpu4pyscf/lib.deps'
+warning: no previously-included files found matching '*.so.*'
+adding license file 'LICENSE'
+writing manifest file 'gpu4pyscf_sycl2026.2.0.egg-info/SOURCES.txt'
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.deps.lib' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.deps.lib' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.deps.lib' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.deps.lib' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.deps.lib' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+copying gpu4pyscf/lib/libcupy_helper.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgdft.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgecp.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgint.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgsycl.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf_md.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf_rys.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libmgrid_v3.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libonemkl_helper.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libpbc.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libsem.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libsolvent.so -> build/lib/gpu4pyscf/lib
+creating build/lib/gpu4pyscf/lib/deps/lib
+copying gpu4pyscf/lib/deps/lib/libexchcxx.so -> build/lib/gpu4pyscf/lib/deps/lib
+copying gpu4pyscf/lib/deps/lib/libxc.so -> build/lib/gpu4pyscf/lib/deps/lib

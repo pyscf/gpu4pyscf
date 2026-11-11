@@ -1,0 +1,31 @@
+/home/runner/micromamba/envs/sycl-ci/bin/icpx
+/home/runner/micromamba/envs/sycl-ci/bin/icx
+/home/runner/micromamba/envs/sycl-ci/bin/ifx
+/home/runner/micromamba/envs/sycl-ci/bin/cmake
+Intel(R) oneAPI DPC++/C++ Compiler 2026.2.0 (2026.2.0.20261001)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /home/runner/micromamba/envs/sycl-ci/bin/compiler
+Configuration file: /home/runner/micromamba/envs/sycl-ci/bin/compiler/../icpx.cfg
+dpctl 0.24.0dev0+53.gdd4f089d80 | dpnp 0.21.0
+Intel(R) OpenCL OpenCL 3.1 LINUX
+(<dpctl.SyclDevice [backend_type.opencl, device_type.cpu,  AMD EPYC 9V45 96-Core Processor                ] at 0x7f974df06a70>,)
+  dpcpp-cpp-rt               2026.2.0      intel_863                https://software.repos.intel.com/python/conda
+  dpcpp_impl_linux-64        2026.2.0      intel_863                https://software.repos.intel.com/python/conda
+  dpcpp_linux-64             2026.2.0      intel_863                https://software.repos.intel.com/python/conda
+  dpctl                      0.24.0dev0    py312h93fe807_53         dppy/label/dev                               
+  dpnp                       0.21.0        py312hc457af2_0          https://software.repos.intel.com/python/conda
+  intel-opencl-rt            2026.2.0      intel_863                https://software.repos.intel.com/python/conda
+  intel-sycl-rt              2026.2.0      intel_863                https://software.repos.intel.com/python/conda
+  mkl-devel-dpcpp            2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  mkl-dpcpp                  2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-blas           2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-datafitting    2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-dft            2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-include        2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-lapack         2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-rng            2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-sparse         2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-stats          2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  onemkl-sycl-vm             2026.2.0      intel_881                https://software.repos.intel.com/python/conda
+  python                     3.12.8        he267403_8_cpython       https://software.repos.intel.com/python/conda
