@@ -44,7 +44,7 @@ from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import AFTDF
 from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    reset_kpts, fft_matrix, conj_kpts, _normalize_kpts)
+    reset_kpts, fft_matrix, conj_kpts, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.__config__ import num_devices
 
 DEBUG = False
@@ -140,7 +140,7 @@ class GDF(lib.StreamObject):
             assert kpts is None or is_zero(kpts)
             self.bvkmesh = [1] * 3
         else:
-            self.bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=not self._j_only)
+            self.bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
 
         t1 = (logger.process_clock(), logger.perf_counter())
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
@@ -178,18 +178,21 @@ class GDF(lib.StreamObject):
         cell = self.cell
         if self._cderi is None:
             self.build(j_only=self._j_only)
-        nkpts = np.prod(self.bvkmesh)
-        if kpts is not None:
+        nkpts = len(self.kpts)
+        if kpts is None:
+            kpts = self.kpts
+        else:
             assert len(kpts) == nkpts
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
         pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
-            expLk = fft_matrix(self.bvkmesh)
+            kmesh, with_gamma_point = _get_kmesh(kpts, self.bvkmesh)
+            expLk = fft_matrix(kmesh, with_gamma_point)
             nao = cell.nao
-            kk_conserv = k2gamma.double_translation_indices(self.bvkmesh)
-            conj_mapping = cp.asarray(conj_kpts(self.bvkmesh), dtype=np.int32)
+            kk_conserv = k2gamma.double_translation_indices(kmesh)
+            conj_mapping = cp.asarray(conj_kpts(kmesh, with_gamma_point), dtype=np.int32)
             out_buf = out
 
         cderi_buf = out
