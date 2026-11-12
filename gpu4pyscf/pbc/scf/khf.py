@@ -27,7 +27,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
-from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs, member
+from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -39,12 +39,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts
-
-def _check_kpts(kpts):
-    if len(member(np.zeros(3), kpts)) == 0:
-        raise NotImplementedError(
-            'GPU PBC SCF requires k-point sampling to include the Gamma point')
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _get_mp_mesh
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -371,7 +366,6 @@ class KSCF(pbchf.SCF):
             self.kpts = self.__dict__.pop('kpts')
 
         kpts = self.kpts
-        _check_kpts(kpts)
 
         with_df = self.with_df
         if len(kpts) > 1 and getattr(with_df, '_j_only', False):
@@ -515,11 +509,10 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
-        # TODO: Use the MP mesh and off-Gamma flag from the KPoints class to
-        # call conj_kpts(mp_mesh, with_gamma_point=...)
-        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
-        if nkpts == np.prod(kmesh):
-            return conj_kpts(kmesh, return_pair=True)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
+        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, kmesh)
+        if nkpts == np.prod(mp_mesh):
+            return conj_kpts(mp_mesh, with_gamma_point, return_pair=True)
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 
