@@ -564,6 +564,7 @@ def get_sigma(
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if orbs is None:
         orbs = list(range(nmo))
@@ -889,6 +890,7 @@ def get_sigma_outcore(
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if orbs is None:
         orbs = list(range(nmo))
@@ -1130,6 +1132,7 @@ def get_sigma_exchange(gw, mo_coeff_full=None, mo_occ_full=None):
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if mo_coeff_full is None:
         mo_coeff_full = gw.mo_coeff

@@ -317,6 +317,7 @@ def get_rpa_ecorr(rpa, freqs, wts):
     kpts = rpa.kpts
     nw = len(freqs)
     mydf = rpa.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # possible kpts shift center
     kscaled = rpa.mol.get_scaled_kpts(kpts)
@@ -445,6 +446,7 @@ def get_rpa_ecorr_outcore(rpa, freqs, wts):
     kpts = rpa.kpts
     nw = len(freqs)
     mydf = rpa.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # possible kpts shift center
     kscaled = rpa.mol.get_scaled_kpts(kpts)
@@ -589,6 +591,7 @@ def get_rpa_ecorr_outcore_metal(rpa, freqs, wts):
     kpts = rpa.kpts
     nw = len(freqs)
     mydf = rpa.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # possible kpts shift center
     kscaled = rpa.mol.get_scaled_kpts(kpts)
@@ -757,6 +760,7 @@ def get_rpa_exx(rpa, acfd=False, correction_only=False):
     nkpts = rpa.nkpts
     kpts = rpa.kpts
     mydf = rpa.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # Precompute k-conservation table, kconserv_table[kL, i] = j with - ki + kj + kL = G,
     # for kpts shifted by kpts[0] (possible kpts shift center)
