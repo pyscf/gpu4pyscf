@@ -43,7 +43,7 @@ from gpu4pyscf.pbc.df.ft_ao import (
     libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts)
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_mp_mesh)
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -76,16 +76,10 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         assert is_gamma_point
 
     if bvk_kmesh is None:
-        if j_only:
-            # Coulomb integrals can be converged within a smaller bvk cell.
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-        else:
-            # Remote images may contribute to certain k-point mesh, contributing
-            # to the finite-size effects in HFX. For sufficiently large number of
-            # kpts, the truncation radius cell.rcut may cause finite-size errors.
-            # Use a large radius to generate MP kmesh.
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10,
-                                      bound_by_supmol=False)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10)
+
+    if not is_gamma_point:
+        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, bvk_kmesh)
 
     nao = cell.nao
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh).build()
@@ -121,7 +115,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         conj_mapping = cp.asarray(
-            conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+            conj_kpts(mp_mesh, with_gamma_point), dtype=np.int32)
         nkpts = len(kpts)
         out = _unpack_cderi_v2(j3c, pair_address, np.arange(nkpts),
                                conj_mapping, expLk, nao, axis=1)
@@ -134,23 +128,28 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
         conj_mapping = cp.asarray(
-            conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+            conj_kpts(mp_mesh, with_gamma_point), dtype=np.int32)
 
         axis = 0 # Transform index i
-        expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
-        j3c = contract('Lqt,LKz->Kqtz', j3c, expLk_conjz)
+        # Auxiliary momentum q = kj - ki. It includes Gamma even when the
+        # orbital kpoints mesh is shifted. bvkmesh is the larger BvK mesh.
+        # len(bvkmesh_Ls) != len(qpts) for off-gamma kpts
+        qpts = cp.asarray(auxcell.make_kpts(mp_mesh, with_gamma_point=True))
+        expLq_conj = cp.exp(-1j*bvkmesh_Ls.dot(qpts.T))
+        expLq_conjz = expLq_conj.view(np.float64).reshape(nL,nkpts,2)
+        j3c = contract('Lqt,LKz->Kqtz', j3c, expLq_conjz)
         j3c = j3c.view(np.complex128)[...,0]
         out = cp.empty((nkpts,nkpts,naux,nao,nao), dtype=np.complex128)
-        kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+        kk_conserv = double_translation_indices(mp_mesh)
         for k in range(nkpts):
             ki_idx, kj_idx = cp.where(kk_conserv == k)
             out[k] = _unpack_cderi_v2(j3c[k], pair_address, kj_idx,
                                       conj_mapping, expLk, nao, axis)
-        j3c = None
+        j3c = expLq_conj = expLq_conjz = None
 
         # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi
         # therefore, i=ijk_conserv[k,j]
-        ijk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+        ijk_conserv = kk_conserv
         if axis == 0:
             #for ki in range(nkpts):
             #    for kj in range(nkpts):
@@ -245,6 +244,7 @@ class SRInt3c2eOpt:
         With separate_dd=True, the SR evaluator contains only compact pairs;
         dd_ft_opt holds the complementary Fourier-transform pair list.
         """
+        assert not self.cell.space_group_symmetry
         auxcell = self.auxcell = SortedCell.from_cell(self.auxcell)
         assert auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
 

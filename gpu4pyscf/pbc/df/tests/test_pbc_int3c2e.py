@@ -95,6 +95,28 @@ def test_int3c2e_kpoints():
     ref = int3c().reshape(dat.shape)
     assert abs(dat - ref).max() < 1e-8
 
+def test_int3c2e_off_gamma():
+    cell = pyscf.M(
+        atom='He .2 .3 .4; He 1.2 1.5 1.8',
+        a=np.diag([5., 5.5, 6.]), unit='Bohr',
+        basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+        precision=1e-10, verbose=0)
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1.1, 1.]], [1, [.7, 1.]]]
+    auxcell.build()
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    nkpts = len(kpts)
+    omega = -.5
+    dat = sr_aux_e2(cell, auxcell, omega, kpts).get()
+    builder = rsdf_builder._RSGDFBuilder(cell, auxcell, kpts).build(omega=abs(omega))
+    kernel = builder.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
+    ref = kernel().reshape(nkpts, nkpts, cell.nao, cell.nao, auxcell.nao)
+    np.testing.assert_allclose(dat, ref, atol=1e-8, rtol=0)
+
+    dat_j = sr_aux_e2(cell, auxcell, omega, kpts, j_only=True).get()
+    diag_idx = np.diag_indices(nkpts)
+    np.testing.assert_allclose(dat_j, ref[diag_idx], atol=1e-8, rtol=0)
+
 def test_minor_diffused_basis():
     cell = pyscf.M(
         atom='''H   1.3    .2       .3
