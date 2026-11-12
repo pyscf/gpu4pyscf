@@ -50,8 +50,9 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.tools import k2gamma, get_coulG, ke_to_mesh, mesh_to_ke
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts, _get_mp_mesh
+from gpu4pyscf.pbc.tools import get_coulG, ke_to_mesh, mesh_to_ke
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts, _get_kmesh
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
@@ -1596,9 +1597,9 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
     if bvk_ncells == 1:
         dm_sc = dms
     else:
-        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, ni.kmesh)
-        assert len(kpts) == np.prod(mp_mesh)
-        expLk = fft_matrix(mp_mesh, with_gamma_point=with_gamma_point)
+        kmesh, with_gamma_point = _get_kmesh(kpts, ni.bvkmesh)
+        assert len(kpts) == np.prod(kmesh)
+        expLk = fft_matrix(kmesh, with_gamma_point=with_gamma_point)
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
@@ -1619,8 +1620,8 @@ def _inverse_wannier_transform_fock(ni, veff, kpts):
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
-        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, ni.kmesh)
-        expLk = fft_matrix(mp_mesh, with_gamma_point=with_gamma_point)
+        kmesh, with_gamma_point = _get_kmesh(kpts, ni.bvkmesh)
+        expLk = fft_matrix(kmesh, with_gamma_point=with_gamma_point)
         nkpts = expLk.shape[1]
         expLkz = expLk.view(np.float64).reshape(bvk_ncells, nkpts, 2)
         veff = contract('Lpq,Lkz->kpqz', veff, expLkz)
@@ -1844,8 +1845,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
-        ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band)
+        ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
         ni.mesh = mesh
@@ -1980,8 +1981,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
-        ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band)
+        ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
         ni.mesh = mesh
@@ -2052,7 +2053,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         self._reciprocal_lattice_vectors = None
         return self
 
-    def build(self, kmesh=None, xctype='MGGA'):
+    def build(self, bvkmesh=None, xctype='MGGA'):
         log = logger.new_logger(self.cell)
         t0 = log.init_timer()
         cell = self.sorted_cell = SortedGTO.from_cell(
@@ -2060,15 +2061,15 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
 
         self.xctype = xctype
-        self.kmesh = kmesh
-        if kmesh is None:
+        self.bvkmesh = bvkmesh
+        if bvkmesh is None:
             bvkcell = cell
             bvkmesh_Ls = np.zeros((1, 3))
         else:
-            bvkcell = super_cell(cell, kmesh, wrap_around=True)
+            bvkcell = super_cell(cell, bvkmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in the super_cell function
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            bvkmesh_Ls = translation_vectors_for_kmesh(cell, kmesh, wrap_around=True)
+            bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, wrap_around=True)
         self.bvkcell = bvkcell
         self.bvkmesh_Ls = bvkmesh_Ls
         bvk_ncells = len(bvkmesh_Ls)
@@ -2156,13 +2157,13 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         return self
 
     def _ensure_initialized(self, kpts, xctype):
-        kmesh = k2gamma.kpts_to_kmesh(self.cell, kpts)
+        bvkmesh = kpts_to_bvkmesh(self.cell, kpts)
         if (self.bvkcell is None or
-            any(self.kmesh != kmesh) or
+            any(self.bvkmesh != bvkmesh) or
             # LDA and GGA share the same initialization parameters.
             # MGGA requires a little bit higher energy cutoff and rcut
             (xctype == 'MGGA' and self.xctype != xctype)):
-            self.build(kmesh, xctype)
+            self.build(bvkmesh, xctype)
         return self
 
     get_nuc = get_nuc

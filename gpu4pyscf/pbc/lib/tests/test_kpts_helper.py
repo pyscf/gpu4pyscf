@@ -63,18 +63,18 @@ def test_kk_adapted_iter():
 def test_kk_adapted_iter_off_gamma():
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
                    a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
-    mp_mesh = [4, 1, 1]
-    kpts = cell.make_kpts(mp_mesh, with_gamma_point=False)
-    qpts = cell.make_kpts(mp_mesh, with_gamma_point=True)
+    kmesh = [4, 1, 1]
+    kpts = cell.make_kpts(kmesh, with_gamma_point=False)
+    qpts = cell.make_kpts(kmesh, with_gamma_point=True)
     scaled_k = cell.get_scaled_kpts(kpts)
     scaled_q = cell.get_scaled_kpts(qpts)
     differences = scaled_k[None, :, :] - scaled_k[:, None, :]
-    groups = list(kpts_helper.kk_adapted_iter(mp_mesh, with_gamma_point=False))
+    groups = list(kpts_helper.kk_adapted_iter(kmesh, with_gamma_point=False))
     expected_pairs = [[0, 0], [1, 3], [2, 2]]
     # Conjugation is on the transfer mesh, not the shifted orbital mesh.
     np.testing.assert_array_equal([g[:2] for g in groups], expected_pairs)
     pairs = list(kpts_helper.kk_adapted_iter(
-        mp_mesh, with_gamma_point=False, return_pair_index=False))
+        kmesh, with_gamma_point=False, return_pair_index=False))
     np.testing.assert_array_equal(pairs, expected_pairs)
     for q, q_conj, ki, kj in groups:
         # Check the complete pair list against actual momentum differences.
@@ -111,46 +111,46 @@ def test_fft_matrix_off_gamma():
 def test_conj_kpts():
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
                    a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
-    mp_mesh = [2, 3, 1]
-    kpts = cell.make_kpts(mp_mesh, with_gamma_point=True)
-    mapping = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=True)
+    kmesh = [2, 3, 1]
+    kpts = cell.make_kpts(kmesh, with_gamma_point=True)
+    mapping = kpts_helper.conj_kpts(kmesh, with_gamma_point=True)
     np.testing.assert_array_equal(mapping, [0, 2, 1, 3, 5, 4])
-    pairs = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=True, return_pair=True)
+    pairs = kpts_helper.conj_kpts(kmesh, with_gamma_point=True, return_pair=True)
     np.testing.assert_array_equal(pairs, [[0, 0], [1, 2], [3, 3], [4, 5]])
 
-    kpts = cell.make_kpts(mp_mesh, with_gamma_point=False)
-    mapping = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=False)
+    kpts = cell.make_kpts(kmesh, with_gamma_point=False)
+    mapping = kpts_helper.conj_kpts(kmesh, with_gamma_point=False)
     np.testing.assert_array_equal(mapping, [5, 4, 3, 2, 1, 0])
-    pairs = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=False, return_pair=True)
+    pairs = kpts_helper.conj_kpts(kmesh, with_gamma_point=False, return_pair=True)
     np.testing.assert_array_equal(pairs, [[0, 5], [1, 4], [2, 3]])
 
-def test_get_mp_mesh():
+def test_get_kmesh():
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]], a=np.eye(3)*5)
     kpts = cell.make_kpts([2, 3, 1])
-    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [2, 3, 1])
+    mesh, fft_order = kpts_helper._get_kmesh(kpts, [2, 3, 1])
     np.testing.assert_array_equal(mesh, [2, 3, 1])
     assert fft_order
 
-    # One even dimension doubles the bvk_kmesh size
+    # One even dimension doubles the bvkmesh size
     kpts = cell.make_kpts([3, 2, 1], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [3, 4, 1])
+    mesh, fft_order = kpts_helper._get_kmesh(kpts, [3, 4, 1])
     np.testing.assert_array_equal(mesh, [3, 2, 1])
     assert not fft_order
 
-    # Two even dimensions enlarge the bvk_kmesh by a factor of four.
+    # Two even dimensions enlarge the bvkmesh by a factor of four.
     kpts = cell.make_kpts([2, 3, 4], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [4, 3, 8])
+    mesh, fft_order = kpts_helper._get_kmesh(kpts, [4, 3, 8])
     np.testing.assert_array_equal(mesh, [2, 3, 4])
     assert not fft_order
 
-    # Three even dimensions enlarge the bvk_kmesh by a factor of eight.
+    # Three even dimensions enlarge the bvkmesh by a factor of eight.
     kpts = cell.make_kpts([2, 2, 2], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [4, 4, 4])
+    mesh, fft_order = kpts_helper._get_kmesh(kpts, [4, 4, 4])
     np.testing.assert_array_equal(mesh, [2, 2, 2])
     assert not fft_order
 
     # Shifted all-odd meshes retain the BvK dimensions but use off-Gamma ordering.
     kpts = cell.make_kpts([3, 1, 1], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [3, 1, 1])
+    mesh, fft_order = kpts_helper._get_kmesh(kpts, [3, 1, 1])
     np.testing.assert_array_equal(mesh, [3, 1, 1])
     assert not fft_order

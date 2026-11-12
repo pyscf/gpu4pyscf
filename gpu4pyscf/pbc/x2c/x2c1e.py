@@ -41,7 +41,7 @@ from gpu4pyscf.pbc.df import aft, rsdf_builder, ft_ao, int3c2e
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.gto.mole import SortedGTO, extract_pgto_params
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, hermi_triu, empty_aligned)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
@@ -191,12 +191,12 @@ class SpinFreeX2CHelper(PBCX2CHelper):
             kpts = np.zeros((1, 3))
         else:
             kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
-        t = int1e.int1e_kin(xcell, kpts, bvk_kmesh, sort_output=False)
-        s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
-        v = _get_pnucp(xcell, kpts, bvk_kmesh, intor='nuc')
-        w = _get_pnucp(xcell, kpts, bvk_kmesh, intor='pnucp')
+        t = int1e.int1e_kin(xcell, kpts, bvkmesh, sort_output=False)
+        s = int1e.int1e_ovlp(xcell, kpts, bvkmesh, sort_output=False)
+        v = _get_pnucp(xcell, kpts, bvkmesh, intor='nuc')
+        w = _get_pnucp(xcell, kpts, bvkmesh, intor='pnucp')
         if not xcell.cell.cart:
             s, t, v, w = _orbital_pair_cart2sph(xcell, [s, t, v, w])
 
@@ -243,7 +243,7 @@ class SpinFreeX2CHelper(PBCX2CHelper):
             kpts = np.zeros((1, 3))
         else:
             kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
         x = []
         if 'ATOM' in self.approx.upper():
@@ -251,10 +251,10 @@ class SpinFreeX2CHelper(PBCX2CHelper):
             if not is_single_kpt:
                 x = cp.repeat(x_wo_pbc[None], len(kpts), axis=0)
         else:
-            t = int1e.int1e_kin(xcell, kpts, bvk_kmesh, sort_output=False)
-            s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
-            v = _get_pnucp(xcell, kpts, bvk_kmesh, intor='nuc')
-            w = _get_pnucp(xcell, kpts, bvk_kmesh, intor='pnucp')
+            t = int1e.int1e_kin(xcell, kpts, bvkmesh, sort_output=False)
+            s = int1e.int1e_ovlp(xcell, kpts, bvkmesh, sort_output=False)
+            v = _get_pnucp(xcell, kpts, bvkmesh, intor='nuc')
+            w = _get_pnucp(xcell, kpts, bvkmesh, intor='pnucp')
             if not xcell.cell.cart:
                 s, t, v, w = _orbital_pair_cart2sph(xcell, [s, t, v, w])
             for tk, vk, wk, sk in zip(t, v, w, s):
@@ -284,7 +284,7 @@ class SpinOrbitalX2C1EHelper(PBCX2CHelper):
 
     to_cpu = utils.to_cpu
 
-def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
+def _get_pnucp(cell, kpts=None, bvkmesh=None, intor='pnucp', omega=0):
     assert isinstance(cell, SortedGTO)
     cell_exps, cs = extract_pgto_params(cell, 'diffuse')
     rsdf_omega = 0.3
@@ -299,17 +299,17 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp', omega=0):
     elif is_single_kpt:
         kpts = kpts.reshape(1, 3)
     if is_gamma_point:
-        bvk_kmesh = np.ones(3, dtype=int)
+        bvkmesh = np.ones(3, dtype=int)
         bvk_ncells = 1
-    elif bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-        bvk_ncells = np.prod(bvk_kmesh)
+    elif bvkmesh is None:
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
+        bvk_ncells = np.prod(bvkmesh)
 
     ###############################################
     # SR part
     fakenuc = aft._fake_nuc(cell, with_pseudo=False)
     int3c2e_opt = int3c2e.SRInt3c2eOpt(
-        cell, fakenuc, omega=-rsdf_omega, bvk_kmesh=bvk_kmesh).build()
+        cell, fakenuc, omega=-rsdf_omega, bvkmesh=bvkmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
 
     cell = int3c2e_opt.cell

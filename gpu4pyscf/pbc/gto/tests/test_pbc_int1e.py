@@ -465,12 +465,12 @@ def test_int1e_ovlp_off_gamma():
     )
     kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False,
                          wrap_around=True)
-    bvk_mesh = [4, 3, 1]
-    assert np.prod(bvk_mesh) > len(kpts)
+    bvkmesh = [4, 3, 1]
+    assert np.prod(bvkmesh) > len(kpts)
     assert not np.any(np.linalg.norm(kpts, axis=1) < 1e-12)
     ref = np.asarray(cell.pbc_intor('int1e_ovlp', hermi=0, kpts=kpts))
-    for mesh in (None, bvk_mesh):
-        dat = int1e.int1e_ovlp(cell, kpts, bvk_kmesh=mesh).get()
+    for mesh in (None, bvkmesh):
+        dat = int1e.int1e_ovlp(cell, kpts, bvkmesh=mesh).get()
         np.testing.assert_allclose(
             pyscf.lib.fp(dat), 0.3896393551106486-0.21954955705214407j, atol=1e-9, rtol=0)
         assert dat.shape == ref.shape

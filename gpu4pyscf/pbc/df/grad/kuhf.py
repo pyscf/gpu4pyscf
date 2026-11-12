@@ -111,7 +111,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
 
-    kpt_iters = kk_adapted_iter(int3c2e_opt.bvk_kmesh)
+    kpt_iters = kk_adapted_iter(int3c2e_opt.bvkmesh)
     kpt_iters = [(kp, kp_conj, cp.asarray(ki_idx, dtype=np.int32),
                   cp.asarray(kj_idx, dtype=np.int32))
                  for kp, kp_conj, ki_idx, kj_idx in kpt_iters]
@@ -120,7 +120,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     nkpts_uniq = len(uniq_kpts)
 
     conj_mapping = cp.asarray(
-        conj_kpts(int3c2e_opt.bvk_kmesh), dtype=np.int32)
+        conj_kpts(int3c2e_opt.bvkmesh), dtype=np.int32)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
     batch_size = blksize = 0
@@ -192,7 +192,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     log.debug('Set 2c2e integrals precision %g', precision)
     rcut = _estimate_sr_2c2e_rcut(auxcell, int3c2e_opt.omega, precision)
     with lib.temporary_env(auxcell, rcut=rcut):
-        int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh)
+        int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvkmesh)
     j2c = int2c2e_opt.int2c2e(
         uniq_kpts, sort_output=False, omega=-int3c2e_opt.omega)
     if j2c.dtype == np.float64:
@@ -674,13 +674,13 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-        bvk_kmesh = int3c2e_opt.bvk_kmesh
-        s0 = int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
+        bvkmesh = int3c2e_opt.bvkmesh
+        s0 = int1e.int1e_ovlp(cell, kpts, bvkmesh)
         k_dm = contract('nkpq,kqr->nkpr', dm, s0)
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm)
         # The k_factor was previously scaled by 1/nkpts^2.
         k_factor *= nkpts**2
-        de_ewald = int1e.ovlp_derivatives(cell, k_dm, kpts, bvk_kmesh)
+        de_ewald = int1e.ovlp_derivatives(cell, k_dm, kpts, bvkmesh)
         exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
         de_ewald *= -k_factor * exx_0 / nkpts
         ejk_sigma += de_ewald

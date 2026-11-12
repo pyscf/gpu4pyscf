@@ -12,44 +12,113 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import reduce
+from fractions import Fraction
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.lib import logger
+from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
 
-def conj_images_in_bvk_cell(kmesh, return_pair=False):
+def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False):
+    '''Infer a mesh for constructing a BvK supercell with periodic boundary
+    conditions for the given k-points.
+
+    The k-points need not include Gamma, and prod(bvkmesh) need not equal
+    len(kpts). For example, a shifted [2, 2, 2] Monkhorst-Pack mesh can be
+    represented by a [2, 2, 2] supercell with antiperiodic boundary conditions.
+    However, this function returns [4, 4, 4], corresponding to a larger
+    supercell with periodic boundary conditions.
+
+    Args:
+        cell : Cell
+            Provides the reciprocal lattice and lattice-sum cutoff.
+        kpts : ndarray of shape (nkpts, 3) or None
+            Absolute k-points in Bohr^-1. None selects Gamma.
+
+    Kwargs:
+        precision : float
+            Tolerance for fractional k-point reconstruction. Defaults to
+            max(1e-6, cell.precision * 1e2).
+        rcut : float
+            Lattice-sum radius used to set the rational-search denominator
+            limit and fallback mesh. Defaults to using cell.nimgs.
+        bound_by_supmol : bool
+            If True, the k-mesh is bound by the radius cutoff.
+            If False, the k-mesh are not capped by the radius cutoff.
+
+    Returns:
+        Integer ndarray of shape (3,) giving the BvK replication counts.
+    '''
+    if kpts is None:
+        return np.ones(3, dtype=int)
+    assert kpts.ndim == 2
+    if is_zero(kpts):
+        return np.ones(3, dtype=int)
+
+    scaled_kpts = cell.get_scaled_kpts(kpts)
+    logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
+    if rcut is None:
+        bvkmesh = np.asarray(cell.nimgs) * 2 + 1
+    else:
+        nimgs = cell.get_bounding_sphere(rcut)
+        bvkmesh = nimgs * 2 + 1
+
+    if precision is None:
+        precision = max(1e-6, cell.precision * 1e2)
+    for i in range(3):
+        floats = scaled_kpts[:,i]
+        uniq_floats_idx = np.unique((floats/precision+.5).astype(int), return_index=True)[1]
+        uniq_floats = floats[uniq_floats_idx]
+        fracs = [Fraction(x).limit_denominator(int(bvkmesh[i])+10) for x in uniq_floats]
+        denominators = np.unique([x.denominator for x in fracs])
+        common_denominator = reduce(np.lcm, denominators)
+        fs = [(x * common_denominator).numerator for x in fracs]
+        if cell.verbose >= logger.DEBUG3:
+            logger.debug3(cell, 'dim=%d common_denominator %d  error %g',
+                          i, common_denominator, abs(fs - np.rint(fs)).max())
+            logger.debug3(cell, '    unique kpts %s', uniq_floats)
+            logger.debug3(cell, '    frac kpts %s', fracs)
+        if abs(uniq_floats - np.rint(fs)/common_denominator).max() < precision:
+            bvkmesh[i] = common_denominator
+        elif not bound_by_supmol:
+            raise RuntimeError(f'Unable to find Monkhorst-Pack k-point mesh for {kpts}')
+    return bvkmesh
+
+def conj_images_in_bvk_cell(bvkmesh, return_pair=False):
     '''Map BvK images from L to -L modulo the supercell lattice.
 
-    kmesh gives the number of primitive cells along each direction in the
-    periodic BvK supercell (returned by kpts_to_kmesh). It is not MP k-point
+    bvkmesh gives the number of primitive cells along each direction in the
+    periodic BvK supercell (returned by kpts_to_bvkmesh). It is not MP k-point
     mesh.
 
-    Return an integer array of length prod(kmesh).
+    Return an integer array of length prod(bvkmesh).
     If return_pair is True, return each image pair once, including self-pairs.
     '''
     # Periodic image inversion happens to be identical to the conj_kpts for ther
     # larger MP mesh with gamma point.
-    return conj_kpts(kmesh, with_gamma_point=True, return_pair=return_pair)
+    return conj_kpts(bvkmesh, with_gamma_point=True, return_pair=return_pair)
 
-def conj_kpts(mp_mesh, with_gamma_point=True, return_pair=False):
+def conj_kpts(kmesh, with_gamma_point=True, return_pair=False):
     '''Map each MP k-point to its -k partner
 
-    mp_mesh gives the sampling mesh, not the periodic BvK mesh.
-    Points must follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point)
+    kmesh gives the sampling mesh, not the periodic BvK mesh.
+    Points must follow cell.make_kpts(kmesh, with_gamma_point=with_gamma_point)
     ordering, with no additional shift or symmetry reduction. Wrapping points
     into the first Brillouin zone does not change the map.
 
-    Return an integer array of length prod(mp_mesh). If return_pair is True,
+    Return an integer array of length prod(kmesh). If return_pair is True,
     return an (npairs, 2) array with each pair once, including self-pairs.
     '''
-    indices = [np.arange(n) for n in mp_mesh]
+    indices = [np.arange(n) for n in kmesh]
     if with_gamma_point:
-        partners = [(-idx) % n for idx, n in zip(indices, mp_mesh)]
+        partners = [(-idx) % n for idx, n in zip(indices, kmesh)]
     else:
         # For k_j = (j + .5)/n - .5, negating k_j gives index n-1-j.
-        partners = [n-1-idx for idx, n in zip(indices, mp_mesh)]
-    nx, ny, nz = mp_mesh
+        partners = [n-1-idx for idx, n in zip(indices, kmesh)]
+    nx, ny, nz = kmesh
     conj_kx, conj_ky, conj_kz = partners
     mapping = (conj_kx[:,None,None]*(ny*nz) +
                conj_ky[None,:,None]*nz + conj_kz).ravel()
@@ -70,7 +139,7 @@ def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     q_mesh must include gamma, regardless whether kpts are generated with
     "with_gamma_point", because the common k-shift in kj and ki cancels.
     For off-gamma sampling [2, 3, 1], q_mesh is [2, 3, 1], not the larger
-    periodic BvK mesh [4, 3, 1] (by kpts_to_kmesh).
+    periodic BvK mesh [4, 3, 1] (by kpts_to_bvkmesh).
 
     The transfer k-points for q_mesh have the same ordering as
     qpts = cell.make_kpts(q_mesh, with_gamma_point=True).
@@ -136,13 +205,13 @@ def reset_kpts(kpts, cell):
                    time_reversal_symmetry=kpts.time_reversal)
     return kpts
 
-def fft_matrix(mp_mesh, with_gamma_point=True):
+def fft_matrix(kmesh, with_gamma_point=True):
     '''Fourier coefficients from a periodic BvK supercell to MP k-points.
 
-    mp_mesh gives the Monkhorst-Pack sampling mesh, not the larger
-    periodic BvK mesh used by integral routines. If with_gamma_point is False,
-    each even dimension is doubled to form the periodic supercell. Odd
-    meshes are unchanged.
+    kmesh gives the Monkhorst-Pack sampling mesh, not the larger periodic BvK
+    mesh used by integral routines. If with_gamma_point is False, each even
+    dimension is doubled to form the periodic supercell. Odd meshes are
+    unchanged.
 
     The result has shape (bvk_ncells, nkpts). For example, shifted [2, 3, 1]
     sampling gives a (12, 6) matrix. Its coefficients are exp(1j*L.dot(k)),
@@ -151,34 +220,34 @@ def fft_matrix(mp_mesh, with_gamma_point=True):
     S_k = einsum('iLj,LK->Kij', S_bvk, fft_matrix)
 
     Rows follow translation_vectors_for_kmesh for the periodic supercell.
-    Columns follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point).
+    Columns follow cell.make_kpts(kmesh, with_gamma_point=with_gamma_point).
     '''
-    mp_mesh = np.asarray(mp_mesh)
-    nkpts = np.prod(mp_mesh)
-    nx, ny, nz = mp_mesh
+    kmesh = np.asarray(kmesh)
+    nkpts = np.prod(kmesh)
+    nx, ny, nz = kmesh
     if with_gamma_point:
-        bvk_kmesh = mp_mesh
+        bvkmesh = kmesh
         kx = np.fft.fftfreq(nx)
         ky = np.fft.fftfreq(ny)
         kz = np.fft.fftfreq(nz)
     else:
-        # For even n, kpts_to_kmesh creates larger BvK mesh, which requires
+        # For even n, kpts_to_bvkmesh creates larger BvK mesh, which requires
         # twice cells for periodic boundaries
-        bvk_kmesh = np.where(mp_mesh % 2 == 0, 2*mp_mesh, mp_mesh)
+        bvkmesh = np.where(kmesh % 2 == 0, 2*kmesh, kmesh)
         # cell.make_kpts(with_gamma_point=False) uses this ks ordering
         kx = (np.arange(nx) + .5) / nx - .5
         ky = (np.arange(ny) + .5) / ny - .5
         kz = (np.arange(nz) + .5) / nz - .5
-    Lx = np.arange(bvk_kmesh[0])
-    Ly = np.arange(bvk_kmesh[1])
-    Lz = np.arange(bvk_kmesh[2])
+    Lx = np.arange(bvkmesh[0])
+    Ly = np.arange(bvkmesh[1])
+    Lz = np.arange(bvkmesh[2])
     Fx = cp.exp(cp.asarray(2j*np.pi * Lx[:,None] * kx))
     Fy = cp.exp(cp.asarray(2j*np.pi * Ly[:,None] * ky))
     Fz = cp.exp(cp.asarray(2j*np.pi * Lz[:,None] * kz))
     expLk = (Fx[:,None,None,:,None,None] *
              Fy[None,:,None,None,:,None] *
              Fz[None,None,:,None,None,:])
-    return expLk.reshape(np.prod(bvk_kmesh), nkpts)
+    return expLk.reshape(np.prod(bvkmesh), nkpts)
 
 def _normalize_kpts(kpts):
     '''Normalize k-points to an (nkpts, 3) array and flag single-point input.
@@ -231,33 +300,33 @@ def _normalize_kpts(kpts):
     assert kpts.ndim == 2
     return kpts, not is_single_kpt
 
-def _get_mp_mesh(kpts, bvk_mesh=None):
+def _get_kmesh(kpts, bvkmesh=None):
     '''Recover MP mesh from their minimal periodic BvK embedding.
 
     This temporary helper assumes a complete mesh in cell.make_kpts order
-    and bvk_mesh from kpts_to_kmesh. It does not validate arbitrary
+    and bvkmesh from kpts_to_bvkmesh. It does not validate arbitrary
     k-point lists.
 
-    Return (mp_mesh, with_gamma_point), which can be used to reproduce kpts via
-    cell.make_kpts(mp_mesh, with_gamma_point)
+    Return (kmesh, with_gamma_point), which can be used to reproduce kpts via
+    cell.make_kpts(kmesh, with_gamma_point)
     '''
     # TODO: if isinstance(kpts, KPoints):
-    # TODO:     return kpts.mp_mesh, kpts.with_gamma_point
+    # TODO:     return kpts.kmesh, kpts.with_gamma_point
 
     # Assume kpts comes directly from cell.make_kpts, with no extra shift,
     # reordering or symmetry reduction. The BvK mesh must be the minimal
     # periodic embedding, not a larger user-selected or cutoff-limited mesh.
     # Under these assumptions, its size is 1, 2, 4 or 8 times len(kpts).
-    assert bvk_mesh is not None
-    mp_mesh = np.array(bvk_mesh, copy=True)
-    bvk_ncells = np.prod(mp_mesh)
+    assert bvkmesh is not None
+    kmesh = np.array(bvkmesh, copy=True)
+    bvk_ncells = np.prod(kmesh)
     nkpts = len(kpts)
     if bvk_ncells == nkpts:
         fft_order = abs(kpts[0]).max() < 1e-10
-        return mp_mesh, fft_order
+        return kmesh, fft_order
 
-    mp_mesh[mp_mesh % 2 == 0] //= 2
-    if np.prod(mp_mesh) != nkpts:
-        raise ValueError('bvk_mesh and k-point count do not describe a complete MP mesh')
+    kmesh[kmesh % 2 == 0] //= 2
+    if np.prod(kmesh) != nkpts:
+        raise ValueError('bvkmesh and k-point count do not describe a complete MP mesh')
     fft_order = False
-    return mp_mesh, fft_order
+    return kmesh, fft_order

@@ -42,8 +42,8 @@ from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao, int3c2e
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, conj_kpts, _normalize_kpts)
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+    kk_adapted_iter, conj_kpts, _normalize_kpts, _get_kmesh)
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import libpbc, SRInt3c2eOpt
@@ -62,7 +62,7 @@ PREFER_ED = True
 
 THREADS = 256
 
-def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
+def build_cderi(cell, auxcell, kpts=None, bvkmesh=None, j_only=False,
                 omega=None, linear_dep_threshold=LINEAR_DEP_THR,
                 compress=False, exclude_dd=False, int3c2e_opt=None):
     '''
@@ -75,41 +75,31 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     assert cell.dimension >= 2
 
     kpts, _ = _normalize_kpts(kpts)
+    if bvkmesh is None:
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
+    kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+    assert np.prod(kmesh) == len(kpts)
+
     is_gamma_point = is_zero(kpts)
     if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
             cell, auxcell, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
-        kpts = np.zeros((1, 3))
-        kmesh = np.array([1, 1, 1])
     elif j_only:
-        # Coulomb integrals can be converged within a smaller bvk cell.
-        if kmesh is None:
-            kmesh = kpts_to_kmesh(cell, kpts)
-        else:
-            assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
-            cell, auxcell, kmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
+            cell, auxcell, bvkmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
     else:
-        # Remote images may contribute to certain k-point mesh, contributing
-        # to the finite-size effects in HFX. For sufficiently large number of
-        # kpts, the truncation radius cell.rcut may cause finite-size errors.
-        # Use a large radius to generate MP kmesh.
-        if kmesh is None:
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
-        else:
-            assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
-            cell, auxcell, kpts, kmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
+            cell, auxcell, kpts, bvkmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
     if compress:
         return cderi, cderip, cderi_idx
 
-    kpt_iters = list(kk_adapted_iter(kmesh))
+    kpt_iters = list(kk_adapted_iter(bvkmesh))
     if not (is_gamma_point or j_only):
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = cp.asarray(conj_kpts(kmesh), dtype=np.int32)
-    bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
+    conj_mapping = cp.asarray(conj_kpts(bvkmesh), dtype=np.int32)
+    bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, bvkmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao
     for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
@@ -201,11 +191,11 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2ctag = 'ED'
     return j2c, j2c_negative, j2ctag
 
-def _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, bvk_kmesh=None):
+def _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, bvkmesh=None):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is not None:
         assert uniq_kpts.ndim == 2
-    j2c = sr_int2c2e(auxcell, rsdf_omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+    j2c = sr_int2c2e(auxcell, rsdf_omega, kpts=uniq_kpts, bvkmesh=bvkmesh)
     j2c = cp.asarray(j2c)
 
     with_long_range = omega < rsdf_omega
@@ -267,7 +257,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, bvk_kmesh=None):
                 auxG = auxG_conj = v = None
     return j2c
 
-def _guess_omega(cell, kmesh=None):
+def _guess_omega(cell, bvkmesh=None):
     '''Guess optimal omega parameter for int3c2e'''
     #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
     #omega = cell_exps.min()**.5
@@ -279,7 +269,7 @@ def _guess_omega(cell, kmesh=None):
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     nGv = np.prod(mesh)
-    if kmesh is None or np.prod(kmesh) == 1:
+    if bvkmesh is None or np.prod(bvkmesh) == 1:
         if nGv > 2000:
             # Scale ke_cutoff to produce roughly ~3000 Gv points
             ke_cutoff *= (2e3/nGv)**(2./3)
@@ -401,14 +391,14 @@ def _append_dd_cderi(opt, cderi, cd_j2c_cache, omega, recontract, kpts=None):
 def compressed_cderi_gamma_point(cell, auxcell, omega=None,
                                  linear_dep_threshold=LINEAR_DEP_THR,
                                  exclude_dd=False, int3c2e_opt=None):
-    kmesh = np.array([1, 1, 1])
+    bvkmesh = np.array([1, 1, 1])
     return compressed_cderi_j_only(
-        cell, auxcell, kmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
+        cell, auxcell, bvkmesh, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
 
-def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
+def compressed_cderi_j_only(cell, auxcell, bvkmesh, omega=None,
                             linear_dep_threshold=LINEAR_DEP_THR,
                             exclude_dd=False, int3c2e_opt=None):
-    assert kmesh is not None
+    assert bvkmesh is not None
     log = logger.new_logger(cell)
     t0 = t1 = log.init_timer()
 
@@ -417,9 +407,9 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     else:
         omega = abs(omega)
     if int3c2e_opt is None:
-        rsdf_omega = max(omega, _guess_omega(cell, kmesh))
+        rsdf_omega = max(omega, _guess_omega(cell, bvkmesh))
         int3c2e_opt = SRInt3c2eOpt(
-            cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build(separate_dd=True)
+            cell, auxcell, omega=rsdf_omega, bvkmesh=bvkmesh).build(separate_dd=True)
 
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
@@ -432,7 +422,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         auxcell, None, omega, rsdf_omega, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
 
-    is_gamma_point = kmesh is None or np.prod(kmesh) == 1
+    is_gamma_point = bvkmesh is None or np.prod(bvkmesh) == 1
 
     with_long_range = omega < rsdf_omega
     if with_long_range:
@@ -583,18 +573,18 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     t1 = log.timer_debug1('build cderi', *t1)
     return cderi, cderip, cderi_idx
 
-def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
+def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
                         linear_dep_threshold=LINEAR_DEP_THR, exclude_dd=False,
                         int3c2e_opt=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
-    if kmesh is None:
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+    if bvkmesh is None:
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     kpts = kpts.reshape(-1, 3)
-    bvk_ncells = int(np.prod(kmesh))
+    bvk_ncells = int(np.prod(bvkmesh))
     assert len(kpts) == bvk_ncells
-    kpt_iters = list(kk_adapted_iter(kmesh))
+    kpt_iters = list(kk_adapted_iter(bvkmesh))
     # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
@@ -604,9 +594,9 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     else:
         omega = abs(omega)
     if int3c2e_opt is None:
-        rsdf_omega = max(omega, _guess_omega(cell, kmesh))
+        rsdf_omega = max(omega, _guess_omega(cell, bvkmesh))
         int3c2e_opt = SRInt3c2eOpt(
-            cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build(separate_dd=True)
+            cell, auxcell, omega=rsdf_omega, bvkmesh=bvkmesh).build(separate_dd=True)
 
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
@@ -615,7 +605,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
 
     log.debug('Generate auxcell 2c2e integrals. naux=%d', auxcell.nao)
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, kmesh)
+        auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, bvkmesh)
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
     n_compact_pairs = int3c2e_opt.get_n_compact_pairs()
@@ -1044,9 +1034,9 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     kpts, is_single_kpt = _normalize_kpts(kpts)
     is_gamma_point = is_zero(kpts)
     if is_gamma_point:
-        bvk_kmesh = np.ones(3, dtype=int)
+        bvkmesh = np.ones(3, dtype=int)
     else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
     # Guess range-separation parameter based on system size
     omega = 0.4
@@ -1062,7 +1052,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
               omega, ke_cutoff, mesh)
 
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
-    int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvkmesh=bvkmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
     nuc = int3c2e_opt.contract_auxvec(charges, kpts)
 

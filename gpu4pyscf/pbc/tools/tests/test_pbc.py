@@ -65,7 +65,7 @@ def test_madelung_off_gamma():
     probe_cell.a = sampling_mesh[:, None] * cell.lattice_vectors()
     probe_cell.build(0, 0)
     # For off-Gamma kpts, the sampling supercell size is [2, 3, 1], not [4, 3,
-    # 1] mesh returned by kpts_to_kmesh.
+    # 1] mesh returned by kpts_to_bvkmesh.
     reference = -2 * probe_cell.ewald()
     actual = pbc.madelung(cell, kpts)
     np.testing.assert_allclose(actual, reference, atol=1e-10, rtol=0)

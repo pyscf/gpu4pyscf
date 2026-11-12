@@ -215,7 +215,7 @@ def test_sr_int2c2e():
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvkmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
     cell = cell.copy()
@@ -247,7 +247,7 @@ C    D
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvkmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
 def test_contract_dm_gamma_point():
@@ -421,7 +421,7 @@ C    D
     batch_size = int(ref.shape[0] *.23)
     eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
     counts = int3c2e._count_ao_pairs(
-        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+        opt.cell, batches, cell.cart, np.prod(opt.bvkmesh))
     ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
@@ -437,14 +437,14 @@ C    D
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)
     assert abs(dat - ref).max() < 2e-10
 
-    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh=[3,1,2]).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvkmesh=[3,1,2]).build()
     eval_j3c = opt.int3c2e_evaluator()[0]
     ref = eval_j3c()
     batch_size = int(ref.shape[0] *.23)
 
     eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
     counts = int3c2e._count_ao_pairs(
-        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+        opt.cell, batches, cell.cart, np.prod(opt.bvkmesh))
     ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
@@ -548,7 +548,7 @@ def test_contract_auxvec_with_kpts():
                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
                     mesh=[15]*3, precision=1e-8, verbose=0)
     kpts = cell.make_kpts([3, 1, 1])
-    opt = int3c2e.SRInt3c2eOpt(cell, cell, omega=-.4, bvk_kmesh=[3, 1, 1]).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, cell, omega=-.4, bvkmesh=[3, 1, 1]).build()
     args = (cp.ones(opt.auxcell.nao),)
     gamma = opt.contract_auxvec(*args)
     gamma_batch = opt.contract_auxvec(*args, kpts=np.zeros((1, 3)))

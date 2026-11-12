@@ -15,7 +15,8 @@
 import numpy as np
 import pytest
 from pyscf.pbc import gto
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, gamma2k_phase
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.tools.k2gamma import gamma2k_phase
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 
 
@@ -23,13 +24,13 @@ from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
     ([2, 2, 2], [4, 4, 4]),
     ([2, 3, 1], [4, 3, 1]),
 ])
-def test_kpts_to_kmesh(sampling_mesh, shifted_embedding):
+def test_kpts_to_bvkmesh(sampling_mesh, shifted_embedding):
     cell = gto.M(atom='He 0 0 0', basis='sto-3g',
                  a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]],
                  unit='Bohr', verbose=0)
     kpts = cell.make_kpts(sampling_mesh, with_gamma_point=False,
                          wrap_around=True)
-    kmesh = kpts_to_kmesh(cell, kpts)
+    kmesh = kpts_to_bvkmesh(cell, kpts)
     np.testing.assert_array_equal(kmesh, shifted_embedding)
 
     # Each sampled Bloch function is periodic over the inferred supercell.

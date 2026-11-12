@@ -42,7 +42,7 @@ from gpu4pyscf.lib.memcpy import copy_array
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import AFTDF
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.lib.kpts_helper import (
     reset_kpts, fft_matrix, conj_kpts, _normalize_kpts)
 from gpu4pyscf.__config__ import num_devices
@@ -56,7 +56,7 @@ class GDF(lib.StreamObject):
     blockdim = df_cpu.GDF.blockdim
     is_gamma_point = False
 
-    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
+    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'bvkmesh'})
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
@@ -138,13 +138,13 @@ class GDF(lib.StreamObject):
         kpts = self.kpts
         if self.is_gamma_point:
             assert kpts is None or is_zero(kpts)
-            self.kmesh = [1] * 3
+            self.bvkmesh = [1] * 3
         else:
-            self.kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=not self._j_only)
+            self.bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=not self._j_only)
 
         t1 = (logger.process_clock(), logger.perf_counter())
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
-            cell, auxcell, kpts, self.kmesh, j_only=self._j_only, omega=self._omega,
+            cell, auxcell, kpts, self.bvkmesh, j_only=self._j_only, omega=self._omega,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
         ao_pair_mapping, diag_idx = self._cderi_idx
         logger.debug1(self, 'len(cderi)=%d len(ao_pair)=%d len(diag)=%d',
@@ -178,7 +178,7 @@ class GDF(lib.StreamObject):
         cell = self.cell
         if self._cderi is None:
             self.build(j_only=self._j_only)
-        nkpts = np.prod(self.kmesh)
+        nkpts = np.prod(self.bvkmesh)
         if kpts is not None:
             assert len(kpts) == nkpts
         if aux_iter is None:
@@ -186,10 +186,10 @@ class GDF(lib.StreamObject):
             aux_iter = lib.prange(0, naux, blksize)
         pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
-            expLk = fft_matrix(self.kmesh)
+            expLk = fft_matrix(self.bvkmesh)
             nao = cell.nao
-            kk_conserv = k2gamma.double_translation_indices(self.kmesh)
-            conj_mapping = cp.asarray(conj_kpts(self.kmesh), dtype=np.int32)
+            kk_conserv = k2gamma.double_translation_indices(self.bvkmesh)
+            conj_mapping = cp.asarray(conj_kpts(self.bvkmesh), dtype=np.int32)
             out_buf = out
 
         cderi_buf = out

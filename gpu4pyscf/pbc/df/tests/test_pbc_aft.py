@@ -357,8 +357,8 @@ class KnownValues(unittest.TestCase):
 
     def test_ek_derivatives_off_gamma(self):
         cell = self.cell
-        mp_mesh = [2, 3, 1]
-        kpts = cell.make_kpts(mp_mesh, with_gamma_point=False)
+        kmesh = [2, 3, 1]
+        kpts = cell.make_kpts(kmesh, with_gamma_point=False)
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         grad_sigma = aft.AFTDF(cell, kpts).get_ek_derivatives(
             dm, kpts=kpts, exxdiv='ewald')
@@ -366,7 +366,7 @@ class KnownValues(unittest.TestCase):
                                    atol=1e-8, rtol=0)
 
         def exchange_energy(moved):
-            moved_kpts = moved.make_kpts(mp_mesh, with_gamma_point=False)
+            moved_kpts = moved.make_kpts(kmesh, with_gamma_point=False)
             vk = aft_cpu.AFTDF(moved, moved_kpts).get_jk(
                 dm, with_j=False, exxdiv='ewald')[1]
             return .5 * np.einsum('kij,kji->', vk, dm).real / len(kpts)

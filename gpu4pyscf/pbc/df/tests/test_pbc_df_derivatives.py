@@ -372,7 +372,7 @@ def test_ejk_derivatives_kpts_without_long_range():
     disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
-        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh, omega=omega)[0]
+        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, bvkmesh=kmesh, omega=omega)[0]
         jaux = 0
         for ki in range(nkpts):
             jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm[ki])
@@ -430,7 +430,7 @@ def test_ejk_derivatives_kpts_with_long_range():
     disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
-        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh)[0]
+        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, bvkmesh=kmesh)[0]
         jaux = 0
         for ki in range(nkpts):
             jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm[ki])
@@ -500,7 +500,7 @@ def test_ejk_derivatives_kpts_with_long_range1():
     disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
-        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh)[0]
+        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, bvkmesh=kmesh)[0]
         jaux = 0
         for ki in range(nkpts):
             jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm[ki])
@@ -641,7 +641,7 @@ def test_uhf_ejk_derivatives_kpts_without_long_range():
     disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
-        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh, omega=omega)[0]
+        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, bvkmesh=kmesh, omega=omega)[0]
         jaux = 0
         for ki in range(nkpts):
             jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm_sf[ki])
@@ -702,7 +702,7 @@ def test_uhf_ejk_derivatives_kpts_with_long_range():
     disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
-        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh)[0]
+        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, bvkmesh=kmesh)[0]
         jaux = 0
         for ki in range(nkpts):
             jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm_sf[ki])
@@ -771,7 +771,7 @@ def test_uhf_ejk_derivatives_kpts_with_long_range1():
     disp = 1e-4
     def eval_jk(c, ac):
         kpts = c.make_kpts(kmesh)
-        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, kmesh=kmesh)[0]
+        cderi = rsdf_builder.build_cderi(c, ac, kpts=kpts, bvkmesh=kmesh)[0]
         jaux = 0
         for ki in range(nkpts):
             jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm_sf[ki])
@@ -854,7 +854,7 @@ def _mixed_dd_uhf_energy(cell, auxcell, kmesh, dm, omega, j_factor, k_factor):
     if dm.ndim == 3:
         dm = dm[:, None]
     cderi = rsdf_builder.build_cderi(
-        cell, auxcell, kpts=kpts, kmesh=kmesh, omega=omega)[0]
+        cell, auxcell, kpts=kpts, bvkmesh=kmesh, omega=omega)[0]
     total_dm = dm[0] + dm[1]
     rho = sum(cp.einsum('pij,ji->p', cderi[k, k], total_dm[k])
               for k in range(nkpts))

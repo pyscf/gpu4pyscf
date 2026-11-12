@@ -32,7 +32,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -41,7 +41,7 @@ from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_mp_mesh)
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.gto.mole import (
     group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
@@ -85,8 +85,8 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
     if q is None:
         q = np.zeros(3)
     ft_kernel = gen_ft_kernel(cell, kptjs)
-    kmesh = kpts_to_kmesh(cell, kptjs)
-    bvk_ncells = int(np.prod(kmesh))
+    bvkmesh = kpts_to_bvkmesh(cell, kptjs)
+    bvk_ncells = int(np.prod(bvkmesh))
     nao = cell.nao_nr()
     nkpts = len(kptjs)
     bytes_per_gv = nkpts * nao**2 * bvk_ncells * np.dtype(np.complex128).itemsize
@@ -150,20 +150,20 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     case and [nkpts, nGv, nao, nao] for multiple k-points
     '''
     if kpts is None:
-        kmesh = None
+        bvkmesh = None
     else:
-        kmesh = kpts_to_kmesh(cell, kpts.reshape(-1, 3))
-    opt = FTOpt(cell, kmesh)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1, 3))
+    opt = FTOpt(cell, bvkmesh)
     opt.permutation_symmetry = False
     return opt.gen_ft_kernel(verbose)
 
 # TODO: merge with pbc.gto.int1e._Int1eOpt
 class FTOpt:
-    def __init__(self, cell, bvk_kmesh=None):
+    def __init__(self, cell, bvkmesh=None):
         self.cell = cell
-        if bvk_kmesh is None:
-            bvk_kmesh = np.ones(3, dtype=int)
-        self.bvk_kmesh = bvk_kmesh
+        if bvkmesh is None:
+            bvkmesh = np.ones(3, dtype=int)
+        self.bvkmesh = bvkmesh
 
         self.rcut = None
         self._aft_envs = None
@@ -179,7 +179,7 @@ class FTOpt:
     def from_intopt(cls, opt):
         from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
         assert isinstance(opt, SRInt3c2eOpt)
-        ft_opt = FTOpt(opt.cell, opt.bvk_kmesh)
+        ft_opt = FTOpt(opt.cell, opt.bvkmesh)
         ft_opt.rcut = opt.rcut
         ft_opt._aft_envs = opt.rys_envs
         ft_opt.bvkcell = opt.bvkcell
@@ -194,13 +194,13 @@ class FTOpt:
     def build(self):
         log = logger.new_logger(self.cell)
         cell = self.cell = SortedGTO.from_cell(self.cell)
-        bvk_kmesh = self.bvk_kmesh
-        bvk_ncells = np.prod(bvk_kmesh)
-        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        if np.prod(bvk_kmesh) == 1:
+        bvkmesh = self.bvkmesh
+        bvk_ncells = np.prod(bvkmesh)
+        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvkmesh, True)
+        if np.prod(bvkmesh) == 1:
             bvkcell = cell
         else:
-            bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+            bvkcell = pbctools.super_cell(cell, bvkmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
@@ -320,7 +320,7 @@ class FTOpt:
         cell = self.cell
         if cart is None:
             cart = cell.cell.cart
-        bvk_ncells = np.prod(self.bvk_kmesh)
+        bvk_ncells = np.prod(self.bvkmesh)
         nbas = cell.nbas
         ao_loc = self.bvkcell.ao_loc_nr(cart=cart)
         nao = ao_loc[-1]
@@ -504,15 +504,15 @@ class FTOpt:
         if bvk_ncells == 1:
             image_conj_mapping = cp.zeros(1, dtype=np.int32)
         else:
-            image_conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
+            image_conj_mapping = conj_images_in_bvk_cell(self.bvkmesh)
             image_conj_mapping = cp.asarray(image_conj_mapping, dtype=np.int32)
 
-        # mp_mesh inference may need to be deferred until the actual kpts are
+        # kmesh inference may need to be deferred until the actual kpts are
         # supplied to ft_kernel.
-        mp_mesh_cached = with_gamma_point_cached = None
+        kmesh_cached = with_gamma_point_cached = None
         if kpts is not None and self.permutation_symmetry:
-            mp_mesh_cached, with_gamma_point_cached = _get_mp_mesh(
-                kpts_cached, self.bvk_kmesh)
+            kmesh_cached, with_gamma_point_cached = _get_kmesh(
+                kpts_cached, self.bvkmesh)
 
         cell = self.cell
         if transform_ao:
@@ -556,12 +556,12 @@ class FTOpt:
                 kpts = kpts_cached
                 is_single_kpt = is_single_kpt_cached
                 kpts_is_gamma_point = kpts_cached_is_gamma_point
-                mp_mesh = mp_mesh_cached
+                kmesh = kmesh_cached
                 with_gamma_point = with_gamma_point_cached
             else:
                 kpts, is_single_kpt = _normalize_kpts(kpts)
                 kpts_is_gamma_point = is_zero(kpts)
-                mp_mesh = with_gamma_point = None
+                kmesh = with_gamma_point = None
 
             if kpts_is_gamma_point and bvk_ncells == 1:
                 assert at_gamma_point
@@ -574,7 +574,7 @@ class FTOpt:
             symmetric_for_bvk_orbitals = self.permutation_symmetry and at_gamma_point
             if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
-                fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
+                fill_triu_bvk(out.view(np.float64), nao, self.bvkmesh,
                               pair_address, image_conj_mapping, bvk_axis=1)
 
             if kpts_is_gamma_point:
@@ -614,10 +614,10 @@ class FTOpt:
                     # The k <-> -k mapping for each ki in this reordered
                     # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
                     # which is stored in `conj_mapping_ki`.
-                    if mp_mesh is None:
-                        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, self.bvk_kmesh)
+                    if kmesh is None:
+                        kmesh, with_gamma_point = _get_kmesh(kpts, self.bvkmesh)
                     conj_mapping = cp.asarray(
-                        conj_kpts(mp_mesh, with_gamma_point), dtype=np.int32)
+                        conj_kpts(kmesh, with_gamma_point), dtype=np.int32)
                     conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
                     conj_mapping_ki[kj_idx] = conj_mapping
                     libpbc.fill_indexed_triu(

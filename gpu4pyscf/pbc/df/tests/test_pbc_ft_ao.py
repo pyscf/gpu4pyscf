@@ -22,7 +22,7 @@ from pyscf.pbc import gto as pgto
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from pyscf.pbc.lib.kpts_helper import kk_adapted_iter
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -104,7 +104,7 @@ class KnownValues(unittest.TestCase):
         kpti, kptj = kpti_kptj = np.random.random((2,3))
         Gv = cell.get_Gv([3]*3)
         kpts = kptj.reshape(1,3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts)
         ft_opt = ft_ao_gpu.FTOpt(cell, kmesh)
         ft_opt.permutation_symmetry = False
         ft_kern = ft_opt.gen_ft_kernel()
@@ -148,7 +148,7 @@ class KnownValues(unittest.TestCase):
             dat[p0:p1] = eval_ft(Gv, i)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 12)
 
-        ft_opt = ft_ao_gpu.FTOpt(cell, bvk_kmesh=[3,1,2]).build()
+        ft_opt = ft_ao_gpu.FTOpt(cell, bvkmesh=[3,1,2]).build()
         eval_ft, ao_pair_offsets = ft_opt.ft_evaluator()
         ref = eval_ft(Gv)
 
@@ -256,9 +256,9 @@ class KnownValues(unittest.TestCase):
             basis=[[0, [1., 1.]], [1, [.6, 1.]]],
             precision=1e-10, verbose=0)
         kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
-        bvk_mesh = kpts_to_kmesh(cell, kpts)
-        np.testing.assert_array_equal(bvk_mesh, [4, 3, 1])
-        opt = ft_ao_gpu.FTOpt(cell, bvk_mesh)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts)
+        np.testing.assert_array_equal(bvkmesh, [4, 3, 1])
+        opt = ft_ao_gpu.FTOpt(cell, bvkmesh)
 
         cached_kernel = opt.gen_ft_kernel(kpts=kpts)
         kernel = opt.gen_ft_kernel()

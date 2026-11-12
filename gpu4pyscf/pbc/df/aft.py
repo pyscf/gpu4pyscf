@@ -29,7 +29,7 @@ from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
@@ -230,7 +230,7 @@ class AFTDF(lib.StreamObject):
             coulG *= kws
         return coulG
 
-    def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,
+    def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvkmesh=None,
                 max_memory=None, transform_ao=True, **kwargs):
         '''
         Fourier transform iterator for all kpti which satisfy
@@ -246,10 +246,10 @@ class AFTDF(lib.StreamObject):
             assert is_zero(q)
             kpts = self.kpts
         kpts, _ = _normalize_kpts(kpts)
-        if bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        if bvkmesh is None:
+            bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
-        ft_opt = FTOpt(cell, bvk_kmesh).build()
+        ft_opt = FTOpt(cell, bvkmesh).build()
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
 
         bvk_ncells = len(ft_opt.bvkmesh_Ls)

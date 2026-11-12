@@ -31,7 +31,7 @@ from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 
 L_AUX_MAX = 6
 THREADS = 256
@@ -60,53 +60,53 @@ libpbc.PBCint1e_r4_origi.restype = ctypes.c_int
 libpbc.PBCint1e_r2_origi_ip2.restype = ctypes.c_int
 libpbc.PBCint1e_r4_origi_ip2.restype = ctypes.c_int
 
-def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+def int1e_ovlp(cell, kpts=None, bvkmesh=None, sort_output=True):
     # Tighten the precision of overlap integrals because errors in overlap
     # matrix will significantly amplifies the error in eigenvectors of the
     # FC=SCe equation, especially when the basis functions are linear
     # dependent or the eigenvalues have small gaps.
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-4)
+    opt = _check_opt(cell, 1, kpts, bvkmesh, 1e-4)
     return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts, sort_output)
 
-def int1e_kin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+def int1e_kin(cell, kpts=None, bvkmesh=None, sort_output=True):
     # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
     # precision to capture this effect.
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-2)
+    opt = _check_opt(cell, 1, kpts, bvkmesh, 1e-2)
     return opt.intor('PBCint1e_kin', 1, (2, 0), kpts, sort_output)
 
-def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+def int1e_ipovlp(cell, kpts=None, bvkmesh=None, sort_output=True):
     # hermi=2 for anti-symmetric matrices
-    opt = _check_opt(cell, 2, kpts, bvk_kmesh)
+    opt = _check_opt(cell, 2, kpts, bvkmesh)
     return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts, sort_output)
 
-def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 2, kpts, bvk_kmesh, 1e-2)
+def int1e_ipkin(cell, kpts=None, bvkmesh=None, sort_output=True):
+    opt = _check_opt(cell, 2, kpts, bvkmesh, 1e-2)
     return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
 
-def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
+def int1e_r2_origi(cell, kpts=None, bvkmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvkmesh)
     return opt.intor('PBCint1e_r2_origi', 1, (2, 0), kpts, sort_output)
 
-def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
+def int1e_r4_origi(cell, kpts=None, bvkmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvkmesh)
     return opt.intor('PBCint1e_r4_origi', 1, (4, 0), kpts, sort_output)
 
-def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
+def int1e_r2_origi_ip2(cell, kpts=None, bvkmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvkmesh)
     return opt.intor('PBCint1e_r2_origi_ip2', 3, (2, 1), kpts, sort_output)
 
-def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh)
+def int1e_r4_origi_ip2(cell, kpts=None, bvkmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvkmesh)
     return opt.intor('PBCint1e_r4_origi_ip2', 3, (4, 1), kpts, sort_output)
 
-def ovlp_derivatives(cell, dm, kpts=None, kmesh=None):
+def ovlp_derivatives(cell, dm, kpts=None, bvkmesh=None):
     assert isinstance(cell, Cell)
-    opt = _check_opt(cell, 1, kpts, kmesh)
+    opt = _check_opt(cell, 1, kpts, bvkmesh)
     return opt.get_ovlp_derivatives(dm, kpts)
 
-def kin_derivatives(cell, dm, kpts=None, kmesh=None):
+def kin_derivatives(cell, dm, kpts=None, bvkmesh=None):
     assert isinstance(cell, Cell)
-    opt = _check_opt(cell, 1, kpts, kmesh, scale_precision=1e-1)
+    opt = _check_opt(cell, 1, kpts, bvkmesh, scale_precision=1e-1)
     return opt.get_kin_derivatives(dm, kpts)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
@@ -115,15 +115,15 @@ def ovlp_strain_deriv(cell, dm, kpts=None):
 def kin_strain_deriv(cell, dm, kpts=None):
     return kin_derivatives(cell, dm, kpts)[-3:]
 
-def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
+def _check_opt(cell, hermi, kpts, bvkmesh=None, scale_precision=1):
     if isinstance(cell, Mole):
         return _Int1eOpt(cell, hermi)
 
     assert isinstance(cell, Cell)
-    if bvk_kmesh is None:
+    if bvkmesh is None:
         if kpts is not None:
             kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
     rcut = cell.rcut
     precision = cell.precision * scale_precision
@@ -132,29 +132,29 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh=None, scale_precision=1):
         rcut = _estimate_rcut(a, l, c, precision)
 
     with lib.temporary_env(cell, precision=precision, rcut=rcut):
-        return _Int1eOpt(cell, hermi, bvk_kmesh)
+        return _Int1eOpt(cell, hermi, bvkmesh)
 
 class _Int1eOpt:
-    def __init__(self, cell, hermi=0, bvk_kmesh=None):
+    def __init__(self, cell, hermi=0, bvkmesh=None):
         self.cell = cell = SortedGTO.from_cell(cell, decontract=True)
         lmax = self.cell.uniq_l_ctr[:,0].max()
         assert lmax <= L_AUX_MAX
 
         bvk_ncells = 1
         if isinstance(cell, Mole):
-            bvk_kmesh = None
+            bvkmesh = None
             bvkcell = cell
             bvkmesh_Ls = Ls = cp.zeros((1, 3))
         else:
-            if bvk_kmesh is None:
+            if bvkmesh is None:
                 bvkmesh_Ls = cp.zeros((1, 3))
             else:
-                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, True)
             bvk_ncells = len(bvkmesh_Ls)
             if bvk_ncells == 1:
                 bvkcell = cell
             else:
-                bvkcell = super_cell(cell, bvk_kmesh, wrap_around=True)
+                bvkcell = super_cell(cell, bvkmesh, wrap_around=True)
                 # PTR_BAS_COORD was not initialized in the super_cell function
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = _bvkcell_lattice_sum_Ls(bvkcell)
@@ -166,7 +166,7 @@ class _Int1eOpt:
             precision = bvkcell.precision / lattice_sum_factor
 
         self.hermi = hermi
-        self.bvk_kmesh = bvk_kmesh
+        self.bvkmesh = bvkmesh
         self.bvkcell = bvkcell
         self.bvkmesh_Ls = bvkmesh_Ls
 
@@ -260,7 +260,7 @@ class _Int1eOpt:
 
         is_gamma_point = kpts is None or is_zero(kpts)
         if isinstance(cell, Mole) or is_gamma_point:
-            if ncells > 1: # corresponding to self.bvk_kmesh is None
+            if ncells > 1: # corresponding to self.bvkmesh is None
                 mat = mat.sum(axis=0)
             mat = mat.reshape(comp, naoi, naoj)
             if self.hermi != 0:
@@ -358,7 +358,7 @@ class _Int1eOpt:
         return self._derivatives_intor(dm, 'PBCkin_derivatives', (3, 0), kpts)
 
 class CrossInt1e(_Int1eOpt):
-    def __init__(self, cell1, cell2, bvk_kmesh=None):
+    def __init__(self, cell1, cell2, bvkmesh=None):
         self.cell1 = cell1 = SortedGTO.from_cell(cell1, decontract=True)
         self.cell2 = cell2 = SortedGTO.from_cell(cell2, decontract=True)
         self.cell = cell = cell12 = cell1 + cell2
@@ -371,20 +371,20 @@ class CrossInt1e(_Int1eOpt):
         bvk_ncells = 1
         if isinstance(cell1, Mole):
             assert isinstance(cell2, Mole)
-            bvk_kmesh = None
+            bvkmesh = None
             bvkcell = cell12
             bvkmesh_Ls = Ls = np.zeros((1, 3))
             precision = 1e-14
         else:
-            if bvk_kmesh is None:
+            if bvkmesh is None:
                 bvkmesh_Ls = cp.zeros((1, 3))
             else:
-                bvkmesh_Ls = translation_vectors_for_kmesh(cell1, bvk_kmesh, True)
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell1, bvkmesh, True)
             bvk_ncells = len(bvkmesh_Ls)
             if bvk_ncells == 1:
                 bvkcell = cell12
             else:
-                bvkcell = super_cell(cell12, bvk_kmesh, wrap_around=True)
+                bvkcell = super_cell(cell12, bvkmesh, wrap_around=True)
                 # PTR_BAS_COORD was not initialized in supe_rcell
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = _bvkcell_lattice_sum_Ls(bvkcell)
@@ -395,7 +395,7 @@ class CrossInt1e(_Int1eOpt):
             lattice_sum_factor = surface
             precision = bvkcell.precision / lattice_sum_factor
 
-        self.bvk_kmesh = bvk_kmesh
+        self.bvkmesh = bvkmesh
         self.bvkcell = bvkcell
         self.bvkmesh_Ls = bvkmesh_Ls
 

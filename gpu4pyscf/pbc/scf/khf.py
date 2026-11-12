@@ -38,8 +38,8 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _get_mp_mesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _get_kmesh
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -392,10 +392,10 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        bvk_kmesh = None
+        bvkmesh = None
         if kpts_in_bvkcell:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
-        return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        return int1e.int1e_ovlp(cell, kpts, bvkmesh)
 
     def get_hcore(self, cell=None, kpts=None):
         from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
@@ -422,10 +422,10 @@ class KSCF(pbchf.SCF):
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
 
-        bvk_kmesh = None
+        bvkmesh = None
         if kpts_in_bvkcell:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
-        hcore += int1e.int1e_kin(cell, kpts, bvk_kmesh)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        hcore += int1e.int1e_kin(cell, kpts, bvkmesh)
         return hcore
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
@@ -509,10 +509,10 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
-        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, kmesh)
-        if nkpts == np.prod(mp_mesh):
-            return conj_kpts(mp_mesh, with_gamma_point, return_pair=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
+        kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+        if nkpts == np.prod(kmesh):
+            return conj_kpts(kmesh, with_gamma_point, return_pair=True)
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 

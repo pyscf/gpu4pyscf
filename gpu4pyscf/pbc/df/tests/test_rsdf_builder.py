@@ -723,8 +723,8 @@ def test_diffuse_only():
     opt.build(separate_dd=True)
     assert len(opt.img_idx) == 0
 
-    full, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh, int3c2e_opt=opt)
-    excluded, _ = build_cderi(cell, auxcell, kpts, kmesh=kmesh,
+    full, _ = build_cderi(cell, auxcell, kpts, bvkmesh=kmesh, int3c2e_opt=opt)
+    excluded, _ = build_cderi(cell, auxcell, kpts, bvkmesh=kmesh,
                               exclude_dd=True, int3c2e_opt=opt)
     eri = cp.einsum('pij,pkl->ijkl', full[0,0], full[0,0])
     assert abs(lib.fp(eri.get()) - 0.002616152259096199) < 1e-10
@@ -859,8 +859,8 @@ def test_unpack_cderi(nk, j_only):
     aux = pyscf.df.addons.make_auxmol(cell, {'He': [[0, [.9, 1.]], [0, [.3, 1.]]]})
     mesh = np.array([nk, 1, 1])
     kpts = cell.make_kpts(mesh)
-    compressed, negative, indices = build_cderi(cell, aux, kpts=kpts, kmesh=mesh, j_only=j_only, compress=True)
-    dense, dense_negative = build_cderi(cell, aux, kpts=kpts, kmesh=mesh, j_only=j_only)
+    compressed, negative, indices = build_cderi(cell, aux, kpts=kpts, bvkmesh=mesh, j_only=j_only, compress=True)
+    dense, dense_negative = build_cderi(cell, aux, kpts=kpts, bvkmesh=mesh, j_only=j_only)
     assert negative is dense_negative is None
     translations = k2gamma.translation_vectors_for_kmesh(cell, mesh, True)
     phases = cp.asarray(np.exp(1j * translations.dot(kpts.T)), order='C')

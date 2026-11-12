@@ -77,7 +77,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
     pair_address, _ = mydf._cderi_idx
     pair_address = cp.asarray(pair_address, dtype=np.int32)
-    expLk = fft_matrix(mydf.kmesh)
+    expLk = fft_matrix(mydf.bvkmesh)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
@@ -108,7 +108,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
 
     kj_idx = np.arange(nkpts)
-    conj_mapping = conj_kpts(mydf.kmesh)
+    conj_mapping = conj_kpts(mydf.bvkmesh)
     # The ao-pair in vj_packed has the same storage order like the ao-pair in
     # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
     # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple
@@ -199,7 +199,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     for p0, p1 in lib.prange(0, naux, blksize)
                     for kp in mydf._cderi])
     k_adapt_dic = {}
-    for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+    for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
         # ki_idx is already sorted
         k_adapt_dic[kp] = kp_conj, kj_idx
 

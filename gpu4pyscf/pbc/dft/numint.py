@@ -29,7 +29,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, extract_pgto_params
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids, BeckeGrids
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff
 from gpu4pyscf.dft import numint
@@ -132,11 +132,11 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
     return out[0] if is_single_kpt else out
 
 class _GTOvalOpt:
-    def __init__(self, cell, kpts=None, bvk_kmesh=None, deriv=0):
+    def __init__(self, cell, kpts=None, bvkmesh=None, deriv=0):
         self.cell = cell
         assert kpts is None or kpts.ndim == 2
         self.kpts = kpts
-        self.bvk_kmesh = bvk_kmesh
+        self.bvkmesh = bvkmesh
         self.deriv = deriv
 
         sorted_cell, ao_idx, _, uniq_l_ctr, _, bas_mapping = group_basis(
@@ -151,21 +151,21 @@ class _GTOvalOpt:
         rcut = _estimate_rcut(sorted_cell, deriv)
         self.bas_rcut = cp.asarray(rcut)
 
-        if bvk_kmesh is None:
+        if bvkmesh is None:
             if kpts is None:
-                bvk_kmesh = np.ones(3, dtype=np.int32)
+                bvkmesh = np.ones(3, dtype=np.int32)
             else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts)
-            self.bvk_kmesh = bvk_kmesh
-        bvk_ncells = np.prod(bvk_kmesh)
+                bvkmesh = kpts_to_bvkmesh(cell, kpts)
+            self.bvkmesh = bvkmesh
+        bvk_ncells = np.prod(bvkmesh)
         if bvk_ncells == 1:
             bvkcell = sorted_cell
             expLk = None
         else:
-            bvkcell = super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
+            bvkcell = super_cell(sorted_cell, bvkmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            bvkmesh_Ls = translation_vectors_for_kmesh(sorted_cell, bvk_kmesh, True)
+            bvkmesh_Ls = translation_vectors_for_kmesh(sorted_cell, bvkmesh, True)
             expLk = cp.exp(1j * asarray(bvkmesh_Ls).dot(asarray(kpts).T))
         self.bvk_ncells = bvk_ncells
         self.bvkcell = bvkcell

@@ -29,7 +29,7 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):

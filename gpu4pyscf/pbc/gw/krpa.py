@@ -347,7 +347,7 @@ def get_rpa_ecorr(rpa, freqs, wts):
         # Read (L|pq) for every ki and kj that conserves with kL and ki (-ki+kj+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|ki kj) is either Lpq_kL[ki] or Lpq_kL[kj].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kidx[ki_idx] != kj_idx).any()
             if not is_conj or (kidx[kj_idx] == ki_idx).all():
                 break
@@ -469,7 +469,7 @@ def get_rpa_ecorr_outcore(rpa, freqs, wts):
         # Read (L|pq) for every ki and kj that conserves with kL and ki (-ki+kj+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|ki kj) is either Lpq_kL[ki] or Lpq_kL[kj].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kconserv_table[kL, ki_idx] != kj_idx).any()
             if not is_conj or (kconserv_table[kL, kj_idx] == ki_idx).all():
                 break
@@ -609,7 +609,7 @@ def get_rpa_ecorr_outcore_metal(rpa, freqs, wts):
         # Read (L|pq) for every ki and kj that conserves with kL and ki (-ki+kj+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|ki kj) is either Lpq_kL[ki] or Lpq_kL[kj].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kconserv_table[kL, ki_idx] != kj_idx).any()
             if not is_conj or (kconserv_table[kL, kj_idx] == ki_idx).all():
                 break
@@ -772,7 +772,7 @@ def get_rpa_exx(rpa, acfd=False, correction_only=False):
         # Read (L|pq) for every km and kn that conserves with kL and km (-km+kn+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|km kn) is either Lpq_kL[km] or Lpq_kL[kn].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kidx[ki_idx] != kj_idx).any()
             if not is_conj or (kidx[kj_idx] == ki_idx).all():
                 break
