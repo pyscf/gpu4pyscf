@@ -135,14 +135,14 @@ def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     kmesh is the k-point sampling mesh supplied to
     cell.make_kpts(kmesh, with_gamma_point=with_gamma_point)
 
-    q_mesh is the transfer mesh. It has the same value as the kmesh for orbitals.
-    q_mesh must include gamma, regardless whether kpts are generated with
+    qmesh is the transfer mesh. It has the same value as the kmesh for orbitals.
+    qmesh must include gamma, regardless whether kpts are generated with
     "with_gamma_point", because the common k-shift in kj and ki cancels.
-    For off-gamma sampling [2, 3, 1], q_mesh is [2, 3, 1], not the larger
+    For off-gamma sampling [2, 3, 1], qmesh is [2, 3, 1], not the larger
     periodic BvK mesh [4, 3, 1] (by kpts_to_bvkmesh).
 
-    The transfer k-points for q_mesh have the same ordering as
-    qpts = cell.make_kpts(q_mesh, with_gamma_point=True).
+    The transfer k-points for qmesh have the same ordering as
+    qpts = cell.make_kpts(qmesh, with_gamma_point=True).
 
     Return is an iterator for unique transfer k-point pairs, including
     self-conjugate transfers. Each item in the iterator is
@@ -156,12 +156,12 @@ def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     '''
     kmesh = np.asarray(kmesh)
     nkpts = np.prod(kmesh)
-    # The transfer mesh (q_mesh) always includes Gamma, regardless of
+    # The transfer mesh (qmesh) always includes Gamma, regardless of
     # with_gamma_point.
-    q_mesh_pairs = conj_kpts(kmesh, with_gamma_point=True, return_pair=True)
+    qmesh_pairs = conj_kpts(kmesh, with_gamma_point=True, return_pair=True)
 
     if not return_pair_index:
-        return q_mesh_pairs
+        return qmesh_pairs
 
     # double_translation_indices was originally used for Gamma-included
     # meshes. Given orbital indices i and j, kk_conserv[i, j] gives the index
@@ -187,7 +187,7 @@ def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     splits = counts.cumsum()[:-1]
     kk_addrs = np.split(idx, splits)
 
-    return ((q, q_conj, *divmod(kk_addrs[q], nkpts)) for q, q_conj in q_mesh_pairs)
+    return ((q, q_conj, *divmod(kk_addrs[q], nkpts)) for q, q_conj in qmesh_pairs)
 
 def reset_kpts(kpts, cell):
     '''

@@ -93,12 +93,12 @@ def build_cderi(cell, auxcell, kpts=None, bvkmesh=None, j_only=False,
     if compress:
         return cderi, cderip, cderi_idx
 
-    kpt_iters = list(kk_adapted_iter(bvkmesh))
+    kpt_iters = list(kk_adapted_iter(kmesh, with_gamma_point))
     if not (is_gamma_point or j_only):
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = cp.asarray(conj_kpts(bvkmesh), dtype=np.int32)
+    conj_mapping = cp.asarray(conj_kpts(kmesh, with_gamma_point), dtype=np.int32)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, bvkmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao
@@ -580,14 +580,16 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
     t0 = log.init_timer()
 
     if bvkmesh is None:
-        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
     kpts = kpts.reshape(-1, 3)
     bvk_ncells = int(np.prod(bvkmesh))
-    assert len(kpts) == bvk_ncells
-    kpt_iters = list(kk_adapted_iter(bvkmesh))
-    # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
-    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-    nkpts = len(uniq_kpts)
+    kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+    kpt_iters = list(kk_adapted_iter(kmesh, with_gamma_point))
+    # transfer mesh (q = kj - ki) must include gamma point.
+    qmesh = kmesh
+    qpts = cell.make_kpts(qmesh, with_gamma_point=True)
+    uniq_qpts = qpts[[x[0] for x in kpt_iters]]
+    nqpts = len(uniq_qpts)
 
     if omega is None:
         omega = 0
@@ -605,7 +607,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
 
     log.debug('Generate auxcell 2c2e integrals. naux=%d', auxcell.nao)
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, bvkmesh)
+        auxcell, qpts, omega, rsdf_omega, linear_dep_threshold, qmesh)
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
     n_compact_pairs = int3c2e_opt.get_n_compact_pairs()
@@ -618,18 +620,18 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
         assert cell.dimension == 3
         mesh = [1] * 3
     log.debug('mesh = %s', mesh)
-    coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega, uniq_kpts)
+    coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega, uniq_qpts)
     Gv = cell.get_Gv(mesh)
     ngrids = len(Gv)
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
-    mem_free -= cd_j2c_cache[0].nbytes * nkpts # cd_j2c_cache
-    mem_free -= ngrids * naux_cart * 16 * nkpts # auxG_conj
+    mem_free -= cd_j2c_cache[0].nbytes * nqpts # cd_j2c_cache
+    mem_free -= ngrids * naux_cart * 16 * nqpts # auxG_conj
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
     # Per-pair storage for work0 (complex k-space integrals) and work1
     # (real-space integrals / metric contraction).
-    pair_bytes = naux_cart * (nkpts*16 + max(2, bvk_ncells)*8)
+    pair_bytes = naux_cart * (nqpts*16 + max(2, bvk_ncells)*8)
     batch_size = min(n_compact_pairs+1, int(mem_free*0.9)//pair_bytes)
     log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     if batch_size < 1:
@@ -682,18 +684,18 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
         eval_j3c, bas_ij_batches, _ = local_context
         shl_pair_batches = len(bas_ij_batches)
 
-        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
-        expLk_conjz = expLk.conj().view(np.float64).reshape(bvk_ncells,nkpts,2)
-        expLk = None
+        expLk_conj = cp.exp(-1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_qpts.T)))
+        expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nqpts,2)
+        expLk_conj = None
 
         ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
         eval_ft, _ = ft_opt.ft_evaluator(
             cart=cell.cell.cart, original_ao_order=False, bas_ij_batches=bas_ij_batches)
 
         log.debug1('cache auxG')
-        Gk = asarray((Gv + uniq_kpts[:,None]).reshape(-1, 3))
+        Gk = asarray((Gv + uniq_qpts[:,None]).reshape(-1, 3))
         auxG = ft_ao.ft_ao(auxcell, Gk).T
-        auxG = auxG.reshape(naux_cart,nkpts,ngrids)
+        auxG = auxG.reshape(naux_cart,nqpts,ngrids)
         # Note: in the case of ft_ao, auxG[kp].conj() != auxG[kp_conj]
         # auxG_conj at -(kj-ki) = conj(kp)
         #:auxG_conj = auxG.conj()
@@ -701,7 +703,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
         auxG_conj.imag *= -1
         auxG_conj *= cp.asarray(coulG)
 
-        avail_mem = mem_free - max_pair_size*nkpts*naux_cart*16 # work0
+        avail_mem = mem_free - max_pair_size*nqpts*naux_cart*16 # work0
         work1_size = max_pair_size*max(2, bvk_ncells)*naux_cart
         # work1 holds either the SR/metric tensors or pqG. Retain the
         # auxiliary workspace allowance for both possible buffer sizes.
@@ -712,7 +714,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
         Gblksize = min(Gblksize, ngrids)
         log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
                    ngrids, Gblksize, naux_max, batch_size)
-        work0 = cp.empty(nkpts*max_pair_size*naux_cart, dtype=np.complex128)
+        work0 = cp.empty(nqpts*max_pair_size*naux_cart, dtype=np.complex128)
         work1 = cp.empty(max(work1_size, max_pair_size*Gblksize*2))
         write_buf = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
         write_buf1 = empty_mapped(max_pair_size*naux_max, dtype=np.complex128)
@@ -724,7 +726,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
                 continue
 
             pair_size = j3c.shape[0]
-            j3c_buf = ndarray((nkpts, pair_size, naux_cart, 2), buffer=work0)
+            j3c_buf = ndarray((nqpts, pair_size, naux_cart, 2), buffer=work0)
             j3c = contract('pLr,LKz->Kprz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
             t1 = log.timer_debug1(f'sr int3c2e on Device {device_id}', *t1)
@@ -732,7 +734,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 for p0, p1 in lib.prange(0, ngrids, Gblksize):
                     auxG_c = auxG_conj[:,j2c_idx,p0:p1]
-                    pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=work1)
+                    pqG = eval_ft(Gv[p0:p1] + qpts[kp], batch_id, out=work1)
                     # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
                     # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
                     # are assumed to be real
@@ -761,7 +763,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
     if with_dd:
         t1 = log.timer_debug1('compact part of GDF tensor', *t0)
         _append_dd_cderi(int3c2e_opt, cderi, cd_j2c_cache, omega,
-                         recontract, uniq_kpts)
+                         recontract, uniq_qpts)
         t1 = log.timer_debug1('diffuse part of GDF tensor', *t1)
 
     cderip = None
@@ -774,19 +776,19 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
     log.timer_debug1('build cderi', *t0)
     return cderi, cderip, cderi_idx
 
-def _precontract_j2c_aux_coeff(auxcell, kpts, omega, rsdf_omega,
-                               linear_dep_threshold, kmesh=None):
+def _precontract_j2c_aux_coeff(auxcell, qpts, omega, rsdf_omega,
+                               linear_dep_threshold, qmesh=None):
     auxcell = SortedGTO.from_cell(auxcell)
-    if kmesh is None:
-        j2c = _get_2c2e(auxcell, kpts, omega, rsdf_omega, kmesh)
+    if qmesh is None: # gamma point
+        j2c = _get_2c2e(auxcell, qpts, omega, rsdf_omega, qmesh)
         if j2c.ndim == 2:
             j2c = j2c[None]
     else:
-        assert len(kpts) == np.prod(kmesh)
-        kpt_iters = list(kk_adapted_iter(kmesh))
-        # uniq_kpts corresponds to (kj-ki)
-        uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-        j2c = _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, kmesh)
+        assert len(qpts) == np.prod(qmesh)
+        kpt_iters = list(kk_adapted_iter(qmesh))
+        # uniq_qpts corresponds to (kj-ki)
+        uniq_qpts = qpts[[x[0] for x in kpt_iters]]
+        j2c = _get_2c2e(auxcell, uniq_qpts, omega, rsdf_omega, qmesh)
         # DF metric for self-conjugated k-point should be real
         j2c = [j2c_k.real if kp == kp_conj else j2c_k
                for j2c_k, (kp, kp_conj, _, _) in zip(j2c, kpt_iters)]
@@ -838,7 +840,9 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
         k_idx (int):
             The index of the k-point = kpt_j - kpt_i
         kk_conserv (ndarray):
-            kk = kk_conserv[ki,kj] satisfies kpts[kk] = kpts[kj] - kpts[ki] + 2n\pi
+            kk = kk_conserv[ki,kj] satisfies qpts[kk] = kpts[kj] - kpts[ki],
+            where qpts is the Gamma-containing transfer mesh and G is a reciprocal
+            lattice vector.
             This table can be created by k2gamma.double_translation_indices(kmesh)
             (kk_conserv == k_idx) gives all the ki,kj pairs that can produce k_idx.
         axis (int):
@@ -940,7 +944,9 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
             These indices are obtained from k-point conservation table
             kk_conserv = k2gamma.double_translation_indices(kmesh).
             This table encodes k-point relationships for (ij|k) 3c2e integrals.
-            kk = kk_conserv[ki,kj] satisfies kpts[kk] = kpts[kj] - kpts[ki] + 2n\pi
+            kk = kk_conserv[ki,kj] satisfies qpts[kk] = kpts[kj] - kpts[ki],
+            where qpts is the Gamma-containing transfer mesh and G is a reciprocal
+            lattice vector.
             The indices can be extracted via
             ki_idx, kj_idx = np.where(kk_conserv == k_idx)
         conj_mapping (ndarray):

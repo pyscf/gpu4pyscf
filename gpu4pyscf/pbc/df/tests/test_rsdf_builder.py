@@ -22,7 +22,7 @@ from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, kk_adapted_iter
 import pytest
 
 def test_gamma_point():
@@ -884,3 +884,47 @@ def test_unpack_cderi(nk, j_only):
         assert cpu.auxcell.nao == aux.nao
         factors = dense[0, 0].get().reshape(-1, cell.nao**2)
         np.testing.assert_allclose(factors.T @ factors, reference, atol=1e-8, rtol=0)
+
+
+def test_build_cderi_off_gamma():
+    cell = pyscf.M(
+        atom='He .2 .3 .4; He 1.2 1.5 1.8', unit='Bohr',
+        a=np.diag([5., 5.5, 6.]),
+        basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+        precision=1e-10, verbose=0)
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1.1, 1.]], [1, [.7, 1.]]]
+    auxcell.build()
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    actual, negative = build_cderi(cell, auxcell, kpts, omega=0)
+    assert negative is None
+    # Four unique transfers with six orbital pairs each.
+    assert len(actual) == 24
+
+    builder = _RSGDFBuilder(cell, auxcell, kpts)
+    with tempfile.NamedTemporaryFile() as tmpf:
+        builder.make_j3c(tmpf.name, aosym='s1')
+        references = {}
+        for ki, kj in actual:
+            with _load3c(tmpf.name, 'j3c', kpts[[ki, kj]]) as data:
+                references[ki, kj] = np.asarray(data[:]).reshape(-1, cell.nao**2)
+        for _, _, ki_idx, kj_idx in kk_adapted_iter([2, 3, 1], False):
+            pairs = [(i, j) for i, j in zip(ki_idx, kj_idx) if (i, j) in actual]
+            if not pairs:
+                continue
+            factors = np.concatenate([actual[p].get().reshape(-1, cell.nao**2)
+                                      for p in pairs], axis=1)
+            reference = np.concatenate([references[p] for p in pairs], axis=1)
+            np.testing.assert_allclose(factors.conj().T @ factors,
+                                       reference.conj().T @ reference,
+                                       atol=1e-8, rtol=0)
+
+    actual_j, negative = build_cderi(cell, auxcell, kpts, j_only=True, omega=0)
+    assert negative is None
+    assert set(actual_j) == {(i, i) for i in range(len(kpts))}
+    factors = np.concatenate([actual_j[i, i].get().reshape(-1, cell.nao**2)
+                              for i in range(len(kpts))], axis=1)
+    reference = np.concatenate([references[i, i] for i in range(len(kpts))], axis=1)
+    np.testing.assert_allclose(factors.conj().T @ factors,
+                               reference.conj().T @ reference,
+                               atol=1e-8, rtol=0)
