@@ -51,7 +51,7 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.tools import k2gamma, get_coulG, ke_to_mesh, mesh_to_ke
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts, _get_mp_mesh
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
@@ -76,8 +76,7 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     assert _is_orthogonal_lattice(a), 'Must be orthogonal lattice'
     b = cell.reciprocal_vectors()
 
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
+    weight = 1.
 
     rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
     kern = libmgrid.orth_contract_aopair_dm
@@ -207,7 +206,6 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
 
     work = cp.empty_like(rhoG)
     if not with_tau:
@@ -222,7 +220,7 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
+        weight = vol / ngrids
 
         dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
@@ -279,7 +277,6 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
 
     nimgs = cell.nimgs
     Tx = np.arange(-nimgs[0], nimgs[0]+1, dtype=np.float64)
@@ -303,7 +300,7 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
+        weight = vol / ngrids
 
         dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
@@ -527,8 +524,7 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_grad
 
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
+    weight = 1.
 
     mg_envs = ni.mg_envs
 
@@ -1577,6 +1573,11 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
         return out
 
 def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
+    # A single non-Gamma point can produce a complex image-space density.
+    # The current real-valued multigrid kernels do not support.
+    assert len(kpts) > 1 or is_zero(kpts), \
+        'Single non-Gamma k-point sampling is not supported by multigrid'
+
     ni._ensure_initialized(kpts, xctype)
 
     cell = ni.sorted_cell
@@ -1595,16 +1596,17 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
     if bvk_ncells == 1:
         dm_sc = dms
     else:
-        if bvk_ncells != nkpts:
-            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        else:
-            expLk = fft_matrix(ni.kmesh)
+        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, ni.kmesh)
+        assert len(kpts) == np.prod(mp_mesh)
+        expLk = fft_matrix(mp_mesh, with_gamma_point=with_gamma_point)
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
 
     dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao), out=out)
 
+    # Include the normalization when transforming to super-cell gamma-point dm
+    dm_sc *= 1. / nkpts
     if hermi == 1:
         dm_sc *= 2
 
@@ -1617,10 +1619,8 @@ def _inverse_wannier_transform_fock(ni, veff, kpts):
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
-        if len(kpts) != bvk_ncells:
-            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        else:
-            expLk = fft_matrix(ni.kmesh)
+        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, ni.kmesh)
+        expLk = fft_matrix(mp_mesh, with_gamma_point=with_gamma_point)
         nkpts = expLk.shape[1]
         expLkz = expLk.view(np.float64).reshape(bvk_ncells, nkpts, 2)
         veff = contract('Lpq,Lkz->kpqz', veff, expLkz)

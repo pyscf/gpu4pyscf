@@ -21,6 +21,8 @@ from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.dft import multigrid as multigrid_cpu
+from pyscf.pbc.dft.numint import KNumInt as KNumInt_cpu
+from pyscf.pbc.dft.gen_grid import UniformGrids as UniformGrids_cpu
 if hasattr(multigrid_cpu, 'MultiGridNumInt'):
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridNumInt
 else:
@@ -275,6 +277,26 @@ class KnownValues(unittest.TestCase):
         ref = multigrid_cpu.multigrid.get_rho(MultiGridNumInt_cpu(cell_orth), dm)
         out = multigrid.MultiGridNumInt(cell_orth).get_rho(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+
+    def test_get_rho_off_gamma(self):
+        cell = gto.M(
+            atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+            basis=[[0, [1.3, 1.]], [1, [.6, 1.]]],
+            mesh=[25]*3, precision=1e-10, verbose=0)
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        # Average over six sampled k-points, despite having twelve BvK images.
+        ref = KNumInt_cpu().get_rho(
+            cell, dm, UniformGrids_cpu(cell), kpts=kpts)
+        ni = multigrid.MultiGridNumInt(cell)
+        ni.allow_mesh_reduction = False
+        rho = ni.get_rho(cp.asarray(dm), kpts=kpts)
+        assert len(ni.bvkmesh_Ls) == 2*len(kpts)
+        np.testing.assert_allclose(rho.get(), ref, atol=1e-9, rtol=0)
+
+        ni.enable_aft = False
+        rho = ni.get_rho(cp.asarray(dm), kpts=kpts)
+        np.testing.assert_allclose(rho.get(), ref, atol=1e-9, rtol=0)
 
     def test_get_rho_skewed_lattice(self):
         cell = gto.M(

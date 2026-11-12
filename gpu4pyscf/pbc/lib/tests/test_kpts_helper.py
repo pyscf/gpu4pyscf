@@ -149,7 +149,8 @@ def test_get_mp_mesh():
     np.testing.assert_array_equal(mesh, [2, 2, 2])
     assert not fft_order
 
-    # Equal sizes do not identify the ordering for shifted all-odd meshes.
+    # Shifted all-odd meshes retain the BvK dimensions but use off-Gamma ordering.
     kpts = cell.make_kpts([3, 1, 1], with_gamma_point=False)
-    with np.testing.assert_raises(AssertionError):
-        kpts_helper._get_mp_mesh(kpts, [3, 1, 1])
+    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [3, 1, 1])
+    np.testing.assert_array_equal(mesh, [3, 1, 1])
+    assert not fft_order

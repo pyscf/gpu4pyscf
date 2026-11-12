@@ -253,9 +253,7 @@ def _get_mp_mesh(kpts, bvk_mesh=None):
     bvk_ncells = np.prod(mp_mesh)
     nkpts = len(kpts)
     if bvk_ncells == nkpts:
-        # Shifted all-odd meshes have the same size but a different ordering.
-        assert abs(kpts[0]).max() < 1e-10, 'Expected Gamma as the first k-point'
-        fft_order = True
+        fft_order = abs(kpts[0]).max() < 1e-10
         return mp_mesh, fft_order
 
     mp_mesh[mp_mesh % 2 == 0] //= 2
