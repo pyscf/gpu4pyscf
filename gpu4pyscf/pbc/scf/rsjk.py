@@ -43,9 +43,9 @@ from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts)
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_mp_mesh)
 from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
@@ -243,7 +243,7 @@ class PBCJKMatrixOpt:
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         kpts, is_single_kpt = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
         is_gamma_point = is_zero(kpts)
@@ -440,7 +440,7 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, _ = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
@@ -482,12 +482,14 @@ class PBCJKMatrixOpt:
              (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
             raise NotImplementedError
 
-        if bvk_ncells == nkpts:
-            kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
-                         for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(kmesh))
-            t_rev_pairs = conj_kpts(kmesh, return_pair=True)
-        else:
-            raise NotImplementedError
+        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, kmesh)
+        # The common k-shift in kj - ki cancels, so transfer_mesh includes Gamma.
+        transfer_mesh = mp_mesh
+        qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+        kpt_iters = ((qpts[q], ki_idx, kj_idx, q == q_conj)
+                     for q, q_conj, ki_idx, kj_idx in
+                     kk_adapted_iter(mp_mesh, with_gamma_point))
+        t_rev_pairs = conj_kpts(mp_mesh, with_gamma_point, return_pair=True)
         log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))
 
         time_reversal_symmetry = self.time_reversal_symmetry
@@ -536,9 +538,6 @@ class PBCJKMatrixOpt:
             unit += nao**2*bvk_ncells
 
         ft_opt = FTOpt(cell, kmesh)
-        # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
-        # only supports the complete set of kpts within MP mesh.
-        ft_opt.permutation_symmetry = bvk_ncells == nkpts
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
         mesh = self.mesh
@@ -627,7 +626,7 @@ class PBCJKMatrixOpt:
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         kpts, is_single_kpt = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
@@ -801,7 +800,7 @@ class PBCJKMatrixOpt:
         assert cell.dimension == 3
 
         kpts, _ = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
 
@@ -1078,7 +1077,7 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, _ = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10)
         log.debug('bvk_kmesh = %s', kmesh)
         bvk_ncells = np.prod(kmesh)
         is_gamma_point = is_zero(kpts)
@@ -1125,7 +1124,9 @@ class PBCJKMatrixOpt:
         dms = dms.reshape(n_dm,nkpts,nao,nao)
 
         ft_opt = FTOpt(cell, kmesh)
-        ft_opt.permutation_symmetry = bvk_ncells == nkpts
+        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, kmesh)
+        transfer_mesh = mp_mesh
+        qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
         assert ft_opt.permutation_symmetry
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
@@ -1261,8 +1262,9 @@ class PBCJKMatrixOpt:
             ek_sigma = cp.zeros([cell.natm+3, 3])
             sigma = cp.zeros((3, 3))
             stream = cp.cuda.get_current_stream()
-            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-                kpt = kpts[kp]
+            kpt_iters = kk_adapted_iter(mp_mesh, with_gamma_point)
+            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+                kpt = qpts[kp]
                 Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
                 wcoulG_0, wcoulG_1 = weighted_coulG_derivatives(Gvk, 0, remove_G0)
