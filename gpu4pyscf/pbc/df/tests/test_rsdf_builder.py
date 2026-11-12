@@ -22,7 +22,7 @@ from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, kk_adapted_iter, kpts_to_bvkmesh
 import pytest
 
 def test_gamma_point():
@@ -373,8 +373,7 @@ C  D
             print(ki, kj)
             assert abs(_ref - out[ki]).max() < 1e-11
 
-@pytest.mark.skip('Must include gamma point')
-def test_kpts_compressed2():
+def test_kpts_compressed_off_gamma():
     from pyscf.pbc.df import df as df_cpu
     cell = pyscf.M(
         atom = 'He 1. .5 .5;C .1 1.3 2.1',
@@ -390,19 +389,20 @@ def test_kpts_compressed2():
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts)
     ref = build_cderi(cell, auxcell, kpts)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
-    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+
+    bvkmesh = kpts_to_bvkmesh(cell, kpts)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvkmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],
-            conj_kpts(kmesh), expLk, nao)
+            conj_kpts(kmesh, with_gamma_point=False), expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
                 _ref = ref[ki, kj]
             else:
                 _ref = ref[kj, ki].conj().transpose(0,2,1)
-            print(ki, kj)
             assert abs(_ref - out[ki]).max() < 1e-10
 
 def test_sr_kpts():

@@ -383,6 +383,25 @@ class KnownValues(unittest.TestCase):
         assert np.array_equal(mf_scanner.with_df.mesh, [7, 7, 7])
         self.assertAlmostEqual(e1, mf1.e_tot, 9)
 
+    def test_krhf_gdf_off_gamma(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        cell = pbcgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8', unit='Bohr',
+            a=np.diag([5., 5.5, 6.]),
+            basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+            precision=1e-9, verbose=0)
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        auxbasis = {'He': [[0, [1.1, 1.]], [1, [.7, 1.]]]}
+        ref = cell.KRHF(kpts=kpts, exxdiv='ewald').density_fit(auxbasis=auxbasis)
+        ref.conv_tol = 1e-10
+        mf = ref.to_gpu()
+        ref.kernel()
+        mf.kernel()
+        assert ref.converged and mf.converged
+        assert isinstance(mf.with_df, GDF)
+        np.testing.assert_allclose(mf.e_tot, ref.e_tot, atol=1e-8, rtol=0)
+        np.testing.assert_allclose(mf.make_rdm1().get(), ref.make_rdm1(), atol=1e-6, rtol=0)
+
 class RestrictedSCFProperties(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
