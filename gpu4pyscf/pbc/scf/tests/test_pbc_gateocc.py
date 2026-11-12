@@ -18,7 +18,7 @@ import cupy as cp
 from pyscf.pbc import gto
 from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc.scf.addons import gate_charge
-from gpu4pyscf.pbc.scf.gateocc import _zero_temperature_occ
+from gpu4pyscf.pbc.scf.slabgate import _zero_temperature_occ
 from gpu4pyscf.pbc.scf.slabdipole import _slab_charge
 
 
@@ -58,11 +58,13 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(count, 7.7, delta=1e-9)
 
     def test_zero_temperature(self):
-        cases = [('RKS', 1, 7.7), ('KRKS', 1, 7.7), ('KRKS', 2, 7.),
+        cases = [('RKS', 1, 7), ('RKS', 1, 8), ('RKS', 1, 7.7),
+                 ('KRKS', 1, 7.7), ('KRKS', 2, 7.),
                  ('KRKS', 2, 7.7), ('KRKS', 2, 8.3), ('KRKS', 20, 7.7)]
         for name, nkpts, target in cases:
             with self.subTest(name=name, nkpts=nkpts, target=target):
-                mf = gate_charge(make_mf(make_cell(target), name, nkpts))
+                mf = gate_charge(make_mf(make_cell(target), name, nkpts),
+                                 fractional_electrons=True)
                 energy = energies(name, nkpts)
                 occ = mf.get_occ(energy)
                 # Independent filling by cumulative capacity for distinct levels.
@@ -71,8 +73,6 @@ class KnownValues(unittest.TestCase):
                                            expected, atol=1e-12, rtol=0)
         np.testing.assert_allclose(
             _zero_temperature_occ([0., 1., 2., 3., 3.], 7.7), [2, 2, 2, .85, .85])
-        with self.assertRaisesRegex(ValueError, 'capacity'):
-            _zero_temperature_occ([0.], 2.1)
 
     def test_smearing_orders(self):
         for name, nkpts, method in [('RKS', 1, 'fermi'), ('KRKS', 2, 'fermi'),
@@ -81,9 +81,11 @@ class KnownValues(unittest.TestCase):
                 with self.subTest(name=name, method=method, gate_first=gate_first):
                     mf = make_mf(make_cell(), name, nkpts)
                     if gate_first:
-                        mf = gate_charge(mf).smearing(.03, method=method)
+                        mf = gate_charge(mf, fractional_electrons=True)
+                        mf = mf.smearing(.03, method=method)
                     else:
-                        mf = gate_charge(mf.smearing(.03, method=method))
+                        mf = gate_charge(mf.smearing(.03, method=method),
+                                         fractional_electrons=True)
                     energy = energies(name, nkpts)
                     self.assertAlmostEqual(float(mf.get_occ(energy).sum()) / nkpts,
                                            7.7, delta=1e-10)
@@ -98,7 +100,7 @@ class KnownValues(unittest.TestCase):
         old_mf = gate_charge(make_mf(old_cell, 'KRKS', 2))
         self.assertFalse(hasattr(old_mf, '_gate_nelectron'))
         self.assertEqual(_slab_charge(old_mf, old_cell), 1.)
-        mf = gate_charge(make_mf(make_cell(), 'KRKS', 2))
+        mf = gate_charge(make_mf(make_cell(), 'KRKS', 2), fractional_electrons=True)
         self.assertAlmostEqual(_slab_charge(mf, mf.cell), .3)
         mf.cell.charge = -.3
         with self.assertRaisesRegex(ValueError, 'match'):
@@ -106,24 +108,56 @@ class KnownValues(unittest.TestCase):
         cell = make_cell(None)
         cell.charge = .3
         with self.assertRaisesRegex(ValueError, 'explicitly'):
-            gate_charge(make_mf(cell))
+            gate_charge(make_mf(cell), fractional_electrons=True)
 
         mf = make_mf(make_cell())
         mf.cell.spin = 1
         with self.assertRaisesRegex(NotImplementedError, 'spin=0'):
-            gate_charge(mf)
+            gate_charge(mf, fractional_electrons=True)
         with self.assertRaisesRegex(NotImplementedError, 'RKS/KRKS'):
-            gate_charge(make_mf(make_cell(), 'UKS'))
-        mf = gate_charge(make_mf(make_cell())).smearing(.03)
+            gate_charge(make_mf(make_cell(), 'UKS'), fractional_electrons=True)
+        mf = gate_charge(make_mf(make_cell()), fractional_electrons=True).smearing(.03)
         mf.mu0 = 0.
         with self.assertRaisesRegex(ValueError, 'mu0'):
             mf.get_occ(energies('RKS', 1))
+
+    def test_explicit_switch(self):
+        # Explicit integer N alone keeps the original occupation methods.
+        mf = make_mf(make_cell(8))
+        original_get_occ = mf.get_occ.__func__
+        gate_charge(mf)
+        self.assertFalse(hasattr(mf, '_gate_nelectron'))
+        self.assertIs(mf.get_occ.__func__, original_get_occ)
+        for charge, nelectron in [(.3, None), (.3, 7.7), (0, 7.7), (1, 7)]:
+            with self.subTest(charge=charge, nelectron=nelectron):
+                cell = make_cell(nelectron)
+                cell.charge = charge
+                with self.assertRaisesRegex(ValueError, 'fractional_electrons=True'):
+                    gate_charge(make_mf(cell), fractional_electrons=False)
+        with self.assertRaisesRegex(ValueError, 'explicitly'):
+            gate_charge(make_mf(make_cell(None)), fractional_electrons=True)
+
+        # Legacy explicit N must match charge/Nk, not charge per cell.
+        cell = make_cell(None)
+        cell.nelectron = 7
+        mf = gate_charge(make_mf(cell, 'KRKS', 2))
+        self.assertFalse(hasattr(mf, '_gate_nelectron'))
+        self.assertEqual(_slab_charge(mf, cell), 1.)
+        with self.assertRaisesRegex(ValueError, 'match charge/nkpts'):
+            gate_charge(make_mf(make_cell(6), 'KRKS', 2))
+
+        mf = gate_charge(make_mf(make_cell()), fractional_electrons=True)
+        self.assertIs(gate_charge(mf, fractional_electrons=True), mf)
+        with self.assertRaisesRegex(ValueError, 'Cannot disable'):
+            gate_charge(mf, fractional_electrons=False)
+        self.assertAlmostEqual(mf._gate_nelectron(), 7.7)
 
     def test_fractional_orbital_gradient(self):
         for name, nkpts in [('RKS', 1), ('KRKS', 2)]:
             with self.subTest(name=name):
                 # Smearing outside gate must also use the fractional gradient.
-                mf = gate_charge(make_mf(make_cell(), name, nkpts)).smearing(.03)
+                mf = gate_charge(make_mf(make_cell(), name, nkpts),
+                                 fractional_electrons=True).smearing(.03)
                 coeff, occ = cp.eye(4), cp.asarray([2., 2., 2., 1.7])
                 fock = cp.ones((4, 4))
                 if name == 'KRKS':
@@ -139,7 +173,8 @@ class KnownValues(unittest.TestCase):
     def test_scf_run(self):
         for name, nkpts, sigma in [('RKS', 1, 0.), ('KRKS', 2, .03)]:
             with self.subTest(name=name):
-                mf = gate_charge(make_mf(make_cell(), name, nkpts), zgate=17.)
+                mf = gate_charge(make_mf(make_cell(), name, nkpts), zgate=17.,
+                                 fractional_electrons=True)
                 if sigma:
                     mf = mf.smearing(sigma)
                 overlap = mf.get_ovlp()
