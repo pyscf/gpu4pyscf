@@ -132,6 +132,7 @@ class KnownValues(unittest.TestCase):
 
         # mf = KUHF(cell, kpts = kpts).density_fit()
         # mf.conv_tol = 1e-10
+        # mf.with_df.linear_dep_threshold = 1e-9 # The default in pyscf==2.8.0 is 1e-9, in pyscf==2.14.0 is 1e-10
         # ref_energy = mf.kernel()
         # assert mf.converged
         # ref_n_cycle = mf.cycles
@@ -148,6 +149,7 @@ class KnownValues(unittest.TestCase):
 
         mf = KUHF(cell, kpts = kpts).density_fit()
         mf.conv_tol = 1e-10
+        mf.with_df.linear_dep_threshold = 1e-9 # The default in pyscf==2.8.0 is 1e-9, in pyscf==2.14.0 is 1e-10
         mf = gdm(mf)
         mf.check_occupation_per_n_iteration = 1
         test_energy = mf.kernel()
