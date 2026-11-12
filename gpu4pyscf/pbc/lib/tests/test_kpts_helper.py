@@ -60,6 +60,29 @@ def test_kk_adapted_iter():
                        for kp, kpc, ki, kj in kpts_helper.kk_adapted_iter(kmesh)]
                 assert dat == ref
 
+def test_kk_adapted_iter_off_gamma():
+    cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
+                   a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
+    mp_mesh = [4, 1, 1]
+    kpts = cell.make_kpts(mp_mesh, with_gamma_point=False)
+    qpts = cell.make_kpts(mp_mesh, with_gamma_point=True)
+    scaled_k = cell.get_scaled_kpts(kpts)
+    scaled_q = cell.get_scaled_kpts(qpts)
+    differences = scaled_k[None, :, :] - scaled_k[:, None, :]
+    groups = list(kpts_helper.kk_adapted_iter(mp_mesh, with_gamma_point=False))
+    expected_pairs = [[0, 0], [1, 3], [2, 2]]
+    # Conjugation is on the transfer mesh, not the shifted orbital mesh.
+    np.testing.assert_array_equal([g[:2] for g in groups], expected_pairs)
+    pairs = list(kpts_helper.kk_adapted_iter(
+        mp_mesh, with_gamma_point=False, return_pair_index=False))
+    np.testing.assert_array_equal(pairs, expected_pairs)
+    for q, q_conj, ki, kj in groups:
+        # Check the complete pair list against actual momentum differences.
+        delta = differences - scaled_q[q]
+        ref_i, ref_j = np.where(abs(delta - np.rint(delta)).max(axis=2) < 1e-12)
+        np.testing.assert_array_equal(ki, ref_i)
+        np.testing.assert_array_equal(kj, ref_j)
+
 def test_fft_matrix():
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
                    a=np.eye(3)*3+np.random.rand(3,3)*.2)

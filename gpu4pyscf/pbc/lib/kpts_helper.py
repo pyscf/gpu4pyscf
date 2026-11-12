@@ -60,35 +60,54 @@ def conj_kpts(mp_mesh, with_gamma_point=True, return_pair=False):
     mask = idx <= mapping
     return np.stack((idx[mask], mapping[mask])).T
 
-def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
-    '''Generates kpt which is adapted to the kpt_aux of the metric in RI
-    for (ij| RI |kl). The metric is computed as (-kpt_aux|kpt_aux) where
-    kpt_aux = kj - ki. The output is [idx(k), idx(-k), kpti_idx, kptj_idx].
-    The kpti_idx in the output are sorted.
+def kk_adapted_iter(mp_mesh, with_gamma_point=True, return_pair_index=True):
+    '''Group orbital k-point pairs by momentum transfer q = kj - ki.
 
-    This function provides the similar functionality as the
-    pyscf.pbc.lib.kpts_helper.kk_adapted_iter .
-    Note, the kk_adapted_iter function from pyscf supports arbitrary k-points,
-    while this function only works for the k-mesh that contains gamma-point.
+    The transfer mesh q_mesh has the same density and dimensions as the orbital
+    MP mesh, but must include Gamma: the common orbital shift cancels in kj - ki.
+    Its points and their ordering are those returned by
+    qpts = cell.make_kpts(q_mesh, with_gamma_point=True). All transfer indices
+    returned here follow this ordering. For shifted [2, 3, 1] sampling, q_mesh
+    is [2, 3, 1], not the larger periodic BvK mesh [4, 3, 1]. These transfers
+    label the auxiliary momentum sectors in density fitting.
+
+    mp_mesh specifies the sampling dimensions, equal to q_mesh. Orbital points
+    must follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point)
+    ordering. Each result is
+    (q_idx, minus_q_idx, ki_idx, kj_idx), where the first two indices select
+    q and -q from qpts, modulo reciprocal lattice vectors. The remaining
+    arrays index the orbital points satisfying kj - ki = q modulo reciprocal
+    lattice vectors; ki_idx is sorted. Return one group per conjugate transfer
+    pair, including self-conjugate transfers. If return_pair_index is False,
+    return only (q_idx, minus_q_idx).
+
+    Transfer conjugation is distinct from orbital k-point conjugation. In
+    particular, kpts[q_idx] is not the transfer vector for off-Gamma sampling;
+    use qpts[q_idx]. Both values of with_gamma_point give the same grouping
+    because the orbital shift cancels in each difference.
+    For arbitrary k-point lists, use pyscf.pbc.lib.kpts_helper.kk_adapted_iter.
     '''
-    assert with_gamma_point
-    kmesh = np.asarray(kmesh)
-    nkpts = np.prod(kmesh)
-    nx, ny, nz = kmesh
-    kx = np.fft.fftfreq(nx, 1./nx).astype(int)
-    ky = np.fft.fftfreq(ny, 1./ny).astype(int)
-    kz = np.fft.fftfreq(nz, 1./nz).astype(int)
-    kxyz = lib.cartesian_prod([kx, ky, kz])
-    # conjugated pairs are those kpt + kpt_conj = 2n\pi
-    pair = (kxyz[None,:,:] + kxyz[:,None,:]).reshape(nkpts, nkpts, 3)
-    pair %= kmesh # to apply wrap_around
-    kp, kp_conj = np.where(pair.sum(axis=2) == 0)
-    independent_idx = np.sort(np.where(kp <= kp_conj)[0])
+    mp_mesh = np.asarray(mp_mesh)
+    nkpts = np.prod(mp_mesh)
+    # The transfer mesh (q_mesh) always includes Gamma, regardless of
+    # with_gamma_point.
+    q_mesh_pairs = conj_kpts(mp_mesh, with_gamma_point=True, return_pair=True)
 
     if not return_pair_index:
-        return zip(kp[independent_idx], kp_conj[independent_idx])
+        return q_mesh_pairs
 
-    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    # double_translation_indices was originally used for Gamma-included
+    # meshes. Given orbital indices i and j, kk_conserv[i, j] gives the index
+    # of kj - ki on that same mesh.
+    # For off-Gamma sampling, this array instead indexes the transfer mesh,
+    # which follows the cell.make_kpts(mp_mesh, with_gamma_point=True) ordering.
+    # To see why the same mapping works, consider one axis with n points:
+    # off-Gamma coordinates are k_j = (j + .5)/n - .5. Shifting every point
+    # by s = .5 - .5/n gives k_j + s = j/n, the Gamma-containing mesh with
+    # the same index ordering. Each pair (i, j) keeps its transfer because
+    # (k_j + s) - (k_i + s) = k_j - k_i. Thus off-Gamma meshes give the same
+    # transfer index.
+    kk_conserv = k2gamma.double_translation_indices(mp_mesh)
 
     # Evaluate ((kp[x], kp_conj[x], *np.where(kk_conserv == kp[x]))
     #           for x in independent_idx)
@@ -101,8 +120,7 @@ def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     splits = counts.cumsum()[:-1]
     kk_addrs = np.split(idx, splits)
 
-    return ((kp[x], kp_conj[x], *divmod(kk_addrs[x], nkpts))
-            for x in independent_idx)
+    return ((q, q_conj, *divmod(kk_addrs[q], nkpts)) for q, q_conj in q_mesh_pairs)
 
 def reset_kpts(kpts, cell):
     '''
