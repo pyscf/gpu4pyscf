@@ -28,7 +28,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df.df_jk import _format_kpts_band
-from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_iter
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import (
@@ -37,8 +37,8 @@ from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE, _check_rsh_factors
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _normalize_kpts, _get_mp_mesh
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
@@ -137,14 +137,16 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
          (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
         raise NotImplementedError
 
-    if bvk_ncells == nkpts:
-        kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
-                     for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(bvk_kmesh))
-        t_rev_pairs = conj_kpts(bvk_kmesh, return_pair=True)
-    else:
-        kpt_iters = kk_adapted_iter(cell, kpts)
-        t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
-        t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
+    mp_mesh, with_gamma_point = _get_mp_mesh(kpts, bvk_kmesh)
+    # transfer_mesh (for q = kj - ki) must include gamma point.
+    # For off-gamma MP mesh, the common k-shift in ki and kj cancels.
+    # This mesh can be made the same to the MP mesh.
+    transfer_mesh = mp_mesh
+    qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+    kk_iters = ((qpts[q], ki_idx, kj_idx, q == q_conj)
+                 for q, q_conj, ki_idx, kj_idx in
+                 kk_adapted_iter(mp_mesh, with_gamma_point))
+    t_rev_pairs = conj_kpts(mp_mesh, with_gamma_point, return_pair=True)
     log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))
 
     time_reversal_symmetry = mydf.time_reversal_symmetry
@@ -187,9 +189,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     log.debug2('set update_vk to %s', update_vk)
 
     ft_opt = FTOpt(cell, bvk_kmesh)
-    # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
-    # only supports the complete set of kpts within MP mesh.
-    ft_opt.permutation_symmetry = bvk_ncells == nkpts
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
@@ -203,7 +202,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
 
     Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
     buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
-    for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
+    for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kk_iters):
         vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, omega, kpts,
                                       lr_factor=lr_factor, sr_factor=sr_factor)
         vkcoulG *= weight
@@ -530,6 +529,10 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     omega = abs(omega)
 
     ft_opt = FTOpt(cell, kmesh)
+    mp_mesh, with_gamma_point = _get_mp_mesh(kpts, kmesh)
+    # transfer_mesh for q = kj - ki
+    transfer_mesh = mp_mesh
+    qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
     cell = ft_opt.cell
     dms = cp.asarray(dm0.reshape(-1,nao,nao))
@@ -572,8 +575,9 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     kern = libpbc.PBC_ft_aopair_ek_deriv
     ek_sigma = cp.zeros([cell.natm+3, 3])
     sigma = cp.zeros((3, 3))
-    for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-        kpt = kpts[kp]
+    kk_iters = kk_adapted_iter(mp_mesh, with_gamma_point)
+    for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kk_iters):
+        kpt = qpts[kp]
         Gvk = Gv + kpt
         remove_G0 = is_zero(kpt)
         wcoulG_0, wcoulG_1 = weighted_coulG_derivatives(Gvk, 0., remove_G0)

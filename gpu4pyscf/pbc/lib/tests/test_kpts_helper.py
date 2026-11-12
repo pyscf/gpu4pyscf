@@ -123,3 +123,33 @@ def test_conj_kpts():
     np.testing.assert_array_equal(mapping, [5, 4, 3, 2, 1, 0])
     pairs = kpts_helper.conj_kpts(mp_mesh, with_gamma_point=False, return_pair=True)
     np.testing.assert_array_equal(pairs, [[0, 5], [1, 4], [2, 3]])
+
+def test_get_mp_mesh():
+    cell = pyscf.M(atom='He', basis=[[0, [1, 1]]], a=np.eye(3)*5)
+    kpts = cell.make_kpts([2, 3, 1])
+    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [2, 3, 1])
+    np.testing.assert_array_equal(mesh, [2, 3, 1])
+    assert fft_order
+
+    # One even dimension doubles the bvk_kmesh size
+    kpts = cell.make_kpts([3, 2, 1], with_gamma_point=False)
+    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [3, 4, 1])
+    np.testing.assert_array_equal(mesh, [3, 2, 1])
+    assert not fft_order
+
+    # Two even dimensions enlarge the bvk_kmesh by a factor of four.
+    kpts = cell.make_kpts([2, 3, 4], with_gamma_point=False)
+    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [4, 3, 8])
+    np.testing.assert_array_equal(mesh, [2, 3, 4])
+    assert not fft_order
+
+    # Three even dimensions enlarge the bvk_kmesh by a factor of eight.
+    kpts = cell.make_kpts([2, 2, 2], with_gamma_point=False)
+    mesh, fft_order = kpts_helper._get_mp_mesh(kpts, [4, 4, 4])
+    np.testing.assert_array_equal(mesh, [2, 2, 2])
+    assert not fft_order
+
+    # Equal sizes do not identify the ordering for shifted all-odd meshes.
+    kpts = cell.make_kpts([3, 1, 1], with_gamma_point=False)
+    with np.testing.assert_raises(AssertionError):
+        kpts_helper._get_mp_mesh(kpts, [3, 1, 1])

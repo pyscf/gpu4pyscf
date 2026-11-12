@@ -158,7 +158,7 @@ class KnownValues(unittest.TestCase):
         self.assertLess(points.nkpts_ibz, points.nkpts)
         np.testing.assert_array_equal(mydf.mesh, original_mesh)
 
-    def _check_long_range_mesh_and_weighted_kernels(self, scaled):
+    def _check_rsh_kernels(self, scaled):
         cell = self.cell
         cell.omega = .4
         original_mesh = np.array(cell.mesh)
@@ -184,15 +184,15 @@ class KnownValues(unittest.TestCase):
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
                          'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
-    def test_long_range_mesh_and_weighted_kernels_gamma(self):
-        self._check_long_range_mesh_and_weighted_kernels(np.zeros(3))
+    def test_rsh_kernels_gamma(self):
+        self._check_rsh_kernels(np.zeros(3))
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
                          'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
-    def test_long_range_mesh_and_weighted_kernels_nonzero_kpoint(self):
-        self._check_long_range_mesh_and_weighted_kernels(np.array([.13, -.07, .09]))
+    def test_rsh_kernels_kpts(self):
+        self._check_rsh_kernels(np.array([.13, -.07, .09]))
 
-    def test_aft_gamma_derivative_with_kpts(self):
+    def test_aft_derivative_with_kpts(self):
         cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
                        basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
                        mesh=[15]*3, precision=1e-8, verbose=0)
@@ -344,6 +344,41 @@ class KnownValues(unittest.TestCase):
         kref = mydf0.get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
+
+    def test_jk_off_gamma(self):
+        cell = self.cell
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell, kpts)
+        ref_j, ref_k = aft_cpu.AFTDF(cell, kpts).get_jk(dm, exxdiv='ewald')
+        vj, vk = mydf.get_jk(dm, kpts=kpts, exxdiv='ewald')
+        np.testing.assert_allclose(vj.get(), ref_j, atol=1e-9, rtol=0)
+        np.testing.assert_allclose(vk.get(), ref_k, atol=1e-9, rtol=0)
+
+    def test_ek_derivatives_off_gamma(self):
+        cell = self.cell
+        mp_mesh = [2, 3, 1]
+        kpts = cell.make_kpts(mp_mesh, with_gamma_point=False)
+        dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        grad_sigma = aft.AFTDF(cell, kpts).get_ek_derivatives(
+            dm, kpts=kpts, exxdiv='ewald')
+        np.testing.assert_allclose(grad_sigma[:-3].sum(axis=0), 0,
+                                   atol=1e-8, rtol=0)
+
+        def exchange_energy(moved):
+            moved_kpts = moved.make_kpts(mp_mesh, with_gamma_point=False)
+            vk = aft_cpu.AFTDF(moved, moved_kpts).get_jk(
+                dm, with_j=False, exxdiv='ewald')[1]
+            return .5 * np.einsum('kij,kji->', vk, dm).real / len(kpts)
+
+        disp = 1e-4
+        coords = cell.atom_coords()
+        coords[0, 0] += disp
+        plus = cell.set_geom_(coords, unit='Bohr', inplace=False)
+        coords[0, 0] -= 2*disp
+        minus = cell.set_geom_(coords, unit='Bohr', inplace=False)
+        ref = (exchange_energy(plus) - exchange_energy(minus)) / (2*disp)
+        self.assertAlmostEqual(grad_sigma[0, 0], ref, delta=5e-7)
 
     def test_aft_k1(self):
         kpts = cell.get_abs_kpts([[-.25,-.25,-.25],

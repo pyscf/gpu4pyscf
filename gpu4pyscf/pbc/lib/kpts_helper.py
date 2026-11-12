@@ -21,11 +21,11 @@ from pyscf.pbc.tools import k2gamma
 def conj_images_in_bvk_cell(kmesh, return_pair=False):
     '''Map BvK images from L to -L modulo the supercell lattice.
 
-    kmesh gives the number of primitive cells along each direction in
-    the periodic BvK supercell (returned by kpts_to_kmesh). It can differ
-    from MP mesh.
+    kmesh gives the number of primitive cells along each direction in the
+    periodic BvK supercell (returned by kpts_to_kmesh). It is not MP k-point
+    mesh.
 
-    Return an integer array of length prod(kmesh), in super_cell image order.
+    Return an integer array of length prod(kmesh).
     If return_pair is True, return each image pair once, including self-pairs.
     '''
     # Periodic image inversion happens to be identical to the conj_kpts for ther
@@ -35,7 +35,7 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
 def conj_kpts(mp_mesh, with_gamma_point=True, return_pair=False):
     '''Map each MP k-point to its -k partner
 
-    mp_mesh gives the sampling dimensions, not the periodic BvK dimensions.
+    mp_mesh gives the sampling mesh, not the periodic BvK mesh.
     Points must follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point)
     ordering, with no additional shift or symmetry reduction. Wrapping points
     into the first Brillouin zone does not change the map.
@@ -60,38 +60,36 @@ def conj_kpts(mp_mesh, with_gamma_point=True, return_pair=False):
     mask = idx <= mapping
     return np.stack((idx[mask], mapping[mask])).T
 
-def kk_adapted_iter(mp_mesh, with_gamma_point=True, return_pair_index=True):
+def kk_adapted_iter(kmesh, with_gamma_point=True, return_pair_index=True):
     '''Group orbital k-point pairs by momentum transfer q = kj - ki.
 
-    The transfer mesh q_mesh has the same density and dimensions as the orbital
-    MP mesh, but must include Gamma: the common orbital shift cancels in kj - ki.
-    Its points and their ordering are those returned by
-    qpts = cell.make_kpts(q_mesh, with_gamma_point=True). All transfer indices
-    returned here follow this ordering. For shifted [2, 3, 1] sampling, q_mesh
-    is [2, 3, 1], not the larger periodic BvK mesh [4, 3, 1]. These transfers
-    label the auxiliary momentum sectors in density fitting.
+    kmesh is the k-point sampling mesh supplied to
+    cell.make_kpts(kmesh, with_gamma_point=with_gamma_point)
 
-    mp_mesh specifies the sampling dimensions, equal to q_mesh. Orbital points
-    must follow cell.make_kpts(mp_mesh, with_gamma_point=with_gamma_point)
-    ordering. Each result is
-    (q_idx, minus_q_idx, ki_idx, kj_idx), where the first two indices select
-    q and -q from qpts, modulo reciprocal lattice vectors. The remaining
-    arrays index the orbital points satisfying kj - ki = q modulo reciprocal
-    lattice vectors; ki_idx is sorted. Return one group per conjugate transfer
-    pair, including self-conjugate transfers. If return_pair_index is False,
-    return only (q_idx, minus_q_idx).
+    q_mesh is the transfer mesh. It has the same value as the kmesh for orbitals.
+    q_mesh must include gamma, regardless whether kpts are generated with
+    "with_gamma_point", because the common k-shift in kj and ki cancels.
+    For off-gamma sampling [2, 3, 1], q_mesh is [2, 3, 1], not the larger
+    periodic BvK mesh [4, 3, 1] (by kpts_to_kmesh).
 
-    Transfer conjugation is distinct from orbital k-point conjugation. In
-    particular, kpts[q_idx] is not the transfer vector for off-Gamma sampling;
-    use qpts[q_idx]. Both values of with_gamma_point give the same grouping
-    because the orbital shift cancels in each difference.
-    For arbitrary k-point lists, use pyscf.pbc.lib.kpts_helper.kk_adapted_iter.
+    The transfer k-points for q_mesh have the same ordering as
+    qpts = cell.make_kpts(q_mesh, with_gamma_point=True).
+
+    Return is an iterator for unique transfer k-point pairs, including
+    self-conjugate transfers. Each item in the iterator is
+    (q_idx, minus_q_idx, ki_idx, kj_idx),
+    where the first two indices select q and -q from qpts. ki_idx and kj_idx are
+    arrays index the k-points satisfying kj - ki = q . ki_idx is sorted.
+
+    Don't use the q_idx and minus_q_idx to index orbital k-points. It should
+    only be used for transfer mesh (though transfer mesh can be identical to the
+    kmesh when with_gamma_point=True).
     '''
-    mp_mesh = np.asarray(mp_mesh)
-    nkpts = np.prod(mp_mesh)
+    kmesh = np.asarray(kmesh)
+    nkpts = np.prod(kmesh)
     # The transfer mesh (q_mesh) always includes Gamma, regardless of
     # with_gamma_point.
-    q_mesh_pairs = conj_kpts(mp_mesh, with_gamma_point=True, return_pair=True)
+    q_mesh_pairs = conj_kpts(kmesh, with_gamma_point=True, return_pair=True)
 
     if not return_pair_index:
         return q_mesh_pairs
@@ -100,14 +98,14 @@ def kk_adapted_iter(mp_mesh, with_gamma_point=True, return_pair_index=True):
     # meshes. Given orbital indices i and j, kk_conserv[i, j] gives the index
     # of kj - ki on that same mesh.
     # For off-Gamma sampling, this array instead indexes the transfer mesh,
-    # which follows the cell.make_kpts(mp_mesh, with_gamma_point=True) ordering.
+    # which follows the cell.make_kpts(kmesh, with_gamma_point=True) ordering.
     # To see why the same mapping works, consider one axis with n points:
     # off-Gamma coordinates are k_j = (j + .5)/n - .5. Shifting every point
     # by s = .5 - .5/n gives k_j + s = j/n, the Gamma-containing mesh with
     # the same index ordering. Each pair (i, j) keeps its transfer because
     # (k_j + s) - (k_i + s) = k_j - k_i. Thus off-Gamma meshes give the same
     # transfer index.
-    kk_conserv = k2gamma.double_translation_indices(mp_mesh)
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
 
     # Evaluate ((kp[x], kp_conj[x], *np.where(kk_conserv == kp[x]))
     #           for x in independent_idx)
@@ -141,10 +139,10 @@ def reset_kpts(kpts, cell):
 def fft_matrix(mp_mesh, with_gamma_point=True):
     '''Fourier coefficients from a periodic BvK supercell to MP k-points.
 
-    mp_mesh gives the Monkhorst-Pack sampling dimensions, not the larger
+    mp_mesh gives the Monkhorst-Pack sampling mesh, not the larger
     periodic BvK mesh used by integral routines. If with_gamma_point is False,
     each even dimension is doubled to form the periodic supercell. Odd
-    dimensions are unchanged.
+    meshes are unchanged.
 
     The result has shape (bvk_ncells, nkpts). For example, shifted [2, 3, 1]
     sampling gives a (12, 6) matrix. Its coefficients are exp(1j*L.dot(k)),
@@ -232,3 +230,36 @@ def _normalize_kpts(kpts):
 
     assert kpts.ndim == 2
     return kpts, not is_single_kpt
+
+def _get_mp_mesh(kpts, bvk_mesh=None):
+    '''Recover MP mesh from their minimal periodic BvK embedding.
+
+    This temporary helper assumes a complete mesh in cell.make_kpts order
+    and bvk_mesh from kpts_to_kmesh. It does not validate arbitrary
+    k-point lists.
+
+    Return (mp_mesh, with_gamma_point), which can be used to reproduce kpts via
+    cell.make_kpts(mp_mesh, with_gamma_point)
+    '''
+    # TODO: if isinstance(kpts, KPoints):
+    # TODO:     return kpts.mp_mesh, kpts.with_gamma_point
+
+    # Assume kpts comes directly from cell.make_kpts, with no extra shift,
+    # reordering or symmetry reduction. The BvK mesh must be the minimal
+    # periodic embedding, not a larger user-selected or cutoff-limited mesh.
+    # Under these assumptions, its size is 1, 2, 4 or 8 times len(kpts).
+    assert bvk_mesh is not None
+    mp_mesh = np.array(bvk_mesh, copy=True)
+    bvk_ncells = np.prod(mp_mesh)
+    nkpts = len(kpts)
+    if bvk_ncells == nkpts:
+        # Shifted all-odd meshes have the same size but a different ordering.
+        assert abs(kpts[0]).max() < 1e-10, 'Expected Gamma as the first k-point'
+        fft_order = True
+        return mp_mesh, fft_order
+
+    mp_mesh[mp_mesh % 2 == 0] //= 2
+    if np.prod(mp_mesh) != nkpts:
+        raise ValueError('bvk_mesh and k-point count do not describe a complete MP mesh')
+    fft_order = False
+    return mp_mesh, fft_order

@@ -41,7 +41,7 @@ from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts)
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_mp_mesh)
 from gpu4pyscf.gto.mole import (
     group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
@@ -169,6 +169,7 @@ class FTOpt:
         self._aft_envs = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
+        # permutation_symmetry=True: evaluates only one triangular half of ao-pairs
         self.permutation_symmetry = True
         self.bas_ij_cache = None
         self.img_idx = None
@@ -506,6 +507,13 @@ class FTOpt:
             image_conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
             image_conj_mapping = cp.asarray(image_conj_mapping, dtype=np.int32)
 
+        # mp_mesh inference may need to be deferred until the actual kpts are
+        # supplied to ft_kernel.
+        mp_mesh_cached = with_gamma_point_cached = None
+        if kpts is not None:
+            mp_mesh_cached, with_gamma_point_cached = _get_mp_mesh(
+                kpts_cached, self.bvk_kmesh)
+
         cell = self.cell
         if transform_ao:
             # Current ft_aopair_kernel does not support general contraction
@@ -548,9 +556,12 @@ class FTOpt:
                 kpts = kpts_cached
                 is_single_kpt = is_single_kpt_cached
                 kpts_is_gamma_point = kpts_cached_is_gamma_point
+                mp_mesh = mp_mesh_cached
+                with_gamma_point = with_gamma_point_cached
             else:
                 kpts, is_single_kpt = _normalize_kpts(kpts)
                 kpts_is_gamma_point = is_zero(kpts)
+                mp_mesh = with_gamma_point = None
 
             if kpts_is_gamma_point and bvk_ncells == 1:
                 assert at_gamma_point
@@ -603,8 +614,10 @@ class FTOpt:
                     # The k <-> -k mapping for each ki in this reordered
                     # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
                     # which is stored in `conj_mapping_ki`.
-                    assert bvk_ncells == nkpts
-                    conj_mapping = cp.asarray(conj_kpts(self.bvk_kmesh), dtype=np.int32)
+                    if mp_mesh is None:
+                        mp_mesh, with_gamma_point = _get_mp_mesh(kpts, self.bvk_kmesh)
+                    conj_mapping = cp.asarray(
+                        conj_kpts(mp_mesh, with_gamma_point), dtype=np.int32)
                     conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
                     conj_mapping_ki[kj_idx] = conj_mapping
                     libpbc.fill_indexed_triu(
