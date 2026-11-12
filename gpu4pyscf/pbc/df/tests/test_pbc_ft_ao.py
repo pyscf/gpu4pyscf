@@ -249,6 +249,29 @@ class KnownValues(unittest.TestCase):
             ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=kpt, kptjs=kpts)
             self.assertAlmostEqual(abs(ref-dat.get()).max(), 0, 9)
 
+    def test_gen_ft_kernel_off_gamma(self):
+        cell = pgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8',
+            a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]], unit='Bohr',
+            basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+            precision=1e-10, verbose=0)
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        bvk_mesh = kpts_to_kmesh(cell, kpts)
+        np.testing.assert_array_equal(bvk_mesh, [4, 3, 1])
+        opt = ft_ao_gpu.FTOpt(cell, bvk_mesh)
+
+        cached_kernel = opt.gen_ft_kernel(kpts=kpts)
+        kernel = opt.gen_ft_kernel()
+        Gv = cell.get_Gv([3, 3, 3])
+
+        for q, ki_idx, kj_idx, self_conj in kk_adapted_iter(cell, kpts):
+            ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=q, kptjs=kpts)
+            dat = cached_kernel(Gv, q, kj_idx=kj_idx)
+            np.testing.assert_allclose(dat.get(), ref, atol=1e-9, rtol=0)
+            # Supplying k-points at evaluation time must give the same tensor.
+            dat = kernel(Gv, q, kpts, kj_idx)
+            np.testing.assert_allclose(dat.get(), ref, atol=1e-9, rtol=0)
+
     def test_ft_ao_strain_deriv(self):
         from gpu4pyscf.gto.mole import SortedGTO
         from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells

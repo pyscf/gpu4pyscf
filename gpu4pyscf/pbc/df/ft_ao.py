@@ -510,7 +510,7 @@ class FTOpt:
         # mp_mesh inference may need to be deferred until the actual kpts are
         # supplied to ft_kernel.
         mp_mesh_cached = with_gamma_point_cached = None
-        if kpts is not None:
+        if kpts is not None and self.permutation_symmetry:
             mp_mesh_cached, with_gamma_point_cached = _get_mp_mesh(
                 kpts_cached, self.bvk_kmesh)
 
