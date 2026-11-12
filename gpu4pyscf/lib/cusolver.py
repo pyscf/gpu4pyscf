@@ -59,7 +59,7 @@ if cupy.cuda.runtime.is_hip:
     _FILL_MODE_UPPER = 121            # HIPSOLVER_FILL_MODE_UPPER
 else:
     _DN_PREFIX = 'cusolverDn'
-    _FILL_MODE_LOWER = _FILL_MODE_LOWER
+    _FILL_MODE_LOWER = cublas.CUBLAS_FILL_MODE_LOWER
     _FILL_MODE_UPPER = cublas.CUBLAS_FILL_MODE_UPPER
 
 def _dn(name):
