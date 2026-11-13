@@ -112,13 +112,11 @@ def test_conj_kpts():
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
                    a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
     kmesh = [2, 3, 1]
-    kpts = cell.make_kpts(kmesh, with_gamma_point=True)
     mapping = kpts_helper.conj_kpts(kmesh, with_gamma_point=True)
     np.testing.assert_array_equal(mapping, [0, 2, 1, 3, 5, 4])
     pairs = kpts_helper.conj_kpts(kmesh, with_gamma_point=True, return_pair=True)
     np.testing.assert_array_equal(pairs, [[0, 0], [1, 2], [3, 3], [4, 5]])
 
-    kpts = cell.make_kpts(kmesh, with_gamma_point=False)
     mapping = kpts_helper.conj_kpts(kmesh, with_gamma_point=False)
     np.testing.assert_array_equal(mapping, [5, 4, 3, 2, 1, 0])
     pairs = kpts_helper.conj_kpts(kmesh, with_gamma_point=False, return_pair=True)
