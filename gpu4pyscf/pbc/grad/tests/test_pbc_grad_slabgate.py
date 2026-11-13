@@ -127,6 +127,43 @@ class KnownValues(unittest.TestCase):
     def test_multigrid_scf_finite_difference(self):
         self.check_scf('RKS', multigrid=True, gate_side=1)
 
+    def check_explicit_2d(self, name, gate_side):
+        cell = make_cell(dimension=2)
+        z0 = cell.atom_coords()[0, 2]
+        # Keep the external geometry fixed when finite differences move
+        # the atoms, including the atom used to define this reference point.
+        # One ion lies on the slab-facing ramp to test the ionic barrier term.
+        if gate_side == -1:
+            zgate, start, end = z0-5., z0-7.1, z0+2.4
+        else:
+            zgate, start, end = z0+7., z0-.4, z0+9.1
+
+        def build(c):
+            mf = make_mf(c, name)
+            if name == 'KUKS':
+                mf.kpts = c.make_kpts([2, 1, 1], scaled_center=[.17, 0, 0])
+            return gate_charge(mf, zgate=zgate, barrier=True,
+                               barrier_start=start, barrier_end=end,
+                               barrier_width=1., gate_side=gate_side)
+
+        mf = build(cell)
+        dm = mf.get_init_guess()
+        if name == 'KUKS':
+            dm[0] *= 1.1
+            dm[1] *= .9
+        grad = mf.Gradients()
+        grad.grid_response = False
+        numeric = finite_difference(cell, lambda c: gate_energy(build(c), dm))
+        analytic = gate_grad(grad, dm)
+        np.testing.assert_allclose(analytic, numeric, atol=3e-7, rtol=0)
+
+    def test_explicit_finite_difference_rks_2d(self):
+        self.check_explicit_2d('RKS', gate_side=-1)
+
+    def test_explicit_finite_difference_kuks_2d(self):
+        self.check_explicit_2d('KUKS', gate_side=1)
+
 
 if __name__ == '__main__':
+    print("Full tests for slabgate gradients.")
     unittest.main()

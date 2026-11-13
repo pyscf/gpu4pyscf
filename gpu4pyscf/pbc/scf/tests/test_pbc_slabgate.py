@@ -16,21 +16,23 @@ import unittest
 from unittest import mock
 import numpy as np
 import cupy as cp
-from pyscf.pbc import gto
+from pyscf.pbc import gto, dft as cpu_dft
 from pyscf.pbc.dft import numint as cpu_numint
-from gpu4pyscf.pbc import dft
+from gpu4pyscf.pbc import dft, df
 from gpu4pyscf.pbc.scf import slabgate
-from gpu4pyscf.pbc.scf.addons import gate_charge
-from gpu4pyscf.pbc.scf.slabdipole import _sawtooth, _slab_charge
+from gpu4pyscf.pbc.scf.addons import gate_charge, slab_dipole_correction
+from gpu4pyscf.pbc.scf.slabdipole import (
+    SlabDipoleCorrection, _sawtooth, _slab_charge)
 from gpu4pyscf.pbc.scf.slabgate import _sheet_potential, _barrier_potential
 
 
-def make_cell(charge=2):
+def make_cell(charge=2, dimension=3):
+    length, zshift, nz = (60., -10., 249) if dimension == 2 else (22., 0., 91)
     return gto.M(
-        a=np.diag([7., 8., 22.]), unit='Bohr',
-        atom='F 2.1 2.8 10.; H 2.8 3.3 11.7',
+        a=np.diag([7., 8., length]), unit='Bohr',
+        atom=f'F 2.1 2.8 {10.+zshift}; H 2.8 3.3 {11.7+zshift}',
         charge=charge, basis='gth-szv', pseudo='gth-pade',
-        mesh=[31, 33, 91], precision=1e-10, verbose=0)
+        dimension=dimension, mesh=[31, 33, nz], precision=1e-10, verbose=0)
 
 
 def make_mf(cell, name='RKS', multigrid=False, becke=False):
@@ -130,12 +132,13 @@ class KnownValues(unittest.TestCase):
                 self.assertAlmostEqual(e-e0, mf.scf_summary['egate'] +
                                        mf.scf_summary['ebarrier'], delta=1e-10)
 
-    def test_smearing_energy(self):
+    def check_smearing_energy(self, dimension):
         sigma, entropy = .02, 1.25
-        gate_kwargs = dict(zgate=17., barrier=True, barrier_start=15.,
-                           barrier_end=19., barrier_width=.7)
         for name in ('RKS', 'UKS', 'KRKS', 'KUKS'):
-            cell = make_cell()
+            cell = make_cell(dimension=dimension)
+            zgate = cell.atom_coords()[0, 2] + 7.
+            gate_kwargs = dict(zgate=zgate, barrier=True, barrier_start=zgate-2.,
+                               barrier_end=zgate+2., barrier_width=.7)
             reference = gate_charge(make_mf(cell, name), **gate_kwargs)
             dm = reference.get_init_guess()
             h = reference.get_hcore()
@@ -162,6 +165,12 @@ class KnownValues(unittest.TestCase):
                             self.assertAlmostEqual(mf.scf_summary[key],
                                                    reference.scf_summary[key],
                                                    delta=1e-10)
+
+    def test_smearing_energy(self):
+        self.check_smearing_energy(dimension=3)
+
+    def test_smearing_energy_2d(self):
+        self.check_smearing_energy(dimension=2)
 
     def test_charge_per_cell(self):
         cell = make_cell()
@@ -221,13 +230,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.barrier_end, 17.5)
 
     def test_cell_dimension(self):
-        for dimension in (1, 2):
-            with self.subTest(dimension=dimension):
-                cell = make_cell()
-                mf = make_mf(cell)
-                cell.dimension = dimension
-                with self.assertRaisesRegex(NotImplementedError, '3D cell'):
-                    gate_charge(mf)
+        cell = make_cell()
+        mf = make_mf(cell)
+        cell.dimension = 1
+        with self.assertRaises(NotImplementedError):
+            gate_charge(mf)
 
     @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', .4/22.)
     def test_barrier_positions(self):
@@ -275,6 +282,105 @@ class KnownValues(unittest.TestCase):
                 gate_charge(make_mf(cell), barrier=False,
                             dipole_gap=.1, barrier_width=.2, **kwargs)
 
+    def test_defaults_and_reset_2d(self):
+        cell = make_cell(dimension=2)
+        length = cell.lattice_vectors()[2, 2]
+        zgate = cell.atom_coords()[0, 2] + 7.
+        # The 2D geometry must not depend on 3D dipole parameters.
+        with mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', .4):
+            mf = gate_charge(make_mf(cell), zgate=zgate, barrier=True,
+                             dipole_gap=10., gate_side=1)
+        self.assertNotIsInstance(mf, SlabDipoleCorrection)
+        self.assertAlmostEqual(mf.barrier_start, zgate-.05*length)
+        self.assertAlmostEqual(mf.barrier_end, zgate+.05*length)
+        self.assertAlmostEqual(mf.barrier_width, .01*length)
+        mf.reset(cell.copy())
+        self.assertEqual(mf.zgate, zgate)
+        self.assertAlmostEqual(mf.barrier_start, zgate-.05*length)
+        self.assertAlmostEqual(mf.barrier_end, zgate+.05*length)
+        self.assertNotIsInstance(mf, SlabDipoleCorrection)
+        with self.assertRaisesRegex(ValueError, 'dimensionality'):
+            mf.reset(make_cell())
+
+    def test_outside_cell_gate_2d(self):
+        cell = make_cell(dimension=2)
+        length = cell.lattice_vectors()[2, 2]
+        area = cell.vol / length
+        # Both gates are outside the numerical cell and more than L/2
+        # from the slab. The addon must preserve these physical coordinates.
+        for zgate in (-length-5., length+5.):
+            with self.subTest(zgate=zgate):
+                start, end = zgate-2., zgate+2.
+                mf = gate_charge(make_mf(cell), zgate=zgate, barrier=True,
+                                 barrier_start=start, barrier_end=end,
+                                 barrier_width=.5)
+                self.assertEqual(mf.zgate, zgate)
+                self.assertEqual(mf.barrier_start, start)
+                self.assertEqual(mf.barrier_end, end)
+                params = mf._gate_parameters(cell)
+                self.assertEqual(params[1:4], (zgate, start, end))
+                qc = -cell.charge
+                ionic = -2*np.pi*qc/area * np.dot(
+                    cell.atom_charges(), abs(cell.atom_coords()[:, 2]-zgate))
+                egate, ebarrier = mf._gate_ionic_energy(cell)
+                self.assertAlmostEqual(egate, ionic, delta=1e-12)
+                self.assertAlmostEqual(ebarrier, -qc*mf.barrier_height, delta=1e-12)
+
+    @mock.patch('gpu4pyscf.pbc.scf.hf.ALLOWED_FFT_MESH_SIZE', 0)
+    def test_scf_2d_vs_3d(self):
+        # Use FFTDF on both sides, including the 3D nuclear potential, to
+        # isolate boundary-condition effects from the automatic MultiGrid path.
+        # Large vacuum suppresses the remaining nonplanar 3D image interactions.
+        for length, nz in ((60., 249), (80., 333)):
+            with self.subTest(length=length):
+                cell_2d = gto.M(
+                    a=np.diag([7., 8., length]), unit='Bohr', dimension=2,
+                    atom='C 2.1 2.8 0.; H 2.8 3.3 1.7',
+                    charge=1, spin=0, basis='gth-szv', pseudo='gth-pade',
+                    mesh=[31, 33, nz], precision=1e-10, verbose=0)
+                cell_3d = cell_2d.copy()
+                cell_3d.dimension = 3
+                cell_3d.build()
+                mf_2d = gate_charge(make_mf(cell_2d), zgate=-5., barrier=False)
+                mf_3d = gate_charge(make_mf(cell_3d), zgate=-5., barrier=False)
+                mf_2d.xc = 'pbe'
+                mf_3d.xc = 'pbe'
+
+                # Keep the return region well outside the electron-density
+                # tails, on the vacuum side of the gate. Do not use its default
+                # location immediately next to the gate for this comparison.
+                cut = (-length/3) % length
+                slab_dipole_correction(mf_3d, cut=cut, width=1.,
+                                       z0=(cut+length/2) % length)
+                self.assertNotIsInstance(mf_2d, SlabDipoleCorrection)
+                self.assertIsInstance(mf_3d, SlabDipoleCorrection)
+
+                # Independent SCFs from the same initial density; do not seed
+                # the second calculation with the first converged solution.
+                dm0 = mf_2d.get_init_guess()
+                energy_2d = mf_2d.kernel(dm0=dm0.copy())
+                energy_3d = mf_3d.kernel(dm0=dm0.copy())
+                self.assertTrue(mf_2d.converged, '2D SCF did not converge')
+                self.assertTrue(mf_3d.converged, '3D SCF did not converge')
+                # Compare full total energies without fitting a constant shift.
+                # Do not demand bitwise equality for different electrostatics.
+                self.assertAlmostEqual(energy_2d, energy_3d, delta=1e-6)
+                cp.testing.assert_allclose(mf_2d.make_rdm1(), mf_3d.make_rdm1(),
+                                            atol=1e-5, rtol=0)
+
+    def test_backend_selection_is_unchanged(self):
+        # Attaching a gate does not build or validate the base SCF backend.
+        mf = make_mf(make_cell(dimension=2))
+        mf.with_df = df.GDF(mf.cell)
+        mf.xc = 'pbe0'
+        backend, integrator = mf.with_df, mf._numint
+        zgate = mf.cell.atom_coords()[0, 2] + 7.
+        self.assertIs(gate_charge(mf, zgate=zgate), mf)
+        self.assertIs(mf.with_df, backend)
+        self.assertIs(mf._numint, integrator)
+        self.assertEqual(mf.xc, 'pbe0')
+
 
 if __name__ == '__main__':
+    print("Full tests for slabgate.")
     unittest.main()
