@@ -124,6 +124,8 @@ class _SmearingSCF:
     def get_occ(self, mo_energy=None, mo_coeff=None):
         """Label the occupancies for each orbital"""
         from gpu4pyscf import scf
+        if hasattr(self, '_get_gate_occ'):
+            return self._get_gate_occ(mo_energy, mo_coeff)
         if (self.sigma == 0) or (not self.sigma) or (not self.smearing_method):
             mo_occ = super().get_occ(mo_energy, mo_coeff)
             return mo_occ
@@ -235,6 +237,8 @@ class _SmearingSCF:
     _get_entropy = cpu_addons._SmearingSCF._get_entropy
 
     def get_grad(self, mo_coeff, mo_occ, fock=None):
+        if hasattr(self, '_get_gate_grad'):
+            return self._get_gate_grad(mo_coeff, mo_occ, fock)
         if (self.sigma == 0) or (not self.sigma) or (not self.smearing_method):
             return super().get_grad(mo_coeff, mo_occ, fock)
 

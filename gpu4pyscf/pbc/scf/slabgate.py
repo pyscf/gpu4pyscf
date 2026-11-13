@@ -30,17 +30,33 @@ DIPOLE_WIDTH_RATIO = getattr(__config__, 'pbc_scf_slabgate_dipole_width_ratio', 
 
 def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                 barrier_end=None, barrier_height=.05, barrier_width=None,
-                dipole_gap=1e-4, gate_side=-1):
+                dipole_gap=1e-4, gate_side=-1, *,
+                fractional_electrons=False):
     '''
     Apply a compensating planar gate and its dipole correction in place.
 
-    The sheet carries qc = -q, where q = cell.charge/nkpts is the charge
-    PER PRIMITIVE CELL. At a single k-point, q = cell.charge. Negative q
-    adds electrons. The gate charge is determined solely by cell.charge
-    and the number of sampled k-points. To fix a target q per primitive
-    cell when changing the k mesh, reset cell.charge = nkpts*q.
-    Build the cell with a consistent charge/spin; KUKS spin counts are totals
-    over the k-points. No electron-count setting is changed by this addon.
+    The sheet carries qc = -q, where q is the slab charge per primitive cell.
+    Negative q adds electrons. With fractional_electrons=False, the legacy
+    convention q = cell.charge/nkpts is retained. To keep q fixed in this mode,
+    set cell.charge = nkpts*q when changing the k mesh.
+
+    For RKS/KRKS with spin=0, fractional_electrons=True enables real electron
+    counts and requires an explicit cell.nelectron. In this mode cell.charge is PER
+    PRIMITIVE CELL, and cell.nelectron + cell.charge must equal the sum of
+    effective ionic charges. For example, after building an 8-valence-electron
+    cell, set cell.charge = .3 and cell.nelectron = 7.7. No input is changed
+    automatically. Setting cell.nelectron alone does not enable this mode.
+    Occupations are filled globally at zero temperature, sharing any frontier
+    degeneracy, or obtained with Fermi/Gaussian smearing at fixed electron
+    number. Both orders of applying gate_charge and smearing are supported.
+    Fractional-electron mode currently excludes UKS/KUKS, level shifting,
+    fixed chemical potentials and second-order SCF. Nuclear gradients keep
+    the electron number and external gate parameters fixed. With Fermi smearing
+    at fixed sigma, they differentiate e_free, not e_tot or e_zero.
+    In the legacy mode, build the cell with consistent charge/spin; KUKS spin
+    counts are totals over the k-points. An explicit cell.nelectron must be
+    an integer matching the legacy charge/nkpts convention. Restricted SCF
+    requires an even total electron count in this mode.
     The standard 3D Coulomb calculation retains its G=0 convention.
     With A = Omega/L and s = (z-zgate+L/2) % L - L/2, the sheet potential is
 
@@ -90,6 +106,10 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             z, independent of gate_side. Intervals can cross the boundary.
             When barrier=True, the interval must contain zgate strictly
             inside and cover the entire dipole return region.
+        fractional_electrons: Enable real per-cell electron counts (default:
+            False). Requires explicit, consistent cell.nelectron and cell.charge.
+            Integer targets are also supported. When reapplying gate_charge to
+            an enabled object, pass True again; use a new SCF object to disable.
         barrier_height: Plateau height in Hartree (default: .05 = .1 Ry).
         barrier_width: Linear ramp width INSIDE each edge, in Bohr; None
             means dipole_width, as in Brumme. Zero gives a rectangular barrier.
@@ -120,6 +140,34 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Gate charge requires RKS/UKS/KRKS/KUKS')
+    if isinstance(mf, GateFractionalOccupations) and not fractional_electrons:
+        raise ValueError('Cannot disable fractional_electrons on an existing object; '
+                         'create a new SCF object')
+    if fractional_electrons:
+        from gpu4pyscf.scf.soscf import _CIAH_SOSCF
+        if not isinstance(mf, (rks.RKS, krks.KRKS)):
+            raise NotImplementedError('Fractional gate electron counts require RKS/KRKS')
+        if isinstance(mf, _CIAH_SOSCF):
+            raise NotImplementedError('Second-order SCF with fractional gate occupations')
+        GateFractionalOccupations._gate_nelectron(mf)
+    else:
+        charge = mf.cell.charge
+        if not np.isfinite(charge) or charge != round(charge):
+            raise ValueError('Fractional gate charge requires fractional_electrons=True '
+                             'and an explicit cell.nelectron')
+        if mf.cell._nelectron is not None:
+            nelectron = float(mf.cell.nelectron)
+            if nelectron != round(nelectron):
+                raise ValueError('Fractional cell.nelectron requires fractional_electrons=True')
+            nkpts = len(mf.kpts) if mf.istype('KSCF') else 1
+            # Explicit N is per cell even in the legacy charge/nkpts mode.
+            if abs(nelectron + charge / nkpts - mf.cell.atom_charges().sum()) > 1e-9:
+                raise ValueError('cell.nelectron and cell.charge must match charge/nkpts '
+                                 'in legacy mode; use fractional_electrons=True '
+                                 'for per-cell charge')
+            if isinstance(mf, (rks.RKS, krks.KRKS)) and round(nelectron * nkpts) % 2:
+                raise ValueError('An odd restricted electron count requires '
+                                 'fractional_electrons=True')
     length = _slab_length(mf.cell)
     if gate_side not in (-1, 1):
         raise ValueError('gate_side must be -1 or +1')
@@ -155,6 +203,8 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             raise ValueError('Barrier interval must cover the entire dipole return region')
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
+    if fractional_electrons and not isinstance(mf, GateFractionalOccupations):
+        lib.set_class(mf, (GateFractionalOccupations, mf.__class__))
     mf.gate_side = gate_side
     mf.zgate = zgate
     mf.barrier = barrier
@@ -313,3 +363,159 @@ class SlabGateCharge:
 
     def to_cpu(self):
         raise NotImplementedError('Gate charge is a GPU SCF addon')
+
+
+# TODO: this may be applied to normal SCF calculations as well.
+def _check_nelectron(cell):
+    if cell._nelectron is None:
+        raise ValueError('Set cell.nelectron explicitly for fractional gate occupations')
+    nelectron = float(cell.nelectron)
+    charge = float(cell.charge)
+    if not np.isfinite(nelectron) or nelectron < 0 or not np.isfinite(charge):
+        raise ValueError('Gate electron number must be finite and nonnegative')
+    if abs(nelectron + charge - cell.atom_charges().sum()) > 1e-9:
+        raise ValueError('cell.nelectron and cell.charge must match per primitive cell')
+    if cell.spin != 0:
+        raise NotImplementedError('Fractional gate occupations require spin=0 RKS/KRKS')
+    return nelectron
+
+
+def _zero_temperature_occ(mo_energy, nelectron):
+    '''
+    Global filling adapted from pbc.scf.khf.get_occ.
+    '''
+    energies = np.asarray(mo_energy)
+    occ = np.zeros_like(energies, dtype=float)
+    if nelectron == 0:
+        return occ
+    # Unlike khf.get_occ's N//2, include the partially occupied frontier state.
+    fermi = np.sort(energies.ravel())[int(np.ceil(nelectron / 2)) - 1]
+    # Replace the normal energy <= fermi -> 2 rule by sharing the remainder.
+    below = energies < fermi - 1e-9
+    frontier = abs(energies - fermi) <= 1e-9
+    occ[below] = 2
+    occ[frontier] = (nelectron - 2 * below.sum()) / frontier.sum()
+    return occ
+
+
+class GateFractionalOccupations:
+    '''
+    Opt-in, per-cell electron counting; ordinary SCF objects are unchanged.
+    '''
+    __name_mixin__ = 'Fractional'
+
+    def _gate_nelectron(self, cell=None):
+        nelectron = _check_nelectron(self.cell if cell is None else cell)
+        if getattr(self, 'mu0', None) is not None:
+            raise ValueError('Gate occupations fix the electron number; mu0 must be None')
+        if self.level_shift:
+            # TODO: how to do level shifting with fractional gate occupations?
+            raise NotImplementedError('Level shifting with fractional gate occupations')
+        return nelectron
+
+    def build(self, cell=None):
+        self._gate_nelectron(cell)
+        return super().build(cell)
+
+    def reset(self, cell=None):
+        self._gate_nelectron(cell)
+        return super().reset(cell)
+
+    def _get_gate_occ(self, mo_energy=None, mo_coeff=None):
+        '''
+        Restricted-spin adaptation of _SmearingSCF/_SmearingKSCF.get_occ.
+        '''
+        from gpu4pyscf.scf import smearing
+
+        nelectron = self._gate_nelectron()
+        nkpts = len(self.kpts) if self.istype('KSCF') else 1
+        if mo_energy is None:
+            mo_energy = self.mo_energy
+        energies = cp.asnumpy(mo_energy)
+        # Do not use Cell.tot_electrons(nkpts): it rounds the explicit count.
+        target = nelectron * nkpts
+        if not 0 <= target <= 2 * energies.size:
+            raise ValueError('Electron number exceeds the available orbital capacity')
+        sigma = getattr(self, 'sigma', None)
+        method = getattr(self, 'smearing_method', None)
+        if sigma and method:
+            if method.lower() == 'fermi':
+                f_occ = smearing._fermi_smearing_occ
+            elif method.lower() == 'gaussian':
+                f_occ = smearing._gaussian_smearing_occ
+            else:
+                raise ValueError('Gate smearing supports fermi or gaussian')
+            if target == 0 or target == 2 * energies.size:
+                occ = np.full_like(energies, 0. if target == 0 else 2., dtype=float)
+                self.entropy = 0.
+            else:
+                # Reuse the solver, replacing KRKS's (N+1)//2 by real N/2.
+                mu, occ = smearing._smearing_optimize(
+                    f_occ, energies.ravel(), target / 2, sigma)
+                self.entropy = 2 * self._get_entropy(energies.ravel(), occ, mu) / nkpts
+                occ = (2 * occ).reshape(energies.shape)
+                logger.info(self, '    sigma = %g  Optimized mu = %.12g  entropy = %.12g',
+                            sigma, mu, self.entropy)
+        else:
+            occ = _zero_temperature_occ(energies, target)
+            if hasattr(self, 'entropy'):
+                self.entropy = 0.
+                self.e_free = self.e_zero = None
+        if abs(occ.sum() / nkpts - nelectron) > 1e-9:
+            raise RuntimeError('Gate occupations do not conserve the electron number')
+        return cp.asarray(occ)
+
+    get_occ = _get_gate_occ
+
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        from gpu4pyscf.scf import hf
+
+        if cell is None:
+            cell = self.cell
+        target = self._gate_nelectron(cell)
+        # Adapt pbc.scf.hf.RHF / khf.KRHF.get_init_guess: reuse the common
+        # dispatcher, but normalize to the real target rather than tot_electrons.
+        dm = hf.RHF.get_init_guess(self, cell, key)
+        if s1e is None:
+            s1e = self.get_ovlp(cell)
+        nkpts = len(self.kpts) if self.istype('KSCF') else 1
+        count = float(cp.einsum('...ij,...ji->...', dm, s1e).real.sum()) / nkpts
+        if count == 0:
+            if target != 0:
+                raise ValueError('Cannot normalize an empty gate initial density')
+            return dm
+
+        scale = target / count
+        dm *= scale
+        if hasattr(dm, 'mo_occ'):
+            dm.mo_occ *= scale
+        return dm
+
+    def _get_gate_grad(self, mo_coeff, mo_occ, fock=None):
+        self._gate_nelectron()
+        if fock is None:
+            dm = self.make_rdm1(mo_coeff, mo_occ)
+            fock = self.get_hcore() + self.get_veff(self.cell, dm)
+        f_mo = mo_coeff.swapaxes(-1, -2).conj() @ fock @ mo_coeff
+        # Normal hf/khf.get_grad only pairs occupied and empty orbitals.
+        # Occupation differences also include full-to-partial rotations.
+        gradient = f_mo * (mo_occ[..., None, :] - mo_occ[..., :, None])
+        i, j = cp.tril_indices(mo_occ.shape[-1], -1)
+        return gradient[..., i, j].ravel()
+
+    get_grad = _get_gate_grad
+
+    def get_fermi(self, mo_energy=None, mo_occ=None):
+        target = self._gate_nelectron()
+        if target == 0:
+            return -np.inf
+        if mo_energy is None:
+            mo_energy = self.mo_energy
+        nkpts = len(self.kpts) if self.istype('KSCF') else 1
+        # Unlike normal get_fermi's integer truncation, include the partial state.
+        # This remains a zero-temperature reference, not the smearing chemical potential.
+        index = int(np.ceil(target * nkpts / 2)) - 1
+        return float(cp.sort(cp.asarray(mo_energy).ravel())[index])
+
+    def newton(self):
+        raise NotImplementedError('Second-order SCF with fractional gate occupations')

@@ -127,6 +127,40 @@ class KnownValues(unittest.TestCase):
     def test_multigrid_scf_finite_difference(self):
         self.check_scf('RKS', multigrid=True, gate_side=1)
 
+    @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', 2./22.)
+    def test_fractional_scf_finite_difference(self):
+        cell = make_cell(charge=0)
+        cell.charge = .3
+        cell.nelectron = 7.7
+        for name, nkpts, sigma in [('RKS', 1, 0.), ('KRKS', 2, .03)]:
+            with self.subTest(name=name, sigma=sigma):
+                def build(c):
+                    mf = gate_charge(
+                        make_mf(c, name), fractional_electrons=True, zgate=17.,
+                        barrier=True, barrier_start=14.9, barrier_end=19.,
+                        barrier_width=.7, dipole_gap=.1)
+                    return mf.smearing(sigma, method='fermi') if sigma else mf
+
+                mf = build(cell)
+                mf.kernel()
+                self.assertTrue(mf.converged)
+                self.assertAlmostEqual(float(mf.mo_occ.sum()) / nkpts, 7.7, delta=1e-9)
+                analytic = mf.nuc_grad_method().kernel()
+                self.assertTrue(np.isfinite(analytic).all())
+                dm0 = mf.make_rdm1()
+                energies = []
+                # Move H along z, keeping N, the cell, grid and gate fixed.
+                for step in (-DISP, DISP):
+                    displaced = build(displaced_cell(cell, 1, 2, step))
+                    displaced.kernel(dm0=dm0.copy())
+                    self.assertTrue(displaced.converged)
+                    self.assertAlmostEqual(float(displaced.mo_occ.sum()) / nkpts,
+                                           7.7, delta=1e-9)
+                    # Fermi-smearing forces are derivatives of the free energy.
+                    energies.append(displaced.e_free if sigma else displaced.e_tot)
+                numeric = (energies[1] - energies[0]) / (2 * DISP)
+                self.assertAlmostEqual(analytic[1, 2], numeric, delta=1e-5)
+
 
 if __name__ == '__main__':
     unittest.main()
