@@ -19,6 +19,7 @@ Analytical derivatives for DFT+U
 
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import gto
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft.rkspu import _set_U, _make_minao_lo, reference_mol
@@ -35,7 +36,7 @@ def generate_first_order_local_orbitals(mol, minao_ref='MINAO'):
 
     # Lowdin orthogonalization coefficients = S^{-1/2}
     S0 = sAB.conj().T.dot(C0_minao)
-    w2, v = cp.linalg.eigh(S0)
+    w2, v = eigh_std(S0)
     w = cp.sqrt(w2)
     S0_lowdin = (v/w).dot(v.conj().T)
 

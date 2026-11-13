@@ -47,8 +47,14 @@ try:
     libmgrid.MG_init_constant.restype = ctypes.c_int
     libmgrid.ovlp_mask_estimation.restype = ctypes.c_int
     libmgrid.filter_supmol_bas.restype = ctypes.c_int
+    libmgrid.MG_warp_size.restype = ctypes.c_int
+    # Effective wavefront width of the running GPU (32 on RDNA/NVIDIA, 64 on
+    # GCN/CDNA), queried from the compiled library so the `pool` scratch sized below
+    # matches the per-arch device WARP_SIZE stride in a single multi-arch build.
+    WARP_SIZE = libmgrid.MG_warp_size() if libmgrid is not None else 32
 except OSError:
     libmgrid = None
+    WARP_SIZE = 32
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
@@ -57,7 +63,6 @@ PRIMBAS_COORD = 3
 LMAX = 4
 SHM_SIZE = shm_size - 1024
 del shm_size
-WARP_SIZE = 32
 
 DEBUG = False
 
@@ -1438,4 +1443,12 @@ class MultiGridNumInt(MultiGridNumIntBase):
     device = utils.device
 
     def to_cpu(self):
-        raise RuntimeError('Not available')
+        if not cp.cuda.runtime.is_hip:
+            raise RuntimeError('Not available')
+        # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
+        # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU
+        # bridge for the multigrid grid machinery, so return a lightweight CPU
+        # numint sufficient for that functional evaluation. Removable once a
+        # HIP libXC keeps XC on the GPU.
+        from pyscf.pbc.dft import numint as numint_cpu
+        return numint_cpu.NumInt()

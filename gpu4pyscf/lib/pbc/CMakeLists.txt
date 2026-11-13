@@ -20,5 +20,6 @@ add_library(pbc SHARED
 set_target_properties(pbc PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON)
+gpu4pyscf_configure_gpu_target(pbc)
 
 target_link_libraries(pbc OpenMP::OpenMP_C)

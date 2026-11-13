@@ -16,6 +16,7 @@ from functools import reduce
 from pyscf.hessian import thermo
 import numpy as np
 import cupy
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf.data import elements, nist
 from scipy.constants import physical_constants
 from gpu4pyscf.lib import logger
@@ -74,10 +75,10 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         TRspace = cupy.asarray(np.vstack(TRspace))
         q, r = cupy.linalg.qr(TRspace.T)
         P = cupy.eye(natm * 3) - q.dot(q.T)
-        w, v = cupy.linalg.eigh(P)
+        w, v = eigh_std(P)
         bvec = v[:,w > LINDEP_THRESHOLD]
         h = reduce(cupy.dot, (bvec.T, hessian_mass.transpose(0,2,1,3).reshape(3*natm,3*natm), bvec))
-        e, mode = cupy.linalg.eigh(h)
+        e, mode = eigh_std(h)
         mode = bvec.dot(mode)
 
     c = contract('ixn,i->ixn', mode.reshape(natm, 3, -1),

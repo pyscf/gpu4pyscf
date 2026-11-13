@@ -284,6 +284,46 @@ H   1.7   -2.0   0.4''',
                     assert all(r.shape == x.shape and bool((r == x).all())
                                for r, x in zip(ref[1:], dat[i][1:]))
 
+    def test_block_loop_strict_grid_order(self):
+        # Match the screening kernel's 256-point tiles to keep blocks independent.
+        blksize = 256
+        ngrids = 2 * blksize + 17
+        coords = np.arange(ngrids * 3, dtype=np.float64).reshape(-1, 3) / 10000
+        # Fully screen the middle block, but retain a nonempty partial final block.
+        coords[blksize:2 * blksize] += 1e4
+        weights = np.arange(1, ngrids + 1, dtype=np.float64) / ngrids
+        grids = Grids(mol)
+        grids.coords = cupy.asarray(coords)
+        grids.weights = cupy.asarray(weights)
+        ni = NumInt().build(mol, grids.coords)
+
+        with lib.temporary_env(numint, MIN_BLK_SIZE=blksize):
+            screening = grids.get_non0ao_idx(ni.gdftopt)
+            self.assertEqual([bool(x[1].size) for x in screening],
+                             [True, False, True])
+            for deriv, comp in ((0, 1), (1, 4), (2, 10)):
+                for strict in (None, True, False):
+                    with self.subTest(deriv=deriv, strict_grid_order=strict):
+                        # None tests the omitted keyword; False must also keep empty blocks.
+                        kwargs = {} if strict is None else {'strict_grid_order': strict}
+                        blocks = list(ni.block_loop(
+                            mol, grids, deriv=deriv, blksize=blksize, **kwargs))
+                        self.assertEqual(len(blocks), 3)
+                        for block, sparse, size in zip(blocks, screening,
+                                                       (blksize, blksize, 17)):
+                            ao, idx, weight, coord = block
+                            shape = (idx.size, size)
+                            if deriv:
+                                shape = (comp,) + shape
+                            self.assertEqual(ao.shape, shape)
+                            self.assertEqual(weight.shape, (size,))
+                            self.assertEqual(coord.shape, (size, 3))
+                            np.testing.assert_array_equal(idx.get(), sparse[1].get())
+                        np.testing.assert_array_equal(
+                            cupy.concatenate([x[2] for x in blocks]).get(), weights)
+                        np.testing.assert_array_equal(
+                            cupy.concatenate([x[3] for x in blocks]).get(), coords)
+
     def test_scale_ao(self):
         ao = cupy.random.rand(1, 3, 256)
         wv = cupy.random.rand(1, 256)

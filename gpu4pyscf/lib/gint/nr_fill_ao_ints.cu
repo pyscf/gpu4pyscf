@@ -114,8 +114,27 @@ static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTE
     case 4: GINTfill_int2e_kernel<4, GOUTSIZE4> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
     case 5: GINTfill_int2e_kernel<5, GOUTSIZE5> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
     case 6: GINTfill_int2e_kernel<6, GOUTSIZE6> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+#if defined(GPU4PYSCF_WAVE64)
+    case 7:
+        // wave64: the nrys_roots=7 kernel's stack frame (~170 KB) exceeds the
+        // amdgpu linker's stack-frame limit (128 KB) -- wave64 halves per-lane
+        // registers, so the large local `gout` buffer spills further to scratch.
+        // Cap at 6 on wave64 until the kernel is restructured (Phase-2 work).
+        fprintf(stderr, "GINTfill_int2e: nrys_roots=7 unsupported on HIP wave64 (stack limit)\n");
+        return 1;
+#else
     case 7: GINTfill_int2e_kernel<7, GOUTSIZE7> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+#endif
+#if !defined(__HIP_PLATFORM_AMD__)
     case 8: GINTfill_int2e_kernel<8, GOUTSIZE8> <<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+#else
+    case 8:
+        // nrys_roots == 8 needs a ~366 KB/thread local `gout` buffer, which
+        // exceeds the AMD per-thread scratch limit (256 KB). Unsupported on HIP
+        // for now; report failure so the caller can fall back.
+        fprintf(stderr, "GINTfill_int2e: nrys_roots=8 unsupported on HIP (scratch limit)\n");
+        return 1;
+#endif
     default:
         fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;

@@ -53,6 +53,56 @@ There shouldn't be cupy or cutensor compilation during pip install process. If y
 <repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
 
+Building for AMD GPUs (ROCm)
+--------
+gpu4pyscf also runs on AMD GPUs through ROCm/HIP. It is built from source with
+the standard `pip`/`setup.py` path (`USE_HIP=1` selects the HIP backend). The HIP
+kernels are compiled for each GPU's native wavefront automatically — 32-wide on
+RDNA (Radeon) and 64-wide on CDNA (Instinct) — so the same source produces a
+correct binary for one GPU, or a single "fat" binary for many.
+
+Prerequisites: a working [ROCm](https://rocm.docs.amd.com) install (with
+`hipconfig`/`amdclang++` on `PATH`, or `ROCM_PATH` set) and a ROCm build of
+[CuPy](https://docs.cupy.dev/en/stable/install.html#using-cupy-on-amd-gpu-experimental).
+
+Build and install:
+```sh
+git clone https://github.com/pyscf/gpu4pyscf.git
+cd gpu4pyscf
+USE_HIP=1 pip install .        # autodetect this machine's GPU
+# add -e for an editable/development install
+```
+
+Use `GPU_TARGET` to choose what hardware to build for (an explicit
+`GPU_ARCHITECTURES="gfx...;..."` list overrides it):
+
+| `GPU_TARGET`             | Builds for                                                    |
+|--------------------------|---------------------------------------------------------------|
+| `native` (default)       | the GPU(s) installed in this machine (auto-detected)          |
+| `gfx942`, `gfx1100;...`  | one specific GPU, or an explicit `;`-separated list           |
+| `cdna`                   | AMD Instinct datacenter GPUs (MI100/MI200/MI300/MI350, wave64)|
+| `rdna`                   | AMD Radeon RDNA2+ GPUs and APUs (RX 6000/7000/9000, wave32)   |
+| `all`                    | all of the above, in a single binary (CDNA + RDNA)            |
+
+```sh
+USE_HIP=1 GPU_TARGET=all  pip install .          # one binary for all AMD GPUs
+USE_HIP=1 GPU_TARGET=cdna pip wheel . -w dist/    # redistributable wheel
+```
+
+When working against an editable install, recompile the libraries in place with
+`USE_HIP=1 python setup.py build_py` (it accepts the same `GPU_TARGET`).
+
+> [!NOTE]
+> AMD has no portable-IR fallback (unlike CUDA's PTX), so device code is emitted
+> per architecture: each one adds ~40 MB. A single-GPU build is ~40 MB; an `all`
+> binary is a few hundred MB. Build one family (`rdna`/`cdna`) or a specific
+> `GPU_TARGET` to keep it small.
+
+The [HIP build CI](.github/workflows/hip_build.yml) compiles and links the native
+libraries on GitHub-hosted CPU runners using `USE_HIP=1 GPU_TARGET=all` in a
+pinned ROCm development container. This compiles all supported CDNA and RDNA
+targets in a single build and requires no AMD GPU or CuPy installation.
+
 Features
 --------
 

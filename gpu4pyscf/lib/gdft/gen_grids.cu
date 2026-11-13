@@ -393,7 +393,9 @@ typedef struct {
     double3 y;
     double3 z;
 } double9;
-__device__ constexpr double9 identity_3 = { 1,0,0, 0,1,0, 0,0,1 };
+// Nested braces so this compiles both where double3 is a plain aggregate (CUDA)
+// and where it is a vector class with constructors (HIP).
+__device__ constexpr double9 identity_3 = { {1,0,0}, {0,1,0}, {0,0,1} };
 __device__ double9 operator+(const double9& v1, const double9& v2) { return { v1.x + v2.x, v1.y + v2.y, v1.z + v2.z }; }
 __device__ double9 operator-(const double9& v1, const double9& v2) { return { v1.x - v2.x, v1.y - v2.y, v1.z - v2.z }; }
 __device__ double9 operator-(const double9& v) { return { -v.x, -v.y, -v.z }; }
@@ -509,7 +511,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double P_H = PB[i_atom_H * ngrids + i_grid];
     double3 dPH_dH = { 0.0, 0.0, 0.0 };
 
-    double9 sum_d2PB_dGdH = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+    double9 sum_d2PB_dGdH = { {0.0,0.0,0.0}, {0.0,0.0,0.0}, {0.0,0.0,0.0} };
 
     for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
         const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
@@ -623,7 +625,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double9 d2PA_dGdH = P_A * outer(dsAG_dG, dsAH_dH);
 
     const double sum_P_B_1 = invsumPB[i_grid];
-    double9 d2wi_dGdH = { 0,0,0, 0,0,0, 0,0,0 };
+    double9 d2wi_dGdH = { {0,0,0}, {0,0,0}, {0,0,0} };
     d2wi_dGdH += sum_P_B_1 * d2PA_dGdH;
     d2wi_dGdH -= (sum_P_B_1 * sum_P_B_1) * outer(sum_dPB_dG, dPA_dH);
     d2wi_dGdH -= (sum_P_B_1 * sum_P_B_1) * outer(dPA_dG, sum_dPB_dH);
@@ -670,8 +672,8 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     const double P_G = PB[i_atom_G * ngrids + i_grid];
     double3 dPG_dG = { 0.0, 0.0, 0.0 };
 
-    double9 sum_d2PB_dG2 = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-    double9 d2PG_dG2 = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+    double9 sum_d2PB_dG2 = { {0.0,0.0,0.0}, {0.0,0.0,0.0}, {0.0,0.0,0.0} };
+    double9 d2PG_dG2 = { {0.0,0.0,0.0}, {0.0,0.0,0.0}, {0.0,0.0,0.0} };
 
     for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
         const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
@@ -738,7 +740,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     const double9 d2PA_dG2 = P_A * (dsdmu_dmu2dG2 + d2sdmu2_dmuAGdG_2);
 
     const double sum_P_B_1 = invsumPB[i_grid];
-    double9 d2wi_dG2 = { 0,0,0, 0,0,0, 0,0,0 };
+    double9 d2wi_dG2 = { {0,0,0}, {0,0,0}, {0,0,0} };
     d2wi_dG2 += sum_P_B_1 * d2PA_dG2;
     d2wi_dG2 -= (sum_P_B_1 * sum_P_B_1) * outer(sum_dPB_dG, dPA_dG);
     d2wi_dG2 -= (sum_P_B_1 * sum_P_B_1) * outer(dPA_dG, sum_dPB_dG);

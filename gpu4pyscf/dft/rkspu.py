@@ -25,6 +25,7 @@ Refs:
 import itertools
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import gto
 from pyscf.data.nist import HARTREE2EV
 from pyscf.lo.iao import reference_mol
@@ -180,7 +181,7 @@ def _make_minao_lo(mol, minao_ref='minao'):
     s12 = asarray(gto.intor_cross('int1e_ovlp', mol, minao_mol))
     C_minao = cp.linalg.solve(ovlp, s12)
     S0 = C_minao.T.dot(ovlp).dot(C_minao)
-    w2, v = cp.linalg.eigh(S0)
+    w2, v = eigh_std(S0)
     C_minao = C_minao.dot((v*cp.sqrt(1./w2)).dot(v.T))
     return C_minao
 

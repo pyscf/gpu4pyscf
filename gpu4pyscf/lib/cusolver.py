@@ -23,11 +23,13 @@ from cupy.cuda import device
 from gpu4pyscf.lib.utils import load_library
 
 from ctypes.util import find_library
-libcusolver = find_library('cusolver')
-if libcusolver is not None:
-    libcusolver = ctypes.CDLL(libcusolver)
-else:
-    libcusolver = load_library('libcusolver', path='nvidia/cusolver/lib')
+# On ROCm/HIP, hipSOLVER is loaded in place of cuSOLVER (see below).
+if not cupy.cuda.runtime.is_hip:
+    libcusolver = find_library('cusolver')
+    if libcusolver is not None:
+        libcusolver = ctypes.CDLL(libcusolver)
+    else:
+        libcusolver = load_library('libcusolver', path='nvidia/cusolver/lib')
 
 # workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
 # integer. For arrays above this dimension, the workspace size would overflow.
@@ -40,13 +42,37 @@ CUSOLVER_EIG_TYPE_3 = 3
 CUSOLVER_EIG_MODE_NOVECTOR = 0
 CUSOLVER_EIG_MODE_VECTOR = 1
 
-libcusolver.cusolverDnDsygvd_bufferSize.restype = int
-libcusolver.cusolverDnDsygvd.restype = int
+# Generalized-eigenproblem backend. On ROCm/HIP, use hipSOLVER's
+# cuSOLVER-compatible "Dn" API (hipsolverDn*); on NVIDIA, use cuSOLVER
+# (cusolverDn*). The Dn symbols have identical signatures, but the enum values
+# differ between the two libraries, so both the library handle/symbol prefix and
+# the enum constants are selected per backend below. The CUDA path is unchanged.
+if cupy.cuda.runtime.is_hip:
+    libcusolver = ctypes.CDLL(find_library('hipsolver') or 'libhipsolver.so')
+    _DN_PREFIX = 'hipsolverDn'
+    CUSOLVER_EIG_TYPE_1 = 211         # HIPSOLVER_EIG_TYPE_1
+    CUSOLVER_EIG_TYPE_2 = 212
+    CUSOLVER_EIG_TYPE_3 = 213
+    CUSOLVER_EIG_MODE_NOVECTOR = 201  # HIPSOLVER_EIG_MODE_NOVECTOR
+    CUSOLVER_EIG_MODE_VECTOR = 202    # HIPSOLVER_EIG_MODE_VECTOR
+    _FILL_MODE_LOWER = 122            # HIPSOLVER_FILL_MODE_LOWER
+    _FILL_MODE_UPPER = 121            # HIPSOLVER_FILL_MODE_UPPER
+else:
+    _DN_PREFIX = 'cusolverDn'
+    _FILL_MODE_LOWER = cublas.CUBLAS_FILL_MODE_LOWER
+    _FILL_MODE_UPPER = cublas.CUBLAS_FILL_MODE_UPPER
+
+def _dn(name):
+    '''Look up a cuSOLVER/hipSOLVER Dn symbol by suffix, e.g. _dn("Dsygvd").'''
+    return getattr(libcusolver, _DN_PREFIX + name)
+
+_dn('Dsygvd_bufferSize').restype = int
+_dn('Dsygvd').restype = int
 
 _buffersize = {}
 
 # https://docs.nvidia.com/cuda/cusolver/index.html#cusolverdn-t-sygvd
-libcusolver.cusolverDnDsygvd_bufferSize.argtypes = [
+_dn('Dsygvd_bufferSize').argtypes = [
     ctypes.c_void_p, # handle
     ctypes.c_int,    # itype
     ctypes.c_int,    # jobz
@@ -60,7 +86,7 @@ libcusolver.cusolverDnDsygvd_bufferSize.argtypes = [
     ctypes.c_void_p  # *lwork
 ]
 
-libcusolver.cusolverDnDsygvd.argtypes = [
+_dn('Dsygvd').argtypes = [
     ctypes.c_void_p,  # handle
     ctypes.c_int,     # itype
     ctypes.c_int,     # jobz
@@ -77,7 +103,7 @@ libcusolver.cusolverDnDsygvd.argtypes = [
 ]
 
 # https://docs.nvidia.com/cuda/cusolver/index.html#cusolverdn-t-sygvd
-libcusolver.cusolverDnZhegvd_bufferSize.argtypes = [
+_dn('Zhegvd_bufferSize').argtypes = [
     ctypes.c_void_p, # handle
     ctypes.c_int,    # itype
     ctypes.c_int,    # jobz
@@ -91,7 +117,7 @@ libcusolver.cusolverDnZhegvd_bufferSize.argtypes = [
     ctypes.c_void_p  # *lwork
 ]
 
-libcusolver.cusolverDnZhegvd.argtypes = [
+_dn('Zhegvd').argtypes = [
     ctypes.c_void_p,  # handle
     ctypes.c_int,     # itype
     ctypes.c_int,     # jobz
@@ -106,6 +132,50 @@ libcusolver.cusolverDnZhegvd.argtypes = [
     ctypes.c_int,     # lwork
     ctypes.c_void_p   # *devInfo
 ]
+
+# Standard (non-generalized) symmetric/hermitian eigensolver: syevd/heevd
+# (divide-and-conquer). Signatures identical on cuSOLVER and hipSOLVER Dn.
+for _name in ('Dsyevd', 'Zheevd'):
+    _dn(_name + '_bufferSize').restype = int
+    _dn(_name).restype = int
+    _dn(_name + '_bufferSize').argtypes = [
+        ctypes.c_void_p,  # handle
+        ctypes.c_int,     # jobz
+        ctypes.c_int,     # uplo
+        ctypes.c_int,     # n
+        ctypes.c_void_p,  # *A
+        ctypes.c_int,     # lda
+        ctypes.c_void_p,  # *w
+        ctypes.c_void_p   # *lwork
+    ]
+    _dn(_name).argtypes = [
+        ctypes.c_void_p,  # handle
+        ctypes.c_int,     # jobz
+        ctypes.c_int,     # uplo
+        ctypes.c_int,     # n
+        ctypes.c_void_p,  # *A
+        ctypes.c_int,     # lda
+        ctypes.c_void_p,  # *w
+        ctypes.c_void_p,  # *work
+        ctypes.c_int,     # lwork
+        ctypes.c_void_p   # *devInfo
+    ]
+
+
+# hipSOLVER's Dn eigensolvers (syevd/heevd) leave the *shared* cusolver handle
+# in a state that makes cupy's own subsequent cusolver calls (e.g.
+# cupy.linalg.solve -> getrs) fail with rocblas_status_memory_error. syevd below
+# therefore uses its own dedicated handle and never touches cupy's shared handle.
+# (Irrelevant on CUDA, where eigh_std routes to cupy.linalg.eigh and syevd is
+# unused.)
+_dn('Create').restype = int
+_dn('Create').argtypes = [ctypes.c_void_p]
+_dn('SetStream').restype = int
+_dn('SetStream').argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_syevd_handle = ctypes.c_void_p()
+if _dn('Create')(ctypes.byref(_syevd_handle)) != 0:
+    raise RuntimeError('failed to create dedicated cusolver handle for syevd')
+
 
 def eigh(h, s, overwrite=False):
     '''Solve the generalized Hermitian eigenproblem with positive-definite s.
@@ -135,14 +205,14 @@ def eigh(h, s, overwrite=False):
     else:
         lwork = ctypes.c_int(0)
         if h.dtype == np.float64:
-            fn = libcusolver.cusolverDnDsygvd_bufferSize
+            fn = _dn('Dsygvd_bufferSize')
         else:
-            fn = libcusolver.cusolverDnZhegvd_bufferSize
+            fn = _dn('Zhegvd_bufferSize')
         status = fn(
             _handle,
             CUSOLVER_EIG_TYPE_1,
             CUSOLVER_EIG_MODE_VECTOR,
-            cublas.CUBLAS_FILL_MODE_LOWER,
+            _FILL_MODE_LOWER,
             n,
             A.data.ptr,
             n,
@@ -158,16 +228,16 @@ def eigh(h, s, overwrite=False):
             raise LinAlgError("failed in buffer size")
 
     if h.dtype == np.float64:
-        fn = libcusolver.cusolverDnDsygvd
+        fn = _dn('Dsygvd')
     else:
-        fn = libcusolver.cusolverDnZhegvd
+        fn = _dn('Zhegvd')
     work = cupy.empty(lwork, dtype=h.dtype)
     devInfo = cupy.empty(1, dtype=np.int32)
     status = fn(
         _handle,
         CUSOLVER_EIG_TYPE_1,
         CUSOLVER_EIG_MODE_VECTOR,
-        cublas.CUBLAS_FILL_MODE_LOWER,
+        _FILL_MODE_LOWER,
         n,
         A.data.ptr,
         n,
@@ -191,6 +261,63 @@ def eigh(h, s, overwrite=False):
     if info != 0:
         raise LinAlgError(f'eigh failed to converge (devInfo={info})')
     return w, A.T
+
+def syevd(a, overwrite=False):
+    '''Standard symmetric/hermitian eigenproblem via cuSOLVER/hipSOLVER syevd/heevd
+    (divide-and-conquer). Eigenvectors are returned; UPLO is 'L'. Mirrors the
+    layout/return of cupy.linalg.eigh (ascending eigenvalues, columns are vectors).
+    '''
+    assert a.dtype in (np.float64, np.complex128)
+    n = a.shape[0]
+    if a.dtype == np.complex128 and a.flags.c_contiguous:
+        # heevd expects F-order. For a hermitian matrix stored C-contiguous,
+        # .conj() yields the F-ordered representation (same as the sygvd path).
+        A = a.conj()
+    elif overwrite:
+        A = a
+    else:
+        A = a.copy()
+    _handle = _syevd_handle
+    _dn('SetStream')(_handle, ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+    w = cupy.zeros(n)
+
+    if a.dtype == np.float64:
+        buffn, fn = _dn('Dsyevd_bufferSize'), _dn('Dsyevd')
+    else:
+        buffn, fn = _dn('Zheevd_bufferSize'), _dn('Zheevd')
+
+    key = ('syevd', a.dtype, n)
+    if key in _buffersize:
+        lwork = _buffersize[key]
+    else:
+        lwork = ctypes.c_int(0)
+        status = buffn(_handle, CUSOLVER_EIG_MODE_VECTOR, _FILL_MODE_LOWER,
+                       n, A.data.ptr, n, w.data.ptr, ctypes.byref(lwork))
+        if status != 0:
+            raise LinAlgError("failed in syevd buffer size")
+        lwork = lwork.value
+        _buffersize[key] = lwork
+
+    work = cupy.empty(lwork, dtype=a.dtype)
+    devInfo = cupy.empty(1, dtype=np.int32)
+    status = fn(_handle, CUSOLVER_EIG_MODE_VECTOR, _FILL_MODE_LOWER,
+                n, A.data.ptr, n, w.data.ptr, work.data.ptr, lwork, devInfo.data.ptr)
+    if status != 0:
+        raise LinAlgError("failed in syevd kernel")
+    return w, A.T
+
+def eigh_std(a):
+    '''Drop-in for cupy.linalg.eigh (standard symmetric/hermitian eigendecomposition).
+
+    On ROCm/HIP, cupy.linalg.eigh falls back to the Jacobi solver (syevj) because
+    its divide-and-conquer binding is unimplemented there; syevj is ~15-80x slower
+    for large matrices and can even OOM. Route HIP through hipSOLVER's syevd/heevd
+    (divide-and-conquer) instead. On NVIDIA/CUDA, cupy.linalg.eigh already uses the
+    fast syevd, so it is left byte-for-byte unchanged.
+    '''
+    if cupy.cuda.runtime.is_hip:
+        return syevd(a)
+    return cupy.linalg.eigh(a)
 
 def cholesky(A):
     n = len(A)

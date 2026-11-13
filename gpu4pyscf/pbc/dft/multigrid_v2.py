@@ -2015,8 +2015,31 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
                                      rho1_sf, grids, with_j, with_nuc)
     return out
 
+_MULTIGRID_HIP_WARNED = False
+
+def _warn_multigrid_on_hip():
+    '''Advise against multigrid on ROCm/HIP (once per process).
+
+    On AMD the multigrid collocation kernels are currently slow -- frequently
+    slower than the default FFTDF path (the vxc->Fock collocation dominates the
+    runtime) -- and can hard-hang the GPU for sharp / short-range GTH
+    pseudopotentials (e.g. the semicore Mg pseudo in MgO). The internal
+    get_hcore optimization already falls back to FFTDF on HIP; this only warns
+    when a user explicitly selects multigrid.
+    '''
+    global _MULTIGRID_HIP_WARNED
+    if _MULTIGRID_HIP_WARNED or not cp.cuda.runtime.is_hip:
+        return
+    _MULTIGRID_HIP_WARNED = True
+    warnings.warn(
+        'multigrid (v2) on ROCm/HIP: the collocation kernels are currently slow '
+        '(often slower than the default FFTDF path) and can hard-hang the GPU '
+        'for sharp / short-range GTH pseudopotentials (e.g. the semicore Mg '
+        'pseudo in MgO). The default FFTDF path is recommended on AMD.')
+
 class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
+        _warn_multigrid_on_hip()
         self.cell = cell
         self.mesh = cell.mesh
         self.tasks = None
@@ -2261,4 +2284,12 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     device = utils.device
 
     def to_cpu(self):
-        raise RuntimeError('Not available')
+        if not cp.cuda.runtime.is_hip:
+            raise RuntimeError('Not available')
+        # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
+        # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU
+        # bridge for the multigrid grid machinery, so return a lightweight CPU
+        # numint sufficient for that functional evaluation. Removable once a
+        # HIP libXC keeps XC on the GPU.
+        from pyscf.pbc.dft import numint as numint_cpu
+        return numint_cpu.NumInt()

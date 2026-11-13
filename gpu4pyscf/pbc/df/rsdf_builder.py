@@ -27,6 +27,7 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -183,7 +184,7 @@ def cholesky_decomposed_metric(j2c):
 
 def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2c = cp.asarray(j2c, order='C')
-    w, v = cp.linalg.eigh(j2c)
+    w, v = eigh_std(j2c)
     mask = w > linear_dep_threshold
     # Note this implementation is different to the one in PySCF-2.10. In PySCf,
     # j2c at a wrong k-point is passed to this function. v.conj() is called.

@@ -15,6 +15,7 @@
  */
 
 #include <stdint.h>
+#include "../warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
 
 // WARP_SIZE: compile-time constant used for shared-memory sizing.
 // `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
@@ -24,7 +25,13 @@
 #define WARP_SIZE       32
 #endif
 #define WARPS           8
-#define THREADS         (WARP_SIZE*WARPS)
+// Block size is fixed at 256 threads and must NOT scale with WARP_SIZE. The
+// multigrid collocation/eval kernels are thread-indexed and their shared-memory
+// budget (buflen) assumes 256 threads. Deriving THREADS from WARP_SIZE would
+// make a wave64 block 512 threads, doubling shared memory past the 64KB LDS
+// limit and desyncing host/device sizing. 256 threads is 8 warps on wave32 or
+// 4 warps on wave64; warp count is irrelevant to correctness here.
+#define THREADS         256
 #define LMAX            4
 
 #define PRIMBAS_SLOTS   4
@@ -79,7 +86,7 @@ typedef struct {
     uint8_t _padding;
 } Fold3Index;
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
 #endif

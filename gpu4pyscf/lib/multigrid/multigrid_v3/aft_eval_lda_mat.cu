@@ -23,9 +23,8 @@
 #include "utils.cuh"
 #include "aft_recursion.cuh"
 
-#define WARP_SIZE       32
-#define WARPS           8
 #define THREADS         256
+#define WARPS           (THREADS / MGRID_SUBGROUP_SIZE)
 #define NGV_PER_BLOCK   16
 #define DENSITY_WIDTH   16
 #define TILES_PER_BATCH 64
@@ -183,11 +182,11 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
                     s += xyzR * vG_R[n] - xyzI * vG_I[n];
                 }
             }
-            for (int offset = 16; offset > 0; offset >>= 1) {
-                s += __shfl_down_sync(0xffffffff, s, offset);
+            for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
+                s += __shfl_down_sync(__activemask(), s, offset, MGRID_SUBGROUP_SIZE);
             }
-            int lane = thread_id % WARP_SIZE;
-            int warp = thread_id / WARP_SIZE;
+            int lane = thread_id % MGRID_SUBGROUP_SIZE;
+            int warp = thread_id / MGRID_SUBGROUP_SIZE;
             if (lane == 0) {
                 vjR[warp + WARPS*(i*nfj+j)] += s;
             }

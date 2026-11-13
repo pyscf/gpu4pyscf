@@ -21,6 +21,7 @@ Refs: PRB, 1998, 57, 1505.
 
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 
 from pyscf import __config__
 from pyscf.data.nist import HARTREE2EV
@@ -176,7 +177,7 @@ def _make_minao_lo(cell, minao_ref='minao', kpts=None):
     for k, S_k in enumerate(ovlp):
         C = cp.linalg.solve(S_k, s12[k])
         S0 = C.conj().T.dot(S_k).dot(C)
-        w2, v = cp.linalg.eigh(S0)
+        w2, v = eigh_std(S0)
         C_minao[k] = C.dot((v*cp.sqrt(1./w2)).dot(v.conj().T))
     return C_minao
 

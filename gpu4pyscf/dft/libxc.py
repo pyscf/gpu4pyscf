@@ -32,7 +32,15 @@ is_nlc           = libxc_cpu.is_nlc
 is_hybrid_xc     = libxc_cpu.is_hybrid_xc
 test_deriv_order = libxc_cpu.test_deriv_order
 
-_libxc = load_library('libxc', path='gpu4pyscf/lib/deps/lib')
+try:
+    _libxc = load_library('libxc', path='gpu4pyscf/lib/deps/lib')
+except OSError:
+    # ROCm/HIP builds do not include the CUDA libXC fork. Keep libXC optional
+    # there so XC is evaluated on CPU via PySCF's libXC (see below); a missing
+    # libXC remains a hard error on CUDA.
+    if not cupy.cuda.runtime.is_hip:
+        raise
+    _libxc = None
 
 libgdft = load_library('libgdft')
 libgdft.GDFT_xc_lda.argtypes = (
@@ -63,15 +71,23 @@ libgdft.GDFT_xc_mgga.argtypes = (
     POINTER(xc_mgga_out_params),
     ctypes.c_void_p)
 
-_libxc.xc_version_string.restype = ctypes.c_char_p
-_libxc_version = _libxc.xc_version_string().decode()
-__version__ = _libxc_version + ' (CUDA)'
-# The packaged 7.0.0 fork inserts params_size before the four thresholds.
-# Select the layout before binding xc_func_alloc and the other C functions.
-if _libxc_version == '7.0.0':
-    xc_func_type = libxc_structs.xc_func_type_700
+if _libxc is None:
+    import warnings
+    warnings.warn(
+        "GPU libXC is not available on ROCm/HIP; XC functionals are "
+        "evaluated on CPU via PySCF's libXC."
+    )
+    __version__ = 'libXC not available'
 else:
-    xc_func_type = libxc_structs.xc_func_type
+    _libxc.xc_version_string.restype = ctypes.c_char_p
+    _libxc_version = _libxc.xc_version_string().decode()
+    __version__ = _libxc_version + ' (CUDA)'
+    # The packaged 7.0.0 fork inserts params_size before the four thresholds.
+    # Select the layout before binding xc_func_alloc and the other C functions.
+    if _libxc_version == '7.0.0':
+        xc_func_type = libxc_structs.xc_func_type_700
+    else:
+        xc_func_type = libxc_structs.xc_func_type
 
 LDA_OUTPUT_LABELS = [
                 "zk",       # 1, 1
@@ -153,6 +169,13 @@ if _libxc is not None:
         if xc_name in libxc_cpu.XC_CODES:
             assert libxc_cpu.XC_CODES[xc_name] == xc_id, \
                     'Libxc for PySCF and GPU4PySCF incompatible'
+else:
+    # No GPU libXC available (e.g. on ROCm/HIP, where the CUDA libXC fork is not
+    # built). Leave the GPU functional tables empty so every functional reports
+    # on_gpu=False; XC is then evaluated on CPU via PySCF's libXC (see the
+    # eval_xc_eff fallback in numint), while the rest of DFT stays on GPU.
+    XC_IDS = np.zeros(0, dtype=np.int32)
+    XC_CODES = {}
 
 
 def _has_omega(func):

@@ -69,15 +69,7 @@ perf = profiler.benchmark(cupy.dot, (b0.T, a0), n_repeat=20, n_warmup=3)
 print(flops/perf.gpu_times.mean(), 'GFLOPS')
 
 import cupy as cp
-from cupy.cuda import cublas
-import ctypes
-from cupy.cuda import device
-from cupy_backends.cuda.libs import cublas #NOQA
-
-libcublas = ctypes.CDLL('libcublas.so')
-_handle = device.get_cublas_handle()
 
 print(cupy.matmul(b0.T,a0).shape)
-#handle = cublas.create()
 perf = profiler.benchmark(cupy.matmul, (b0.T,a0), n_repeat=20, n_warmup=3)
 print(flops/perf.gpu_times.mean(), 'GFLOPS')
