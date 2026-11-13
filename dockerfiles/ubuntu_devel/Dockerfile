@@ -18,5 +18,5 @@ RUN echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/b
 
 RUN pip3 config set global.break-system-packages true
 RUN pip3 install --no-cache-dir cmake pytest pytest-cov pytest-benchmark
-RUN pip3 install --no-cache-dir pyscf==2.14.0 basis-set-exchange==0.11
+RUN pip3 install --no-cache-dir pyscf==2.15.0 basis-set-exchange==0.11
 RUN pip3 install --no-cache-dir cupy-cuda12x==13.4.1
