@@ -73,7 +73,7 @@ class DF(lib.StreamObject):
         self._rsh_parameters = None
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('intopt', '_cderi'))
+        excludes=('intopt', 'j_engine', '_cderi'))
 
     @property
     def auxbasis(self):
@@ -82,6 +82,7 @@ class DF(lib.StreamObject):
     def auxbasis(self, x):
         if self._auxbasis != x:
             self.reset()
+            self.auxmol = None
             self._auxbasis = x
 
     to_gpu = utils.to_gpu
@@ -260,6 +261,13 @@ class DF(lib.StreamObject):
             io_stream = cp.cuda.stream.Stream(non_blocking=True)
             io_event = cp.cuda.Event()
 
+            # Issue #1031: buf_prefetch may reuse memory from CuPy's pool.
+            # When buf_prefetch.set() is launched on the non-blocking io_stream,
+            # this memory may still be in use by the main stream (comput_stream).
+            # io_stream must not access buf_prefetch until the main stream
+            # finishes accessing the reused memory pool.
+            compute_event.record(comput_stream)
+            io_stream.wait_event(compute_event)
             buf_prefetch.set(cderi_sparse[:blksize], stream=io_stream)
             io_event.record(io_stream)
 
@@ -484,6 +492,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
     with cupy.cuda.Device(device_id):
+        stream = cupy.cuda.get_current_stream()
         assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
@@ -514,7 +523,8 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
                     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
                         k0 = aux_ao_loc[cp_kl_id]
                         k1 = aux_ao_loc[cp_kl_id+1]
-                        int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices[k0:k1], omega=omega)
+                        # Preserve the Coulomb block until the LR subtraction.
+                        int3c2e.get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=ints_slices_lr[k0:k1], omega=omega)
                     ints_slices -= ints_slices_lr
             else:
                 # Initialization is required due to cutensor operations later
@@ -555,9 +565,9 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
-                    cupy.cuda.get_current_stream().synchronize()
+                    stream.synchronize()
                     copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
-                    cupy.cuda.get_current_stream().synchronize()
+                    stream.synchronize()
             elif num_devices > 1:
                 # Multi-GPU case, copy data to other Devices
                 for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
@@ -679,11 +689,11 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
                 p0, p1 = cderi_offsets[batch_id:batch_id+2]
                 # TODO: async-write to host memory in another stream
                 err = libvhf_rys.transpose_write(
-                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p),
                     cderi_cpu.ctypes,
                     ctypes.cast(cderi_gpu.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(naux), ctypes.c_int(cderi_npairs),
-                    ctypes.c_int(p0), ctypes.c_int(p1))
+                    ctypes.c_int(p0), ctypes.c_int(p1),
+                    ctypes.cast(cp.cuda.get_current_stream().ptr, ctypes.c_void_p))
                 if err != 0:
                     raise RuntimeError('transpose_write cderi_cpu failed')
 

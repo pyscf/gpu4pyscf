@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
 #include "rys_roots.cu"
@@ -559,11 +557,11 @@ extern "C" {
 int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
                         RysIntEnvVars *envs, int shm_size,
                         int nbas_aux, int nbatches_shl_pair, int *shl_pair_offsets,
-                        uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                        uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbas_aux, nbatches_shl_pair);
-    contract_int3c2e_dm_kernel<<<blocks, THREADS, shm_size>>>(
+    contract_int3c2e_dm_kernel<<<blocks, THREADS, shm_size, stream>>>(
             out, dm, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -578,11 +576,11 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
                             RysIntEnvVars *envs, int shm_size,
                             int nbatches_shl_pair, int nbatches_ksh,
                             int *shl_pair_offsets, int *ksh_offsets,
-                            uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                            uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    contract_int3c2e_auxvec_kernel<<<blocks, THREADS, shm_size>>>(
+    contract_int3c2e_auxvec_kernel<<<blocks, THREADS, shm_size, stream>>>(
             vj, auxvec, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup);
     cudaError_t err = cudaGetLastError();

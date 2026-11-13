@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -744,11 +742,11 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset,
-                    int nao, int npairs, int naux, int natm)
+                    int nao, int npairs, int naux, int natm, cudaStream_t stream)
 {
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
+    sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size, stream>>>(
             ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
             omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
@@ -768,13 +766,13 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int aux_offset,
-                    int nao, int npairs, int naux, int natm)
+                    int nao, int npairs, int naux, int natm, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     size_t nao2 = nao * nao;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
-        ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
+        ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size, stream>>>(
                 ejk+n*natm*3, ejk_aux ? ejk_aux+n*natm*3 : NULL,
                 dm, density_auxvec, n_dm-n,
                 omega, lr_factor, sr_factor, *envs,

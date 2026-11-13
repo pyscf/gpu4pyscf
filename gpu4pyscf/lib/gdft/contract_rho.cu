@@ -23,7 +23,7 @@
 #include "contract_rho.cuh"
 // TODO: improve this?
 __global__
-void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
+void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, int ngrids, int nao)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     const bool active = grid_id < ngrids;
@@ -306,7 +306,7 @@ void GDFT_make_dR_dao_w_kernel(double *out, double *ket, double *wv,
 
 extern "C"{
 __host__
-int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
+int GDFTcontract_rho(double *rho, const double *bra, const double *ket, int ngrids, int nao, cudaStream_t stream)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -319,7 +319,7 @@ int GDFTcontract_rho(cudaStream_t stream, double *rho, double *bra, double *ket,
     return 0;
 }
 
-int GDFTcontract_rho4(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao, int count)
+int GDFTcontract_rho4(double *rho, double *bra, double *ket, int ngrids, int nao, int count, cudaStream_t stream)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -332,7 +332,7 @@ int GDFTcontract_rho4(cudaStream_t stream, double *rho, double *bra, double *ket
     return 0;
 }
 
-int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
+int GDFTcontract_rho_gga(double *rho, double *bra, double *ket, int ngrids, int nao, cudaStream_t stream)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -345,7 +345,7 @@ int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *
     return 0;
 }
 
-int GDFTcontract_rho_mgga(cudaStream_t stream, double *rho, double *bra, double *ket, int ngrids, int nao)
+int GDFTcontract_rho_mgga(double *rho, double *bra, double *ket, int ngrids, int nao, cudaStream_t stream)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
@@ -358,8 +358,8 @@ int GDFTcontract_rho_mgga(cudaStream_t stream, double *rho, double *bra, double 
     return 0;
 }
 
-int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv,
-                 int ngrids, int nao)
+int GDFT_make_dR_dao_w(double *out, double *ket, double *wv,
+                 int ngrids, int nao, cudaStream_t stream)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
@@ -373,14 +373,14 @@ int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv
 }
 
 int GDFTscale_ao(double *out, double *ket, double *wv,
-                 int ngrids, int nao, int nvar, int is_real)
+                 int ngrids, int nao, int nvar, int is_real, cudaStream_t stream)
 {
     dim3 threads(BLKSIZEX, BLKSIZEY);
     dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
     if (is_real) {
-        dscale_ao_kernel<<<blocks, threads>>>(out, ket, wv, ngrids, nao, nvar);
+        dscale_ao_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao, nvar);
     } else {
-        zscale_ao_kernel<<<blocks, threads>>>(out, ket, wv, ngrids, nao, nvar);
+        zscale_ao_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao, nvar);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

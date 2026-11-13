@@ -18,6 +18,7 @@ import cupy as cp
 from pyscf import lib, gto
 from gpu4pyscf.tdscf import rhf, rks
 from gpu4pyscf import tdscf
+from gpu4pyscf.solvent.tdscf import pcm as pcm_td
 from gpu4pyscf.grad.tests.test_tdrhf_grad import diagonalize, diagonalize_tda
 from gpu4pyscf.grad.tests.test_tduhf_grad import diagonalize as diagonalize_u
 
@@ -187,6 +188,109 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.with_solvent.get_eps(), 2.3741, 12)
         td = mf.TDA(equilibrium_solvation=False)
         self.assertAlmostEqual(td.with_solvent.eps, 1.4961**2, 12)
+
+
+class SolventTDResponse_high_cost(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        molecule = gto.M(atom='He 0 0 0; H .13 .07 .76', charge=1,
+                         basis='6-31g', verbose=0)
+        cpu_mf = molecule.RHF().PCM()
+        cpu_mf.with_solvent.method = 'C-PCM'
+        cpu_mf.with_solvent.eps = 10
+        cpu_mf.with_solvent.lebedev_order = 7
+        cpu_mf.conv_tol = 1e-12
+        cpu_mf.conv_tol_grad = 1e-10
+        cpu_mf.kernel()
+        assert cpu_mf.converged
+        cpu_td = cpu_mf.TDA(equilibrium_solvation=True).set(
+            nstates=3, conv_tol=1e-12, lindep=1e-24)
+        cpu_td.kernel()
+        assert np.all(cpu_td.converged)
+        # Current local PySCF lacks the old PCM-TD derivative conversion classes.
+        # Use the supported SCF conversion and native GPU TD factory instead.
+        gpu_mf = cpu_mf.to_gpu()
+        np.testing.assert_allclose(gpu_mf.mo_coeff.get(), cpu_mf.mo_coeff, atol=0, rtol=0)
+        np.testing.assert_allclose(gpu_mf.energy_tot(dm=gpu_mf.make_rdm1()),
+                                   cpu_mf.e_tot, atol=1e-11, rtol=0)
+        gpu_td = gpu_mf.TDA(equilibrium_solvation=True).set(
+            nstates=3, conv_tol=1e-12, lindep=1e-24)
+        gpu_td.kernel()
+        assert isinstance(gpu_td, pcm_td.WithSolventTDSCF)
+        assert np.all(gpu_td.converged)
+        np.testing.assert_allclose(gpu_td.e, cpu_td.e, atol=1e-10, rtol=0)
+        cls.small_pcm_td_reference = gpu_td
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.small_pcm_td_reference
+
+    def test_pcm_derivative_undo_and_reapply(self):
+        for method in ['Gradients', 'nac_method']:
+            with self.subTest(method=method):
+                small_pcm_td_reference = self.small_pcm_td_reference
+                td = small_pcm_td_reference
+                original = getattr(td, method)()
+                original.cphf_conv_tol = 1e-12
+                arguments = {'state': 1} if method == 'Gradients' else {'states': (0, 1)}
+                values = original.kernel(**arguments)
+                if method == 'Gradients':
+                    values = (values,)
+                reference = [cp.asnumpy(value).copy() for value in values]
+                assert all(value.shape == (td.mol.natm, 3) for value in reference)
+                assert np.linalg.norm(reference[0]) > 1e-5
+                assert all(np.isfinite(value).all() for value in reference)
+                original_class = type(original)
+                original_keys = set(original.__dict__)
+                original_pcm = td.with_solvent
+                original_xy = [(x.copy(), y) for x, y in td.xy]
+                assert not hasattr(original, 'with_solvent')
+
+                bare = original.undo_solvent()
+                plain = getattr(td.undo_solvent(), method)()
+                assert type(bare) is type(plain)
+                assert bare is not original
+                assert bare.base is td
+                assert type(original) is original_class
+                assert set(original.__dict__) == original_keys
+                assert td.with_solvent is original_pcm
+                density = td._scf.make_rdm1()
+                assert bare.solvent_response(density) == 0
+                assert float(cp.linalg.norm(original.solvent_response(density))) > 1e-5
+
+                reapplied = getattr(bare.base, method)()
+                reapplied.cphf_conv_tol = original.cphf_conv_tol
+                assert type(reapplied) is original_class
+                result = reapplied.kernel(**arguments)
+                if method == 'Gradients':
+                    result = (result,)
+                for actual, expected in zip(result, reference):
+                    np.testing.assert_allclose(cp.asnumpy(actual), expected, atol=1e-10, rtol=1e-10)
+                for (x, _), (old_x, _) in zip(td.xy, original_xy):
+                    np.testing.assert_allclose(x.get(), old_x.get(), atol=0, rtol=0)
+                assert original.base is td and td.with_solvent is original_pcm
+
+    def test_pcm_triplet_solvent_response(self):
+        small_pcm_td_reference = self.small_pcm_td_reference
+        mf = small_pcm_td_reference._scf
+        triplet = mf.TDA(equilibrium_solvation=True).set(
+            singlet=False, nstates=3, conv_tol=1e-12, lindep=1e-24)
+        vacuum = mf.undo_solvent().TDA().set(
+            singlet=False, nstates=3, conv_tol=1e-12, lindep=1e-24)
+        np.testing.assert_allclose(vacuum._scf.mo_coeff.get(), mf.mo_coeff.get(), atol=0, rtol=0)
+        co = mf.mo_coeff[:, mf.mo_occ > 0]
+        cv = mf.mo_coeff[:, mf.mo_occ == 0]
+        x = small_pcm_td_reference.xy[0][0]
+        density = co @ x @ cv.T
+        density = density+density.T
+        pcm_response = triplet.gen_response(singlet=False, hermi=0)(density)
+        gas_response = vacuum.gen_response(singlet=False, hermi=0)(density)
+        np.testing.assert_allclose(pcm_response.get(), gas_response.get(), atol=1e-11, rtol=0)
+        triplet.kernel()
+        vacuum.kernel()
+        assert np.all(triplet.converged) and np.all(vacuum.converged)
+        np.testing.assert_allclose(triplet.e, vacuum.e, atol=1e-10, rtol=0)
+        np.testing.assert_array_equal(triplet.oscillator_strength(), np.zeros(3))
 
 
 if __name__ == "__main__":

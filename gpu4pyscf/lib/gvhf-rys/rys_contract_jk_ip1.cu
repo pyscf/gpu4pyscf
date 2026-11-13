@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
 
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
@@ -404,10 +403,10 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
     double *cicj_cache = shared_memory + reserved_shm_size;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
 while (1) {
     __syncthreads();
     if (t_id == 0) {
@@ -1647,12 +1646,12 @@ while (1) {
 extern int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                                 float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                                uint32_t *pool, int *head, int workers);
+                                uint32_t *pool, int *head, int workers, cudaStream_t stream);
 
 extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                                 float *q_cond_ij, float *q_cond_kl, float dm_penalty,
                                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                                uint32_t *pool, double *dd_pool, int *head, int workers);
+                                uint32_t *pool, double *dd_pool, int *head, int workers, cudaStream_t stream);
 
 extern "C" {
 int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int atom_offset,
@@ -1662,7 +1661,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
                      uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                      float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                      float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                     uint32_t *pool, int *bas, double *env)
+                     uint32_t *pool, int *bas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1701,10 +1700,10 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     if (!rys_vjk_ip1_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                              s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers)) {
+                              s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers, stream)) {
         int nf = nfi * nfj * nfk * nfl;
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
@@ -1722,7 +1721,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
                 return 1;
             }
         }
-        rys_vjk_ip1_kernel<<<workers, threads, buflen>>>(
+        rys_vjk_ip1_kernel<<<workers, threads, buflen, stream>>>(
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, nf,
             reserved_shm_size);
@@ -1749,7 +1748,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                         float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1796,10 +1795,10 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                              s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers)) {
+                              s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers, stream)) {
         int nf = nfi * nfj * nfk * nfl;
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
@@ -1817,7 +1816,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_ip1_kernel<<<workers, threads, buflen, stream>>>(
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, dd_pool, nf,
             reserved_shm_size);
@@ -1846,7 +1845,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
                         float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                         float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool, int dd_cache_size,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1885,7 +1884,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, n_dm*sizeof(int));
+    cudaMemsetAsync(head, 0, n_dm*sizeof(int), stream);
 
     int quartets_per_block = scheme[0];
     int gout_stride = scheme[1];
@@ -1918,7 +1917,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
                 jk.k_factor = 1.; // ensure not dropping by schwarz screening
             }
         }
-        rys_ejk_ip1_multidm_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_ip1_multidm_kernel<<<workers, threads, buflen, stream>>>(
                 envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
                 q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);
@@ -1945,7 +1944,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
                         float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                         float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool, int dd_cache_size,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1985,7 +1984,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     int quartets_per_block = scheme[0];
     int gout_stride = scheme[1];
@@ -2011,7 +2010,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
             jk.k_factor = 1.; // ensure not dropping by schwarz screening
         }
     }
-    rys_ejk_ip1_sum_kernel<<<workers, threads, buflen>>>(
+    rys_ejk_ip1_sum_kernel<<<workers, threads, buflen, stream>>>(
             envs, jk, bounds, j_factor, k_factor, dm1, dm2,
             q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
             pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);

@@ -40,7 +40,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
 from gpu4pyscf.gto.mole import (
     group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
@@ -57,7 +57,7 @@ POOL_SIZE = 65536
 
 def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
     if kpti_kptj is None:
-        kptj = None
+        kptj = np.zeros((1, 3))
     else:
         kpti, kptj = kpti_kptj
         if q is None:
@@ -66,11 +66,39 @@ def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
     return ft_aopair_kpts(cell, Gv, q, kptj)[0]
 
 def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
-    '''Analytical Fourier transform orbital-pair on Gv grids'''
+    '''Analytical Fourier transform orbital-pair on Gv grids.
+
+    Kwargs:
+        q:
+            Momentum transfer kptj - kpti. Defaults to zero.
+        kptjs:
+            Follows the PySCF kpts convention; see
+            gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+
+    Returns:
+        cupy.ndarray
+            Shape (nGv, nao, nao) for single-point input or
+            (nkpts, nGv, nao, nao) for batched input.
+    '''
+    kptjs, is_single_kpt = _normalize_kpts(kptjs)
     if q is None:
         q = np.zeros(3)
     ft_kernel = gen_ft_kernel(cell, kptjs)
-    return ft_kernel(Gv, q, kptjs)
+    kmesh = kpts_to_kmesh(cell, kptjs)
+    bvk_ncells = int(np.prod(kmesh))
+    nao = cell.nao_nr()
+    nkpts = len(kptjs)
+    bytes_per_gv = nkpts * nao**2 * bvk_ncells * np.dtype(np.complex128).itemsize
+    scratch_bytes = 512 * 1024**2
+    blksize = max(1, min(len(Gv), scratch_bytes // bytes_per_gv))
+    if blksize < len(Gv):
+        out = cp.empty((nkpts, len(Gv), nao, nao), dtype=np.complex128)
+        for p0 in range(0, len(Gv), blksize):
+            p1 = min(p0 + blksize, len(Gv))
+            out[:, p0:p1] = ft_kernel(Gv[p0:p1], q, kptjs)
+    else:
+        out = ft_kernel(Gv, q, kptjs)
+    return out[0] if is_single_kpt else out
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=None, verbose=None,
@@ -100,7 +128,8 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
-        ctypes.cast(GvT.data.ptr, ctypes.c_void_p))
+        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('build_ft_ao failed')
     if sort_output or not cell_sorted:
@@ -122,7 +151,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     if kpts is None:
         kmesh = None
     else:
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_kmesh(cell, kpts.reshape(-1, 3))
     opt = FTOpt(cell, kmesh)
     opt.permutation_symmetry = False
     return opt.gen_ft_kernel(verbose)
@@ -195,13 +224,15 @@ class FTOpt:
 
         nbas = cell.nbas
         img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
+        stream = cp.cuda.get_current_stream()
         libpbc.bvk_ovlp_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(self._aft_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff),
-            ctypes.c_int(int(self.permutation_symmetry)))
+            ctypes.c_int(int(self.permutation_symmetry)),
+            ctypes.c_void_p(stream.ptr))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
         self.bas_ij_cache = bas_ij_cache = {}
@@ -239,7 +270,8 @@ class FTOpt:
             ctypes.byref(self._aft_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(stream.ptr))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
         return self
@@ -434,7 +466,8 @@ class FTOpt:
                 ctypes.c_int(nGv),
                 ctypes.cast(ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(compressing),
-                ctypes.c_int(not cart))
+                ctypes.c_int(not cart),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('build_ft_aopair kernel failed')
             return out
@@ -459,8 +492,8 @@ class FTOpt:
             cart = True
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
-        kpts_cached = kpts
-        kpts_cached_is_gamma_point = kpts is None or is_zero(kpts)
+        kpts_cached, is_single_kpt_cached = _normalize_kpts(kpts)
+        kpts_cached_is_gamma_point = is_zero(kpts_cached)
 
         pair_address = self.pair_and_diag_indices(
             cart, original_ao_order=transform_ao)[0]
@@ -494,7 +527,9 @@ class FTOpt:
         def ft_kernel(Gv, q=None, kpts=None, kj_idx=None, out=None, buf=None):
             '''
             Analytical FT for orbital products. The output tensor has the shape
-            [nk, nGv, nao, nao]
+            [nk, nGv, nao, nao]. The k-index is omitted for the single k-point case.
+
+            If kpts=None, the cached kpts will be used.
 
             kj_idx indicates the mapping between ki and kj index that satisfies
             kpt_j - kpt_i == q. If permutation_symmetry is enabled, it must be
@@ -510,8 +545,10 @@ class FTOpt:
 
             if kpts is None:
                 kpts = kpts_cached
+                is_single_kpt = is_single_kpt_cached
                 kpts_is_gamma_point = kpts_cached_is_gamma_point
             else:
+                kpts, is_single_kpt = _normalize_kpts(kpts)
                 kpts_is_gamma_point = is_zero(kpts)
 
             if kpts_is_gamma_point and bvk_ncells == 1:
@@ -538,8 +575,12 @@ class FTOpt:
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(1),
-                        ctypes.c_int(nao), ctypes.c_int(nGv*2))
-                return out.transpose(1,3,0,2)
+                        ctypes.c_int(nao), ctypes.c_int(nGv*2),
+                        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                out = out.transpose(1,3,0,2)
+                if is_single_kpt:
+                    out = out[0]
+                return out
             else:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
                 kpts = asarray(kpts, order='C')
@@ -568,8 +609,12 @@ class FTOpt:
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(conj_mapping_ki.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(nkpts),
-                        ctypes.c_int(nao), ctypes.c_int(nGv*2))
-                return out.transpose(0,3,1,2)
+                        ctypes.c_int(nao), ctypes.c_int(nGv*2),
+                        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
+                out = out.transpose(0,3,1,2)
+                if is_single_kpt:
+                    out = out[0]
+                return out
         return ft_kernel
 
     def contract_dm(self, dm, Gv, kpts=None):
@@ -600,7 +645,13 @@ class FTOpt:
         return rhoG
 
     def contract_rhoG(self, rhoG, Gv, kpts=None, sort_output=True):
+        '''Contract to AO matrices.
+
+        kpts follows the PySCF kpts convention; see
+        gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
+        '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
+        kpts, is_single_kpt = _normalize_kpts(kpts)
         cell = self.cell
         nsp_per_block, gout_stride, shm_size = ft_ao_scheme(nGv_per_block=16)
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -634,11 +685,12 @@ class FTOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
-            ctypes.c_int(compressing))
+            ctypes.c_int(compressing),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 
-        if kpts is None or is_zero(kpts):
+        if is_zero(kpts):
             if bvk_ncells != 1:
                 vj = vj.sum(axis=1)[None]
             else:
@@ -652,6 +704,8 @@ class FTOpt:
         vj = hermi_triu(vj)
         if sort_output:
             vj = cell.apply_CT_mat_C(vj)
+        if is_single_kpt:
+            vj = vj[0]
         return vj
 
 def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,

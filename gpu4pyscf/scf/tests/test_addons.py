@@ -16,6 +16,7 @@ import unittest
 import numpy as np
 import cupy as cp
 from pyscf import gto
+from pyscf import scf as cpu_scf
 from gpu4pyscf import scf, dft
 from gpu4pyscf.scf import addons
 from gpu4pyscf.dft.numint2c import NumInt2C
@@ -243,6 +244,49 @@ class KnownValues(unittest.TestCase):
         self.assertIs(result, out)
         self.assertIsInstance(result._numint, NumInt2C)
         self.assertEqual(result.omega, .23)
+
+    def _check_same_flavor_out(self, base, convert, constructor):
+        for density_fit in (False, True):
+            with self.subTest(density_fit=density_fit):
+                source = base.copy()
+                out = constructor(base.mol)
+                if density_fit:
+                    source = source.density_fit('weigend', only_dfj=True)
+                    out = out.density_fit('weigend')
+                arrays = {name: getattr(source, name).copy()
+                          for name in ('mo_coeff', 'mo_occ', 'mo_energy')}
+                density = source.make_rdm1().copy()
+                result = convert(source, out=out, remove_df=False)
+                self.assertIs(result, out)
+                self.assertEqual(result.e_tot, source.e_tot)
+                for name, expected in arrays.items():
+                    cp.testing.assert_array_equal(getattr(result, name), expected)
+                cp.testing.assert_allclose(result.make_rdm1(), density, atol=1e-12, rtol=0)
+                cpu_mol = base.mol.to_cpu()
+                cpu = cpu_scf.UHF(cpu_mol) if base.istype('UHF') else cpu_scf.RHF(cpu_mol)
+                self.assertIsInstance(cpu, cpu_scf.hf.SCF)
+                if density_fit:
+                    self.assertIsInstance(result, _DFHF)
+                    self.assertIs(result.with_df, source.with_df)
+                    self.assertTrue(result.only_dfj)
+                    cpu = cpu.density_fit('weigend', only_dfj=True)
+                else:
+                    self.assertNotIsInstance(result, _DFHF)
+                    self.assertFalse(hasattr(result, 'with_df'))
+                expected_energy = cpu.energy_tot(dm=density.get())
+                cp.testing.assert_allclose(result.energy_tot(dm=result.make_rdm1()),
+                                           expected_energy, atol=1e-10, rtol=1e-10)
+                for name, expected in arrays.items():
+                    cp.testing.assert_array_equal(getattr(source, name), expected)
+                if density_fit:
+                    self.assertIsInstance(source, _DFHF)
+                    self.assertIsNotNone(source.with_df)
+
+    def test_convert_to_rhf_same_type_out(self):
+        self._check_same_flavor_out(rhf_ref, addons.convert_to_rhf, scf.RHF)
+
+    def test_convert_to_uhf_same_type_out(self):
+        self._check_same_flavor_out(rhf_ref.to_uhf(), addons.convert_to_uhf, scf.UHF)
 
     def test_complex_orbitals_and_spin_order(self):
         ref = rohf_ref.to_uhf()

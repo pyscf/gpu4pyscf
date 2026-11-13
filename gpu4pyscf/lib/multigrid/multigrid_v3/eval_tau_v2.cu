@@ -17,10 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
 
@@ -286,7 +284,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
 extern "C" {
 #define eval_tau_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_tau_kernel<li,lj,slice_i,slice_j><<<ntasks, threads, shmsize>>>( \
+        eval_tau_kernel<li,lj,slice_i,slice_j><<<ntasks, threads, shmsize, stream>>>(\
             rho_c, tau_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
             atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
@@ -297,7 +295,7 @@ int evaluate_tau_v2(double *rho_c, double *tau_c, double *dm,
                  int i_angular, int j_angular,
                  int *shl_pair_offsets, int64_t *bas_ij_idx,
                  float2 *atom_frac_ranges, int nseg, int *atom_mesh,
-                 int *mesh, double factor, double negligible)
+                 int *mesh, double factor, double negligible, cudaStream_t stream)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

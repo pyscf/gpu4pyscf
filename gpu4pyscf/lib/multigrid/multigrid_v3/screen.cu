@@ -18,10 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cmath>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
 
@@ -546,10 +544,10 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
                               PBCIntEnvVars *envs,
                               int64_t *bas_ij_idx, int npairs,
                               int li_inc, int lj_inc, float log_threshold,
-                              float undressed_threshold)
+                              float undressed_threshold, cudaStream_t stream)
 {
     int batches = (npairs + THREADS-1) / THREADS;
-    grid_ranges_kernel<<<batches, THREADS>>>(
+    grid_ranges_kernel<<<batches, THREADS, 0, stream>>>(
         grid_frac_ranges, pair_ke, Ecut_by_shell, primary_atoms, *envs, bas_ij_idx,
         li_inc, lj_inc, npairs, log_threshold, undressed_threshold);
     cudaError_t err = cudaGetLastError();
@@ -562,9 +560,9 @@ int gaussian_prod_grid_ranges(float2 *grid_frac_ranges, float *pair_ke,
 
 int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
                         int64_t *bas_ij_idx, float2 *grid_frac_ranges,
-                        int *nimgs, int *mesh, int npairs, int nbas, int *head)
+                        int *nimgs, int *mesh, int npairs, int nbas, int *head, cudaStream_t stream)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     int nimgs_x = nimgs[0];
     int nimgs_y = nimgs[1];
     int nimgs_z = nimgs[2];
@@ -572,7 +570,7 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
     int mesh_y = mesh[1];
     int mesh_z = mesh[2];
     int batches = (npairs + THREADS-1) / THREADS;
-    grid_range_to_tiles_kernel<<<batches, THREADS>>>(
+    grid_range_to_tiles_kernel<<<batches, THREADS, 0, stream>>>(
         grid_tile_idx, dressed_bas_ij, bas_ij_idx, grid_frac_ranges,
         nimgs_x, nimgs_y, nimgs_z, mesh_x, mesh_y, mesh_z, npairs, nbas, head);
     cudaError_t err = cudaGetLastError();
@@ -584,10 +582,10 @@ int grid_range_to_tiles(int *grid_tile_idx, int64_t *dressed_bas_ij,
 }
 
 int atom_grid_ranges(float2 *atom_frac_ranges, float2 *grid_frac_ranges,
-                     int *shl_pair_offsets, int npairs, int nsegs)
+                     int *shl_pair_offsets, int npairs, int nsegs, cudaStream_t stream)
 {
     int blocks = (nsegs + 255) / 256;
-    atom_grid_ranges_kernel<<<blocks, 256>>>(
+    atom_grid_ranges_kernel<<<blocks, 256, 0, stream>>>(
         atom_frac_ranges, grid_frac_ranges, shl_pair_offsets, npairs, nsegs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -599,13 +597,13 @@ int atom_grid_ranges(float2 *atom_frac_ranges, float2 *grid_frac_ranges,
 }
 
 int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
-                             double *img_coords, int nimgs, float log_cutoff)
+                             double *img_coords, int nimgs, float log_cutoff, cudaStream_t stream)
 {
     int nbas = envs->nbas;
     int bvk_nbas = nbas * envs->bvk_ncells;
     dim3 threads(16, 16);
     dim3 blocks((bvk_nbas + 15) / 16, (nbas + 15) / 16);
-    ovlp_mask_estimation_kernel<<<blocks, threads>>>(
+    ovlp_mask_estimation_kernel<<<blocks, threads, 0, stream>>>(
             ovlp_mask, *envs, img_coords, nimgs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -616,11 +614,11 @@ int bvk_ovlp_mask_estimation(int8_t *ovlp_mask, PBCIntEnvVars *envs,
 }
 int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
                              PBCIntEnvVars *envs, int npairs, float log_cutoff,
-                             int is_mgga, int *head)
+                             int is_mgga, int *head, cudaStream_t stream)
 {
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
     int blocks = (npairs + THREADS-1)/THREADS;
-    supmol_non_trivial_pairs_kernel<<<blocks, THREADS>>>(
+    supmol_non_trivial_pairs_kernel<<<blocks, THREADS, 0, stream>>>(
             supmol_bas_ij, bas_ij_idx, *envs, npairs, log_cutoff, is_mgga, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -632,10 +630,10 @@ int supmol_non_trivial_pairs(int64_t *supmol_bas_ij, int64_t *bas_ij_idx,
 
 int estimate_aft_Ecut(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
                       double *img_coords, int nimgs, int npairs,
-                      float log_cutoff, float Ecut_max, int is_mgga)
+                      float log_cutoff, float Ecut_max, int is_mgga, cudaStream_t stream)
 {
     int blocks = (npairs + THREADS-1)/THREADS;
-    estimate_aft_Ecut_kernel<<<blocks, THREADS>>>(
+    estimate_aft_Ecut_kernel<<<blocks, THREADS, 0, stream>>>(
         Ecut, bas_ij_idx, *envs, img_coords, nimgs, npairs, log_cutoff,
         Ecut_max, is_mgga);
     cudaError_t err = cudaGetLastError();

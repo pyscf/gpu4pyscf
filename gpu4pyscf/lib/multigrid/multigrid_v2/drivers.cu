@@ -32,22 +32,23 @@ __constant__ double reciprocal_norm[3];
 extern "C" {
 void update_lattice_vectors(const double *lattice_vectors_on_device,
                             const double *reciprocal_lattice_vectors_on_device,
-                            const double *reciprocal_norm_on_device) {
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::lattice_vectors,
-                     lattice_vectors_on_device, 9 * sizeof(double));
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::reciprocal_lattice_vectors,
-                     reciprocal_lattice_vectors_on_device, 9 * sizeof(double));
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::reciprocal_norm,
-                     reciprocal_norm_on_device, 3 * sizeof(double));
+                            const double *reciprocal_norm_on_device, cudaStream_t stream) {
+  cudaMemcpyToSymbolAsync(gpu4pyscf::gpbc::multi_grid::lattice_vectors,
+                     lattice_vectors_on_device, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
+  cudaMemcpyToSymbolAsync(gpu4pyscf::gpbc::multi_grid::reciprocal_lattice_vectors,
+                     reciprocal_lattice_vectors_on_device, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
+  cudaMemcpyToSymbolAsync(gpu4pyscf::gpbc::multi_grid::reciprocal_norm,
+                     reciprocal_norm_on_device, 3 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
+  cudaStreamSynchronize(stream);
 }
 
-void update_dxyz_dabc(const double *dxyz_dabc_on_device) {
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::dxyz_dabc,
-                     dxyz_dabc_on_device, 9 * sizeof(double));
+void update_dxyz_dabc(const double *dxyz_dabc_on_device, cudaStream_t stream) {
+  cudaMemcpyToSymbolAsync(gpu4pyscf::gpbc::multi_grid::dxyz_dabc,
+                     dxyz_dabc_on_device, 9 * sizeof(double), 0, cudaMemcpyHostToDevice, stream);
+  cudaStreamSynchronize(stream);
 }
 
-int evaluate_density_driver(
-    double *density, double *density_matrices, const int i_angular,
+int evaluate_density_driver(double *density, double *density_matrices, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
     const int n_i_functions, const int n_j_functions,
@@ -58,30 +59,28 @@ int evaluate_density_driver(
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
     const int *bas, const double *env, int n_channels,
-    const int is_non_orthogonal, const int use_float_precision) {
+    const int is_non_orthogonal, const int use_float_precision, cudaStream_t stream) {
   if (use_float_precision) {
 #ifdef GPU4PYSCF_ENABLE_FP32_MULTIGRID
     if (is_non_orthogonal) {
       if (n_channels == 1) {
-        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, true>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, true>((float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
             sorted_block_index, n_contributing_blocks, image_indices,
             vectors_to_neighboring_images, n_images,
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
+            env, stream);
       } else if (n_channels == 2) {
-        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, true>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, true>((float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
             sorted_block_index, n_contributing_blocks, image_indices,
             vectors_to_neighboring_images, n_images,
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
+            env, stream);
       } else {
         return 1;
       }
@@ -95,7 +94,7 @@ int evaluate_density_driver(
             sorted_block_index, n_contributing_blocks, image_indices,
             vectors_to_neighboring_images, n_images,
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
+            env, stream);
       } else if (n_channels == 2) {
         return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, false>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
@@ -105,7 +104,7 @@ int evaluate_density_driver(
             sorted_block_index, n_contributing_blocks, image_indices,
             vectors_to_neighboring_images, n_images,
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
+            env, stream);
       } else {
         return 1;
       }
@@ -133,7 +132,7 @@ int evaluate_density_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids;
           density_matrices += size_dm;
           n_channels -= 1;
@@ -146,7 +145,7 @@ int evaluate_density_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids * 2;
           density_matrices += size_dm * 2;
           n_channels -= 2;
@@ -161,7 +160,7 @@ int evaluate_density_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids;
           density_matrices += size_dm;
           n_channels -= 1;
@@ -174,7 +173,7 @@ int evaluate_density_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids * 2;
           density_matrices += size_dm * 2;
           n_channels -= 2;
@@ -200,7 +199,7 @@ int evaluate_density_tau_driver(
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
     const int *bas, const double *env, int n_channels,
-    const int is_non_orthogonal, const int use_float_precision) {
+    const int is_non_orthogonal, const int use_float_precision, cudaStream_t stream) {
   if (use_float_precision) {
     fprintf(stderr, "single precision not available\n");
     return 1;
@@ -221,7 +220,7 @@ int evaluate_density_tau_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids * 2;
           density_matrices += size_dm;
           n_channels -= 1;
@@ -234,7 +233,7 @@ int evaluate_density_tau_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids * 2 * 2;
           density_matrices += size_dm * 2;
           n_channels -= 2;
@@ -249,7 +248,7 @@ int evaluate_density_tau_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids * 2;
           density_matrices += size_dm;
           n_channels -= 1;
@@ -262,7 +261,7 @@ int evaluate_density_tau_driver(
               sorted_block_index, n_contributing_blocks, image_indices,
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
-              env);
+              env, stream);
           density += ngrids * 2 * 2;
           density_matrices += size_dm * 2;
           n_channels -= 2;

@@ -417,6 +417,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         compact_buf, work = _allocate(nao_pair*Gblksize*2, work)
         ao_buf, work = _allocate(ao_size*Gblksize*2, work)
         scratch1, scratch2 = _allocate(scratch1_size*Gblksize*2, work)
+        stream = cp.cuda.get_current_stream()
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
             auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3), out=aux_buf).T
@@ -470,7 +471,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(ft_opt.permutation_symmetry))
+                    ctypes.c_int(ft_opt.permutation_symmetry),
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ek_deriv failed')
                 LpqG = None
@@ -524,7 +526,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                     null_ptr,
                     ctypes.cast(dm_auxG.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GkT.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(aux_ft_envs), ctypes.c_int(nGv))
+                    ctypes.byref(aux_ft_envs), ctypes.c_int(nGv),
+                    ctypes.c_void_p(stream.ptr))
                 if err != 0:
                     raise RuntimeError('ft_ao_deriv failed')
                 pqG = pqG_compressed = tmp = ijG = dm_auxG1 = dm_oo_k = None
@@ -652,7 +655,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 ctypes.c_int(naux_in_batch),
                 ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff))
+                ctypes.c_float(log_cutoff),
+                ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
             if err != 0:
                 raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         ejk_sigma += ejk_sigma_sr * 2
@@ -866,6 +870,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
             vG += vG_FR
         GvT = cp.asarray(Gv.T.ravel())
         ej_sigma_aux = cp.zeros([cell.natm+3, 3])
+        stream = cp.cuda.get_current_stream()
         err = libpbc.PBC_ft_ao_deriv(
             ctypes.cast(ej_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
             ctypes.cast(ej_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
@@ -873,7 +878,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
             ctypes.cast(vG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.byref(aux_ft_envs),
-            ctypes.c_int(ngrids))
+            ctypes.c_int(ngrids),
+            ctypes.c_void_p(stream.ptr))
         if err != 0:
             raise RuntimeError('ft_ao_deriv failed')
 
@@ -894,7 +900,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry))
+                ctypes.c_int(ft_opt.permutation_symmetry),
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
@@ -913,7 +920,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
                 ctypes.cast(dd_bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dd_bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dd_shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry))
+                ctypes.c_int(ft_opt.permutation_symmetry),
+                ctypes.c_void_p(stream.ptr))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
@@ -990,7 +998,8 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
             ctypes.c_int(naux),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
         ej_sigma += ej_sigma_sr * 2
@@ -1170,13 +1179,15 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
     aux_ft_envs = RysIntEnvVars.new(
         auxcell.natm, auxcell.nbas, auxcell._atm, auxcell._bas,
         _scale_sp_ctr_coeff(auxcell), auxcell.ao_loc)
+    stream = cp.cuda.get_current_stream()
     err = libpbc.PBC_ft_ao_deriv(
         ctypes.cast(ej_sigma_aux[:-3].data.ptr, ctypes.c_void_p),
         ctypes.cast(ej_sigma_aux[-3:].data.ptr, ctypes.c_void_p),
         ctypes.cast(charges.data.ptr, ctypes.c_void_p),
         ctypes.cast(vG.data.ptr, ctypes.c_void_p),
         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-        ctypes.byref(aux_ft_envs), ctypes.c_int(ngrids))
+        ctypes.byref(aux_ft_envs), ctypes.c_int(ngrids),
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('ft_ao_deriv failed')
 
@@ -1199,7 +1210,8 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ft_opt.permutation_symmetry))
+        ctypes.c_int(ft_opt.permutation_symmetry),
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('PBC_ft_aopair_ej_deriv failed')
 
@@ -1268,7 +1280,8 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         ctypes.c_int(naux),
         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-        ctypes.c_float(log_cutoff))
+        ctypes.c_float(log_cutoff),
+        ctypes.c_void_p(stream.ptr))
     if err != 0:
         raise RuntimeError('PBCsr_ejk_int3c2e_deriv failed')
     ej_sigma += ej_sigma_sr * 2

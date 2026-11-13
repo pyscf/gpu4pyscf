@@ -17,10 +17,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "constant_objects.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "cartesian.cuh"
 #include "utils.cuh"
 
@@ -381,7 +379,7 @@ void eval_mgga_grad_kernel(double *grad, double *strain, double *dm,
 extern "C" {
 #define eval_mgga_grad_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): \
-        eval_mgga_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads>>>( \
+        eval_mgga_grad_kernel<li,lj,slice_i,slice_j><<<npairs, threads, 0, stream>>>(\
             grad, strain, dm, vxc, tau, *envs, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
             factor, negligible); \
@@ -391,7 +389,7 @@ int evaluate_mgga_grad(double *grad, double *strain, double *dm,
                        double *vxc, double *tau, PBCIntEnvVars *envs,
                        double *dxyz_dabc, int li, int lj, int64_t *bas_ij_idx,
                        float2 *grid_frac_ranges, int *mesh, int npairs,
-                       double factor, double negligible)
+                       double factor, double negligible, cudaStream_t stream)
 {
     int mesh_a = mesh[0];
     int mesh_b = mesh[1];

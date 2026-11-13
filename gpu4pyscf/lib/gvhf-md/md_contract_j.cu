@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
@@ -43,8 +41,8 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
-    uint16_t *p1 = c_Rt_idx + offsets;
-    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
+    const uint16_t *p1 = c_Rt_idx + offsets;
+    const int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
     double Rt_tmp[RT_TMP_SIZE];
     nf2 -= 1; // Drop the first element in Rt. It is assigned outside
     nf3 -= 1;
@@ -922,9 +920,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 }
 
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                  float *q_cond_ij, float *q_cond_kl, double omega);
+                  float *q_cond_ij, float *q_cond_kl, double omega, cudaStream_t stream);
 int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
-                  float *q_cond_ij, float *q_cond_kl, double omega, int dm_size);
+                  float *q_cond_ij, float *q_cond_kl, double omega, int dm_size, cudaStream_t stream);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
@@ -934,7 +932,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float *qd_ij_max, float *qd_kl_max,
                 float *q_cond_ij, float *q_cond_kl, float cutoff,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -983,7 +981,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     pRt2_kl_ij += offset_for_Rt2_idx(lij, lkl);
     efg_phase += offset_for_Rt2_idx(0, lkl);
     if (n_dm == 1) {
-        if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega)) {
+        if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, stream)) {
             cudaFuncSetAttribute(md_j_1dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
@@ -993,12 +991,12 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
             }
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
-            md_j_1dm_kernel<<<blocks, threads, buflen>>>(
+            md_j_1dm_kernel<<<blocks, threads, buflen, stream>>>(
                 *envs, jk, bounds, q_cond_ij, q_cond_kl,
                 threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
         }
     } else {
-        if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size)) {
+        if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size, stream)) {
             cudaFuncSetAttribute(md_j_4dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
@@ -1012,7 +1010,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 jk.vj = vj + dm_offset * dm_size;
                 jk.dm = dm + dm_offset * dm_size;
                 jk.n_dm = n_dm - dm_offset;
-                md_j_4dm_kernel<<<blocks, threads, buflen>>>(
+                md_j_4dm_kernel<<<blocks, threads, buflen, stream>>>(
                     *envs, jk, bounds, q_cond_ij, q_cond_kl,
                     threads_ij, threads_kl, tilex, tiley, dm_size, pRt2_kl_ij, efg_phase);
             }

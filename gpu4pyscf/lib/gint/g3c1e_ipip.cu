@@ -113,7 +113,9 @@ static void GINTfill_int3c1e_ipip1_charge_contracted_kernel_general(double* outp
     const int jsh = bas_pair2ket[bas_ij];
     const double* __restrict__ a_exponents = c_bpcache.a1;
 
-    constexpr int l_sum_max = (NROOTS - 1) * 2 + 1;
+    // The launcher picks NROOTS = (i_l + j_l + 2) / 2 + 1, so i_l + j_l is at most
+    // 2 * NROOTS - 3 for this instantiation.
+    constexpr int l_sum_max = 2 * NROOTS - 3;
     constexpr int l_i_max_density_elements = (l_sum_max + 1) / 2;
     constexpr int l_j_max_density_elements = l_sum_max - l_i_max_density_elements;
     double output_cache[(l_i_max_density_elements + 1) * (l_i_max_density_elements + 2) / 2
@@ -271,7 +273,9 @@ static void GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general(double* out
     const double* __restrict__ a_exponents = c_bpcache.a1;
     const double* __restrict__ b_exponents = c_bpcache.a2;
 
-    constexpr int l_sum_max = (NROOTS - 1) * 2 + 1;
+    // The launcher picks NROOTS = (i_l + j_l + 2) / 2 + 1, so i_l + j_l is at most
+    // 2 * NROOTS - 3 for this instantiation.
+    constexpr int l_sum_max = 2 * NROOTS - 3;
     constexpr int l_i_max_density_elements = (l_sum_max + 1) / 2;
     constexpr int l_j_max_density_elements = l_sum_max - l_i_max_density_elements;
     double output_cache[(l_i_max_density_elements + 1) * (l_i_max_density_elements + 2) / 2
@@ -445,7 +449,9 @@ static void GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general(double* out
     const double Ay = bas_y[ish];
     const double Az = bas_z[ish];
 
-    constexpr int l_sum_max = (NROOTS - 1) * 2 + 1;
+    // The launcher picks NROOTS = (i_l + j_l + 2) / 2 + 1, so i_l + j_l is at most
+    // 2 * NROOTS - 3 for this instantiation.
+    constexpr int l_sum_max = 2 * NROOTS - 3;
     constexpr int l_i_max_density_elements = (l_sum_max + 1) / 2;
     constexpr int l_j_max_density_elements = l_sum_max - l_i_max_density_elements;
     double output_cache[(l_i_max_density_elements + 1) * (l_i_max_density_elements + 2) / 2

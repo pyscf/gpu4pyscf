@@ -13,9 +13,7 @@
 # limitations under the License.
 
 from concurrent.futures import ThreadPoolExecutor
-import numpy as np
 import cupy
-from pyscf.mp import mp2 as mp2_pyscf
 from gpu4pyscf import df
 from gpu4pyscf.mp import mp2
 from gpu4pyscf.lib import logger
@@ -139,10 +137,7 @@ class DFMP2(mp2.MP2Base):
             yield Lov
 
     def ao2mo(self, mo_coeff=None):
-        eris = mp2_pyscf._ChemistsERIs()
-        # Initialize only the mo_coeff
-        if isinstance(mo_coeff, np.ndarray):
-            mo_coeff = cupy.asarray(mo_coeff)
+        eris = mp2._ChemistsERIs()
         eris._common_init_(self, mo_coeff)
         return eris
 

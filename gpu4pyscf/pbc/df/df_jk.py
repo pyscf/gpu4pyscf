@@ -119,7 +119,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     if is_zero(kpts_band) and not np.iscomplexobj(dms):
         vj = vj.real
     vj *= 1./nkpts
-    return _format_jks(vj, dm_kpts, input_band, kpts)
+    return _format_jks(vj, dm_kpts,
+                       kpts_band if input_band is not None else None, kpts)
 
 
 def get_j_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None):
@@ -259,7 +260,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     if exxdiv == 'ewald':
         _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band)
     log.timer('get_k_kpts', *t0)
-    return _format_jks(vk, dm_kpts, input_band, kpts)
+    return _format_jks(vk, dm_kpts,
+                       kpts_band if input_band is not None else None, kpts)
 
 def get_k_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None,
                       exxdiv=None):

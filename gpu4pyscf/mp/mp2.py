@@ -101,7 +101,10 @@ def _gamma1_intermediates(mp, t2=None, eris=None):
     dm1vir = cupy.zeros((nvir,nvir), dtype=dtype)
     for i in range(nocc):
         if t2 is None:
-            gi = cupy.asarray(eris.ovov[i*nvir:(i+1)*nvir])
+            if eris.ovov.ndim == 4:
+                gi = cupy.asarray(eris.ovov[i])
+            else:
+                gi = cupy.asarray(eris.ovov[i*nvir:(i+1)*nvir])
             gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
             t2i = gi.conj()/(eia[:,:,None] + eia[i])
             #lib.direct_sum('jb+a->jba', eia, eia[i])
@@ -114,12 +117,38 @@ def _gamma1_intermediates(mp, t2=None, eris=None):
                 - _einsum('iab,jba->ij', l2i, t2i)
     return -dm1occ, dm1vir
 
+class _ChemistsERIs(mp2_cpu._ChemistsERIs):
+    def _common_init_(self, mp, mo_coeff=None):
+        if mo_coeff is None:
+            mo_coeff = mp.mo_coeff
+        if mo_coeff is None:
+            raise RuntimeError('mo_coeff, mo_energy are not initialized.\n'
+                               'You may need to call mf.kernel() to generate them.')
+
+        same_reference = mo_coeff is mp._scf.mo_coeff
+        mo_coeff = cupy.asarray(mo_coeff)
+        mask = mp.get_frozen_mask()
+        self.mo_coeff = mo_coeff[:,mask]
+        self.mol = mp.mol
+
+        # Keep restricted MP2 initialization independent of the CPU helper's
+        # singles-amplitude API, introduced in PySCF 2.14.
+        if same_reference and mp._scf.converged:
+            self.mo_energy = cupy.asarray(mp._scf.mo_energy)[mask]
+            self.fock = cupy.diag(self.mo_energy)
+        else:
+            dm = mp._scf.make_rdm1(mo_coeff, mp.mo_occ)
+            vhf = mp._scf.get_veff(mp.mol, dm)
+            fockao = mp._scf.get_fock(vhf=vhf, dm=dm)
+            self.fock = self.mo_coeff.conj().T.dot(fockao).dot(self.mo_coeff)
+            self.mo_energy = self.fock.diagonal().real
+        return self
+
+
 def _make_eris(mp, mo_coeff=None, ao2mofn=None, verbose=None):
     log = logger.new_logger(mp, verbose)
     time0 = (logger.process_clock(), logger.perf_counter())
-    eris = mp2_cpu._ChemistsERIs()
-    if isinstance(mo_coeff, np.ndarray):
-        mo_coeff = cupy.asarray(mo_coeff)
+    eris = _ChemistsERIs()
     eris._common_init_(mp, mo_coeff)
     mo_coeff = eris.mo_coeff
     nocc = mp.nocc
@@ -201,14 +230,10 @@ class MP2Base(lib.StreamObject):
     max_cycle = getattr(__config__, 'cc_ccsd_CCSD_max_cycle', 50)
     conv_tol = getattr(__config__, 'cc_ccsd_CCSD_conv_tol', 1e-7)
     conv_tol_normt = getattr(__config__, 'cc_ccsd_CCSD_conv_tol_normt', 1e-5)
-    # Keep the PySCF MP2 option available to shared integral and amplitude
-    # helpers.  Recent PySCF versions use it when initializing MP2 ERIs.
-    exclude_t1 = getattr(__config__, 'mp_mp2_exclude_t1', False)
 
     _keys = {
         'max_cycle', 'conv_tol', 'conv_tol_normt', 'mol', 'max_memory',
-        'frozen', 'level_shift', 'exclude_t1', 'mo_coeff', 'mo_occ', 'e_hf',
-        'e_corr',
+        'frozen', 'level_shift', 'mo_coeff', 'mo_occ', 'e_hf', 'e_corr',
         'e_corr_ss', 'e_corr_os', 't2',
     }
 
@@ -264,18 +289,6 @@ class MP2Base(lib.StreamObject):
     get_nocc = get_nocc
     get_nmo = get_nmo
     get_e_hf = get_e_hf
-
-    def _reference_is_canonical(self):
-        # Match PySCF's check for spin-paired orbitals with unequal alpha and
-        # beta occupations (for example ROHF orbitals passed to UMP2).
-        coeff = self.mo_coeff
-        if getattr(coeff, 'ndim', 0) != 3:
-            return True
-        occ = cupy.asarray(self.mo_occ)
-        if occ.ndim == 2 and not bool(cupy.array_equal(occ[0], occ[1])) and \
-                bool(cupy.allclose(coeff[0], coeff[1])):
-            return False
-        return True
 
     def set_frozen(self, method='auto', window=(-1000.0, 1000.0)):
         from pyscf import mp

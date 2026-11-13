@@ -16,7 +16,6 @@ import pyscf
 import numpy as np
 import cupy as cp
 import unittest
-import pytest
 from pyscf import lib
 import gpu4pyscf
 from gpu4pyscf.lib.cupy_helper import contract
@@ -254,22 +253,24 @@ class KnownValues(unittest.TestCase):
         assert abs(lib.fp(ej) - -5.7379651745047555) < 2e-12
 
     def test_jk_energy_per_atom(self):
-        cp.random.seed(8)
+        # Backend-independent input: np.random (MT19937) is identical on
+        # every host, unlike cp.random (cuRAND on CUDA, oneMKL on SYCL).
+        np.random.seed(8)
         nao = mol.nao
         nocc = 5
-        mo_coeff = cp.random.rand(3, nao, nocc) - .5
+        mo_coeff = cp.asarray(np.random.rand(3, nao, nocc)) - .5
         dm = cp.einsum('spi,sqi->spq', mo_coeff, mo_coeff)
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         j_factor = [1, -1,  0]
         k_factor = [1, -1, -1]
         ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(lib.fp(ejk) - 16.8821623565) < 2e-9
+        assert abs(lib.fp(ejk) - -39.9335312459366) < 2e-9
         assert abs(ejk.sum(axis=0)).max() < 1e-9
 
         # mimic insufficent memory, processing in small batches
         with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 3000000)):
             ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(lib.fp(ejk) - 16.8821623565) < 2e-9
+        assert abs(lib.fp(ejk) - -39.9335312459366) < 2e-9
 
         ref = 0
         for i in range(len(dm)):
@@ -356,6 +357,56 @@ class KnownValues(unittest.TestCase):
         ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
                                         k_factor=None, sum_results=True)
         assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
+
+class SmallPhysicalProtocols(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.small_mol = pyscf.M(atom='H 0 0 0; H 0 0 .74', basis='6-31g', verbose=0)
+        cls.cpu = cls.small_mol.RHF().density_fit(auxbasis='weigend').set(
+            conv_tol=1e-12, conv_tol_grad=1e-10)
+        cls.gpu = cls.cpu.to_gpu()
+        cls.cpu.kernel()
+        cls.gpu.kernel()
+        assert cls.cpu.converged and cls.gpu.converged
+        np.testing.assert_allclose(cls.gpu.e_tot, cls.cpu.e_tot, atol=1e-10, rtol=0)
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.cpu, cls.gpu, cls.small_mol
+
+    def test_tda_gradient_without_td_kernel(self):
+        td = self.gpu.TDA().set(nstates=2, conv_tol=1e-10, lindep=1e-20)
+        gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
+        self.assertIsNone(td.xy)
+        actual = gradient.kernel(state=1)
+        self.assertTrue(all(td.converged))
+        # CPU PySCF 2.14.0 DF energy central difference, step 5e-4 Bohr;
+        # agrees with step 1e-3 Bohr within 2e-7 Eh/Bohr.
+        derivative = -0.19801192632862
+        reference = np.array([[0., 0., -derivative], [0., 0., derivative]])
+        np.testing.assert_allclose(actual, reference, atol=1e-6, rtol=0)
+
+    def test_tdhf_gradient_with_xy(self):
+        td = self.gpu.TDHF().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
+        self.assertTrue(all(td.converged))
+        gradient = td.nuc_grad_method().set(cphf_conv_tol=1e-10)
+        selected = gradient.kernel(state=2)
+        self.assertEqual(gradient.state, 2)
+        explicit = td.nuc_grad_method().set(cphf_conv_tol=1e-10).kernel(xy=td.xy[1])
+        np.testing.assert_allclose(explicit, selected, atol=1e-10, rtol=0)
+        # CPU PySCF 2.14.0 DF energy central difference, step 5e-4 Bohr;
+        # agrees with step 1e-3 Bohr within 3e-7 Eh/Bohr.
+        reference = [[0., 0., -0.10770852316910], [0., 0., 0.10770852316910]]
+        np.testing.assert_allclose(selected, reference, atol=1e-6, rtol=0)
+
+    def test_tda_gradient_state_zero(self):
+        td = self.gpu.TDA()
+        gradient = td.nuc_grad_method()
+        actual = gradient.kernel(state=0)
+        self.assertIsNone(td.xy)
+        reference = self.cpu.nuc_grad_method().kernel()
+        np.testing.assert_allclose(actual, reference, atol=1e-7, rtol=0)
+
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")

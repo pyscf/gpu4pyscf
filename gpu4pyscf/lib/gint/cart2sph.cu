@@ -702,11 +702,11 @@ static void left_cart2cart(double* destination_matrix, const double* source_matr
 
 extern "C" {
     // Notice: The cartesian_matrix is used as scratch and the content is destroyed.
-    int cart2sph_CT_mat_C_with_padding(const cudaStream_t stream, double* cartesian_matrix, double* spherical_matrix,
+    int cart2sph_CT_mat_C_with_padding(double* cartesian_matrix, double* spherical_matrix,
                                        const int n_ao_cartesian, const int n_ao_spherical,
                                        const int n_l_ctr_group, const int* l_of_group, const int* n_total_bas_of_group, const int* n_pad_bas_of_group,
                                        const int* d_ao_idx,
-                                       const bool if_no_cart2sph)
+                                       const bool if_no_cart2sph, const cudaStream_t stream)
     {
         if (!if_no_cart2sph) {
             int i_cartesian_offset = 0;
@@ -821,11 +821,11 @@ extern "C" {
         return 0;
     }
 
-    int cart2sph_C_mat_CT_with_padding(const cudaStream_t stream, double* cartesian_matrix, const double* spherical_matrix,
+    int cart2sph_C_mat_CT_with_padding(double* cartesian_matrix, const double* spherical_matrix,
                                        const int n_ao_cartesian, const int n_ao_spherical,
                                        const int n_l_ctr_group, const int* l_of_group, const int* n_total_bas_of_group, const int* n_pad_bas_of_group,
                                        const int* d_ao_idx,
-                                       const bool if_no_cart2sph)
+                                       const bool if_no_cart2sph, const cudaStream_t stream)
     {
         if (!if_no_cart2sph) {
             int i_cartesian_offset = 0;
@@ -940,11 +940,11 @@ extern "C" {
         return 0;
     }
 
-    int cart2sph_C_mat_with_padding(const cudaStream_t stream, double* cartesian_matrix, const double* spherical_matrix,
+    int cart2sph_C_mat_with_padding(double* cartesian_matrix, const double* spherical_matrix,
                                     const int n_right,
                                     const int n_l_ctr_group, const int* l_of_group, const int* n_total_bas_of_group, const int* n_pad_bas_of_group,
                                     const int* d_ao_idx,
-                                    const bool if_no_cart2sph)
+                                    const bool if_no_cart2sph, const cudaStream_t stream)
     {
         if (!if_no_cart2sph) {
             int i_cartesian_offset = 0;
@@ -986,7 +986,7 @@ extern "C" {
 
                 const dim3 threads(16, 16);
                 const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas * n_cartesian_of_l + threads.y - 1) / threads.y);
-                left_cart2cart<<<threads, blocks>>>(cartesian_matrix, spherical_matrix,
+                left_cart2cart<<<blocks, threads, 0, stream>>>(cartesian_matrix, spherical_matrix,
                                                     n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx);
 
                 i_pad_offset += n_total_bas_of_group[i_group] * n_cartesian_of_l;

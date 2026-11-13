@@ -53,3 +53,10 @@ def HF(cell, *args, **kwargs):
         return RHF(cell, *args, **kwargs)
     else:
         return UHF(cell, *args, **kwargs)
+
+def KHF(cell, *args, **kwargs):
+    '''K-point HF, restricted for spin zero and unrestricted otherwise.'''
+    if cell.spin == 0:
+        return KRHF(cell, *args, **kwargs)
+    else:
+        return KUHF(cell, *args, **kwargs)

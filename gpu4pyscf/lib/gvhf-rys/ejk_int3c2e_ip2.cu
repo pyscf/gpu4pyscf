@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -496,11 +494,11 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int aux_offset, int naux)
+                    int *ao_pair_loc, int aux_offset, int naux, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ejk_int3c2e_ipip_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    ejk_int3c2e_ipip_kernel<<<blocks, THREADS, shm_size>>>(
+    ejk_int3c2e_ipip_kernel<<<blocks, THREADS, shm_size, stream>>>(
             ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, naux);

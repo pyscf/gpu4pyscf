@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
@@ -43,8 +41,8 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
-    uint16_t *p1 = c_Rt_idx + offsets;
-    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
+    const uint16_t *p1 = c_Rt_idx + offsets;
+    const int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
     double Rt_tmp[RT_TMP_SIZE];
     nf2 -= 1; // Drop the first element in Rt. It is assigned outside
     nf3 -= 1;
@@ -321,7 +319,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float *qd_ij_max, float *qd_kl_max,
                 float *q_cond_ij, float *q_cond_kl, float cutoff,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -382,7 +380,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
         if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
-            pbc_md_j_kernel<<<blocks, threads, buflen>>>(
+            pbc_md_j_kernel<<<blocks, threads, buflen, stream>>>(
                 *envs, jmat, bounds, q_cond_ij, q_cond_kl,
                 threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
         }

@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 
 #define PTR_PBAS_IDX    4
@@ -71,9 +69,9 @@ void recontract_gather_kernel(double *out, double *input, int *inp_idx,
 }
 
 extern "C" {
-int recontract_ao_pair_gather(cudaStream_t stream, double *out, double *input,
+int recontract_ao_pair_gather(double *out, double *input,
                              int *inp_idx, double *coef, int *offsets,
-                             int naux, int npair)
+                             int naux, int npair, cudaStream_t stream)
 {
     if (naux == 0 || npair == 0) {
         return 0;
@@ -91,9 +89,9 @@ int recontract_ao_pair_gather(cudaStream_t stream, double *out, double *input,
 }
 
 int recontract_ao_pair(double *out, double *input, int *out_idx, int *inp_idx,
-                       double *coef, int naux, int count)
+                       double *coef, int naux, int count, cudaStream_t stream)
 {
-    recontract_kernel<<<count, 256>>>(out, input, out_idx, inp_idx, coef, naux);
+    recontract_kernel<<<count, 256, 0, stream>>>(out, input, out_idx, inp_idx, coef, naux);
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "recontract_ao_pair error %s\n", cudaGetErrorString(err));

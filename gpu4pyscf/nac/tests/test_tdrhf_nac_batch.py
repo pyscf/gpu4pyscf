@@ -13,13 +13,15 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
+from packaging.version import Version
 import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
+from gpu4pyscf.nac import tdrhf_grad_nacv
 import gpu4pyscf
-import pytest
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
@@ -27,6 +29,7 @@ O 0. 0. 0.1174; H -0.757 0. -0.4696; H 0.757 0. -0.4696
 """
 
 bas0 = "def2tzvp"
+CPU_GRADIENT_REFERENCE = Version(pyscf.__version__) >= Version('2.14')
 
 def setUpModule():
     global mol
@@ -41,7 +44,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test_nac_tda_singlet(self):
+    def test_nac_tda_singlet_high_cost(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -75,7 +78,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
-    def test_nac_grad_tda_singlet(self):
+    def test_nac_grad_tda_singlet_high_cost(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -109,7 +112,7 @@ class KnownValues(unittest.TestCase):
         g1.kernel()
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tdhf_singlet(self):
+    def test_nac_tdhf_singlet_high_cost(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDHF().set(nstates=5)
@@ -145,7 +148,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-4
 
-    def test_nac_grad_tdhf_singlet(self):
+    def test_nac_grad_tdhf_singlet_high_cost(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDHF().set(nstates=5)
@@ -171,7 +174,7 @@ class KnownValues(unittest.TestCase):
         # low accuracy due to z-vector calculation
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-5
 
-    def test_nac_grad_tda_target_state_singlet(self):
+    def test_nac_grad_tda_target_state_singlet_high_cost(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -207,7 +210,7 @@ class KnownValues(unittest.TestCase):
         g1.kernel()
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_z_vector_reuse(self):
+    def test_nac_z_vector_reuse_high_cost(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -251,6 +254,91 @@ class KnownValues(unittest.TestCase):
         nac_std.states = (1, 2)
         nac_std.kernel()
         assert abs(np.abs(de_run3_12) - np.abs(nac_std.de)).max() < 1e-6
+
+
+class NACGradients_high_cost(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.small_mol = pyscf.M(atom=atom, basis='6-31g', verbose=0)
+        cls.mf = scf.RHF(cls.small_mol).to_gpu().set(conv_tol=1e-12).run()
+        cls.td = cls.mf.TDA().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
+        assert cls.mf.converged and all(cls.td.converged)
+        cls.cpu = None
+        if CPU_GRADIENT_REFERENCE:
+            cls.cpu = scf.RHF(cls.small_mol).set(conv_tol=1e-12).run()
+            assert cls.cpu.converged
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.td, cls.mf, cls.cpu, cls.small_mol
+
+    def test_ground_target_and_cpu_ground_gradient(self):
+        td = self.td
+        batch = td.nac_gradient_method().set(cphf_conv_tol=1e-10)
+        results = batch.kernel(states=(2, 1), target_state=0,
+                               grad_state=0)
+        self.assertEqual(set(results), {(0, 1), (0, 2)})
+        if CPU_GRADIENT_REFERENCE:
+            reference = self.cpu.nuc_grad_method().kernel()
+            np.testing.assert_allclose(batch.grad_result, reference, atol=1e-7, rtol=0)
+        for (_, state), values in results.items():
+            for value in values.values():
+                self.assertEqual(value.shape, (td.mol.natm, 3))
+                self.assertTrue(np.isfinite(value).all())
+            gap = float(td.e[state - 1])
+            np.testing.assert_allclose(values['de_scaled'] * gap, values['de'],
+                                       atol=1e-12, rtol=0)
+            np.testing.assert_allclose(values['de_etf_scaled'] * gap, values['de_etf'],
+                                       atol=1e-12, rtol=0)
+
+    def test_full_td_target_gradient(self):
+        td = self.mf.TDHF().set(nstates=2, conv_tol=1e-10, lindep=1e-20).run()
+        self.assertTrue(all(td.converged))
+        self.assertGreater(sum(float(cp.linalg.norm(y)) for _, y in td.xy), 1e-8)
+        batch = td.nac_gradient_method().set(cphf_conv_tol=1e-10)
+        result = batch.kernel(states=(0, 1, 2), target_state=1, grad_state=1)
+        self.assertEqual(set(result), {(0, 1), (1, 2)})
+        for pair, values in result.items():
+            direct = td.nac_method().set(cphf_conv_tol=1e-10).kernel(states=pair)
+            for name, expected in zip(('de', 'de_scaled', 'de_etf', 'de_etf_scaled'), direct):
+                np.testing.assert_allclose(values[name], expected, atol=1e-6, rtol=0)
+        if CPU_GRADIENT_REFERENCE:
+            cpu_td = self.cpu.TDHF().set(nstates=2, conv_tol=1e-10).run()
+            self.assertTrue(all(cpu_td.converged))
+            np.testing.assert_allclose(cpu_td.e, cp.asnumpy(td.e), atol=1e-8, rtol=0)
+            reference = cpu_td.nuc_grad_method().kernel(state=1)
+            np.testing.assert_allclose(batch.grad_result, reference, atol=1e-6, rtol=0)
+
+    def test_z_vector_reuse(self):
+        batch = self.td.nac_gradient_method().set(cphf_conv_tol=1e-10)
+        with mock.patch.object(tdrhf_grad_nacv, '_solve_zvector',
+                               wraps=tdrhf_grad_nacv._solve_zvector) as solve:
+            first = batch.kernel(states=(0, 1, 2), grad_state=1)
+            repeated = batch.kernel()
+            # Retain the excited-only, no-gradient batch path from the costly tests.
+            batch.grad_state = None
+            changed = batch.kernel(states=(1, 2))
+        self.assertEqual(solve.call_count, 3)
+        self.assertIsNone(solve.call_args_list[0].kwargs['z0'])
+        self.assertIsNotNone(solve.call_args_list[1].kwargs['z0'])
+        self.assertIsNone(solve.call_args_list[2].kwargs['z0'])
+        self.assertEqual(set(changed), {(1, 2)})
+        for pair, values in first.items():
+            for name, value in values.items():
+                np.testing.assert_allclose(repeated[pair][name], value, atol=1e-5, rtol=0)
+        direct = self.td.nac_method().set(cphf_conv_tol=1e-10).kernel(states=(1, 2))
+        for name, reference in zip(('de', 'de_scaled', 'de_etf', 'de_etf_scaled'), direct):
+            np.testing.assert_allclose(changed[(1, 2)][name], reference, atol=1e-6, rtol=0)
+
+    @unittest.skipUnless(CPU_GRADIENT_REFERENCE, 'CPU gradient comparison requires PySCF >= 2.14')
+    def test_cpu_excited_gradient(self):
+        batch = self.td.nac_gradient_method().set(cphf_conv_tol=1e-10)
+        batch.kernel(states=(0, 1, 2), grad_state=1)
+        cpu_td = self.cpu.TDA().set(nstates=2, conv_tol=1e-10).run()
+        self.assertTrue(all(cpu_td.converged))
+        np.testing.assert_allclose(cpu_td.e, cp.asnumpy(self.td.e), atol=1e-8, rtol=0)
+        reference = cpu_td.nuc_grad_method().kernel(state=1)
+        np.testing.assert_allclose(batch.grad_result, reference, atol=1e-6, rtol=0)
 
 
 if __name__ == "__main__":

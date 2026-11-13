@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"
@@ -297,10 +295,10 @@ extern "C" {
 int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
                   double omega, double lr_factor, double sr_factor, int shm_size,
                   int nbatches_shl_pair, int *shl_pair_offsets,
-                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    e_int2c2e_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    e_int2c2e_ip2_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             out, dm, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();

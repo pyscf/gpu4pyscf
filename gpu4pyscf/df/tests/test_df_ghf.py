@@ -74,6 +74,75 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_gpu - e_cpu) < 1e-5
 
 
+class SmallBatchedSpinDensity(unittest.TestCase):
+    """The shared GHF adapter must retain each density's four spin blocks."""
+
+    @classmethod
+    def setUpClass(cls):
+        from scipy.linalg import eigh
+        cls.mol = pyscf.M(atom='H 0 0 0; H .2 .1 .8', basis='6-31g', verbose=0)
+        cpu = cpu_scf.RHF(cls.mol)
+        overlap = cpu.get_ovlp()
+        _, coeff = eigh(cpu.get_hcore(), overlap)
+        n = cls.mol.nao
+        densities = []
+        for theta, phi in ((.28, .63), (.8, .37)):
+            occupied = np.zeros((2*n, 2))
+            occupied[:n, 0] = np.cos(theta)*coeff[:, 0]
+            occupied[n:, 0] = np.sin(theta)*coeff[:, 1]
+            occupied[:n, 1] = -np.sin(phi)*coeff[:, 2]
+            occupied[n:, 1] = np.cos(phi)*coeff[:, 3]
+            dm = occupied @ occupied.T
+            spin_overlap = np.kron(np.eye(2), overlap)
+            np.testing.assert_allclose(dm @ spin_overlap @ dm, dm, atol=1e-12, rtol=0)
+            np.testing.assert_allclose(np.trace(dm @ spin_overlap), 2, atol=1e-12, rtol=0)
+            assert np.linalg.norm(dm[:n, n:]) > .1
+            densities.append(dm)
+        cls.densities = np.stack(densities)
+        assert np.linalg.norm(cls.densities[0]-cls.densities[1]) > .1
+
+    def _check_batch(self, strategy):
+        n = self.mol.nao
+        for complex_dm in (False, True):
+            with self.subTest(strategy=strategy, complex_dm=complex_dm):
+                cpu = cpu_scf.GHF(self.mol)
+                gpu = gpu_scf.GHF(self.mol)
+                kwargs = dict(auxbasis='weigend', only_dfj=(strategy == 'dfj'))
+                cpu = cpu.density_fit(**kwargs)
+                gpu = gpu.density_fit(**kwargs)
+                dm = self.densities.copy()
+                if complex_dm:
+                    phase = np.diag(np.r_[np.ones(n), np.full(n, np.exp(.37j))])
+                    dm = phase @ dm @ phase.conj().T
+                # Evaluate independent CPU references one density at a time;
+                # a shared batch-assembly mistake cannot cancel in this oracle.
+                pairs = [cpu.get_jk(dm=d, hermi=1) for d in dm]
+                reference_j = np.stack([p[0] for p in pairs])
+                reference_k = np.stack([p[1] for p in pairs])
+                gpu_dm = cupy.asarray(dm)
+                j, k = gpu.get_jk(dm=gpu_dm, hermi=1)
+                self.assertEqual(j.shape, dm.shape)
+                self.assertEqual(k.shape, dm.shape)
+                np.testing.assert_allclose(j.get(), reference_j, atol=1e-10, rtol=0)
+                np.testing.assert_allclose(k.get(), reference_k, atol=1e-10, rtol=0)
+                reversed_j, reversed_k = gpu.get_jk(dm=gpu_dm[::-1].copy(), hermi=1)
+                np.testing.assert_allclose(reversed_j.get(), reference_j[::-1], atol=1e-10, rtol=0)
+                np.testing.assert_allclose(reversed_k.get(), reference_k[::-1], atol=1e-10, rtol=0)
+                j_only, unused = gpu.get_jk(dm=gpu_dm, hermi=1, with_k=False)
+                assert unused is None
+                unused, k_only = gpu.get_jk(dm=gpu_dm, hermi=1, with_j=False)
+                assert unused is None
+                np.testing.assert_allclose(j_only.get(), reference_j, atol=1e-10, rtol=0)
+                np.testing.assert_allclose(k_only.get(), reference_k, atol=1e-10, rtol=0)
+                np.testing.assert_array_equal(gpu_dm.get(), dm)
+
+    def test_df_jk_batch(self):
+        self._check_batch('df')
+
+    def test_df_j_exact_k_batch(self):
+        self._check_batch('dfj')
+
+
 if __name__ == "__main__":
     print("Full Tests for Generalized Hartree-Fock")
     unittest.main()

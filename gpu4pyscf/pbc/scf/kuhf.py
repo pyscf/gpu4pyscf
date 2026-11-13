@@ -138,8 +138,8 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     fermi_a = mo_energy_a[nocc_a-1]
     mo_occ_kpts = cp.zeros_like(mo_energy_kpts)
     mo_occ_kpts[0] = (mo_energy_kpts[0] <= fermi_a).astype(np.float64)
+    mo_energy_b = cp.sort(mo_energy_kpts[1].ravel())
     if nocc_b > 0:
-        mo_energy_b = cp.sort(mo_energy_kpts[1].ravel())
         fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 

@@ -38,10 +38,10 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
     if decompose_j2c.upper() == 'CD':
         try:
             j2c = cholesky(int2c)
-            def j2c_solver(b):
+            def j2c_solver(b, overwrite=False):
                 b_ = b.reshape(j2c.shape[0], -1)
-                y = solve_triangular(j2c, b_, lower=True, overwrite_b=False)
-                x = solve_triangular(j2c.conj().T, y, lower=False, overwrite_b=False)
+                y = solve_triangular(j2c, b_, lower=True, overwrite_b=overwrite)
+                x = solve_triangular(j2c.conj().T, y, lower=False, overwrite_b=overwrite)
                 return cp.asarray(x.reshape(b.shape), order='A')
             return j2c_solver
         except RuntimeError:
@@ -51,10 +51,12 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
     mask = w > lindep
     inv_w = 1 / w[mask]
     v1 = v[:,mask]
-    def j2c_solver(b): # noqa: F811
-        x = v1.conj().T @ b.reshape(int2c.shape[0],-1)
-        x = x * inv_w[:,None]
-        x = v1 @ x
+    def j2c_solver(b, overwrite=False): # noqa: F811
+        b_2d = b.reshape(int2c.shape[0],-1)
+        x = v1.conj().T @ b_2d
+        x *= inv_w[:,None]
+        out = b_2d if overwrite else None
+        x = cp.matmul(v1, x, out=out)
         return x.reshape(b.shape)
     return j2c_solver
 
@@ -132,12 +134,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
     if mol.omega <= 0 and not auxmol.mol.cart:
-        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'CD')(aux_coeff.T))
+        metric_solve = _gen_metric_solver(j2c, 'CD')
     else:
-        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
-    j2c = aux_coeff = None
-    dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
-    metric = j3c_oo = None
+        metric_solve = _gen_metric_solver(j2c, 'ED')
+    j2c = None
+
+    dm_oo = j3c_oo
+    j3c_oo = j3c_oo.reshape(naux, nocc**2)
+    pair_blksize = min(nocc**2, int(mem_avail*.4/(naux*4*8)))
+    assert pair_blksize > 0
+    buf = cp.empty((aux_coeff.shape[1], pair_blksize), order='F')
+    for p0, p1 in lib.prange(0, nocc**2, pair_blksize):
+        tmp = buf[:,:p1-p0]
+        contract('uv,up->vp', aux_coeff, j3c_oo[:,p0:p1], out=tmp)
+        tmp = metric_solve(tmp, overwrite=True)
+        contract('uv,vp->up', aux_coeff, tmp, out=j3c_oo[:,p0:p1])
+    metric_solve = j3c_oo = aux_coeff = buf = tmp = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
 
@@ -222,7 +234,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
             ctypes.c_int(nao), ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     buf = buf1 = buf2 = compressed = dm_tensor = dm_tensor1 = tmp = None
@@ -322,7 +335,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         lib.c_null_ptr(),
         ctypes.c_int(0),
         ctypes.c_int(0), ctypes.c_int(0),
-        ctypes.c_int(naux), ctypes.c_int(mol.natm))
+        ctypes.c_int(naux), ctypes.c_int(mol.natm),
+        ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     ej *= 2

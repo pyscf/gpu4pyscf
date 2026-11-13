@@ -220,15 +220,7 @@ def _ncol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
 # * Mcfun requires functional derivatives to total-density and spin-density.
 # * Make it a global function than a closure so as to be callable by multiprocessing
 def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
-    t, s = rho
-    if not isinstance(t, cp.ndarray):
-        t = cp.asarray(t)
-    if not isinstance(s, cp.ndarray):
-        s = cp.asarray(s)
-    rho = cp.stack([(t + s) * .5, (t - s) * .5])
-    spin = 1
-    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
-    evfk = list(evfk)
+    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype)
     for order in range(1, deriv+1):
         if evfk[order] is not None:
             evfk[order] = xc_deriv.ud2ts(evfk[order])
@@ -242,9 +234,7 @@ def mcfun_eval_xc_adapter(ni, xc_code):
     def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None,
                     verbose=None, spin=None):
         return mcfun_gpu.eval_xc_eff(
-            fn_eval_xc, rho, deriv, spin_samples=ni.spin_samples,
-            collinear_threshold=ni.collinear_thrd,
-            collinear_samples=ni.collinear_samples)
+            fn_eval_xc, rho, deriv, spin_samples=ni.spin_samples)
     return eval_xc_eff
 
 def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, assemble_spin_components=False):
@@ -449,7 +439,7 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
 
 class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     '''Numerical integration methods for 2-component basis (used by GKS)'''
-    _keys = {'gdftopt', 'collinear', 'spin_samples', 'collinear_thrd', 'collinear_samples'}
+    _keys = {'gdftopt', 'collinear', 'spin_samples'}
     to_gpu = utils.to_gpu
     device = utils.device
 
@@ -461,8 +451,6 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     #   'mcol' (multi-collinear)
     collinear = getattr(__config__, 'dft_numint_RnumInt_collinear', 'col')
     spin_samples = getattr(__config__, 'dft_numint_RnumInt_spin_samples', 770)
-    collinear_thrd = getattr(__config__, 'dft_numint_RnumInt_collinear_thrd', 0.99)
-    collinear_samples = getattr(__config__, 'dft_numint_RnumInt_collinear_samples', 200)
 
     eval_ao = staticmethod(numint.eval_ao)
     eval_rho = staticmethod(eval_rho)
@@ -517,29 +505,38 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     _gks_mcol_fxc = _gks_mcol_fxc
 
     @lib.with_doc(numint.nr_rks.__doc__)
-    def nr_vxc(self, mol, grids, xc_code, dms, relativity=0, hermi=1,
+    def nr_vxc(self, mol, grids, xc_code, dms, spin=0, relativity=0, hermi=1,
                max_memory=2000, verbose=None):
-        if not isinstance(dms, cp.ndarray):
-            dms = cp.asarray(dms)
-        if self.collinear[0] in ('m',):  # mcol or ncol
-            opt = getattr(self, 'gdftopt', None)
-            if opt is None:
-                self.build(mol, grids.coords)
-                opt = self.gdftopt
+        dms = cp.asarray(dms)
+        nao = dms.shape[-1] // 2
+        if self.gdftopt is None:
+            self.build(mol, grids.coords)
+        if self.collinear[0] == 'c':
+            # For real molecular AOs only the real diagonal spin blocks enter XC.
+            dm_a = dms[..., :nao, :nao].real
+            dm_b = dms[..., nao:, nao:].real
+            ni = self._to_numint1c()
+            n, exc, v = ni.nr_uks(mol, grids, xc_code, (dm_a, dm_b), relativity,
+                                  hermi, max_memory, verbose)
+            vmat = cp.zeros_like(dms)
+            vmat[..., :nao, :nao] = v[0]
+            vmat[..., nao:, nao:] = v[1]
+        elif self.collinear[0] == 'm':
             assert dms.ndim == 2
+            opt = self.gdftopt
             dms = opt.sort_orbitals(dms, axis=[0,1])
             n, exc, vmat = self._gks_mcol_vxc(mol, grids, xc_code, dms, relativity,
                                               hermi, max_memory, verbose)
             vmat = opt.unsort_orbitals(vmat, axis=[0,1])
         else:
-            raise NotImplementedError("Locally collinear and collinear is not implemented")
+            raise NotImplementedError(f'Unsupported collinear scheme {self.collinear}')
         return n.sum(), exc, vmat
     get_vxc = nr_gks_vxc = nr_vxc
 
     @lib.with_doc(numint.nr_nlc_vxc.__doc__)
     def nr_nlc_vxc(self, mol, grids, xc_code, dm, spin=0, relativity=0, hermi=1,
                    max_memory=2000, verbose=None):
-        raise NotImplementedError('non-collinear nlc vxc')
+        raise NotImplementedError('GPU GKS does not support NLC')
 
     @lib.with_doc(numint.nr_rks_fxc.__doc__)
     def nr_fxc(self, mol, grids, xc_code, dm0, dms, spin=0, relativity=0, hermi=0,
@@ -547,11 +544,27 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
         raise NotImplementedError('non-collinear fxc')
     get_fxc = nr_gks_fxc = nr_fxc
     
-    def _init_xcfuns(self, xc_code, spin=0, omega=None):
-        if omega is None:
-            omega = self.omega
-        return numint._init_xcfuns(xc_code, spin, omega)
-    eval_xc_eff = numint.eval_xc_eff
+    def eval_xc_eff(self, xc_code, rho, deriv=1, omega=None, xctype=None,
+                    verbose=None, spin=None, work=None):
+        """Evaluate the collinear functional on the spin channels used by NumInt2C."""
+        rho = cp.asarray(rho)
+        if self.collinear[0] == 'm':
+            t, s = rho  # MCfun already projected the magnetization
+        elif self.collinear[0] == 'c':
+            t, s = rho[0], rho[3]
+        elif self.collinear[0] == 'n':
+            t, s = rho[0], cp.linalg.norm(rho[1:4], axis=0)
+        else:
+            raise RuntimeError(f'Unknown collinear scheme {self.collinear}')
+        assert spin is None or spin == 1
+        if xctype is None:
+            xctype = self._xc_type(xc_code)
+        rho = cp.stack(((t + s) * .5, (t - s) * .5))
+        if xctype == 'MGGA' and rho.shape[1] == 6:
+            rho = rho[:, [0, 1, 2, 3, 5]]
+        return self._to_numint1c().eval_xc_eff(xc_code, rho, deriv, omega=omega,
+                                               xctype=xctype, spin=1, work=work)
+
     mcfun_eval_xc_adapter = mcfun_eval_xc_adapter
 
     block_loop = numint.NumInt.block_loop
@@ -559,13 +572,18 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
 
     def _to_numint1c(self):
         '''Converts to the associated class to handle collinear systems'''
-        return self.view(numint.NumInt)
-    
+        ni = self.view(numint.NumInt)
+        if ni.gdftopt is not None:
+            ni.gdftopt = lib.view(ni.gdftopt, numint._GDFTOpt)
+        return ni
+
     def to_cpu(self):
         ni = numint2c.NumInt2C()
         ni.omega = self.omega
+        ni.collinear = self.collinear
+        ni.spin_samples = self.spin_samples
         return ni
-    
+
 
 class _GDFTOpt2C(numint._GDFTOpt):
 

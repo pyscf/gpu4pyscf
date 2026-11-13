@@ -277,14 +277,14 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_d_s(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         D_ptr, S_ptr,
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
         ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
         ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n)
+        ctypes.c_int(n),
+        ctypes.cast(stream.ptr, ctypes.c_void_p)
     )
     if err != 0:
         raise RuntimeError('Failed in generating PCM D and S matrices.')
@@ -310,13 +310,13 @@ def left_multiply_S(surface, right_vector, transpose = None, stream = None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_left_multiply_s(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(S_dot_v.data.ptr, ctypes.c_void_p),
         ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
         ctypes.cast(S_diag.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('Failed in pcm_left_multiply_s')
@@ -370,7 +370,6 @@ def left_multiply_D(surface, right_vector, transpose = False, stream = None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_left_multiply_d(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(D_dot_v.data.ptr, ctypes.c_void_p),
         ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
@@ -379,6 +378,7 @@ def left_multiply_D(surface, right_vector, transpose = False, stream = None):
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_bool(transpose),
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('Failed in pcm_left_multiply_d')

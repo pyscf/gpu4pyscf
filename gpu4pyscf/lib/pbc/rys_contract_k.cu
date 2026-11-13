@@ -18,10 +18,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
+#include "gvhf-rys/gxyz_offset.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -327,47 +326,6 @@ while (1) {
 }
 }
 
-// Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
-// at (4,4,4,4), and the launcher copies it out in chunks of 256.
-void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
-{
-/*
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    nfl = (ll + 1) * (ll + 2) // 2
-    ioff = np.arange(0, nfi, 3, dtype=np.int8)
-    joff = np.arange(0, nfj, 3, dtype=np.int8)
-    koff = np.arange(0, nfk, 3, dtype=np.int8)
-    loff = np.arange(0, nfl, 3, dtype=np.int8)
-    gxyz_offset = lib.cartesian_prod([ioff, joff, koff, loff])
-    copy = 256 // len(gxyz_offset) + 1
-    return cp.vstack([cp.asarray(gxyz_offset)]*copy, dtype=np.int8)
-*/
-    int nfi = bounds.nfi;
-    int nfj = bounds.nfj;
-    int nfk = bounds.nfk;
-    int nfl = bounds.nfl;
-    int nf = 0;
-    for (int i = 0; i < nfi; i += 3) {
-    for (int j = 0; j < nfj; j += 3) {
-    for (int k = 0; k < nfk; k += 3) {
-    for (int l = 0; l < nfl; l += 3) {
-        gxyz_offset[nf].ioff = i;
-        gxyz_offset[nf].joff = j;
-        gxyz_offset[nf].koff = k;
-        gxyz_offset[nf].loff = l;
-        ++nf;
-    } } } }
-    // n+m must be clamped too: nf need not divide 256, so the last round
-    // would otherwise write past entry 255.
-    for (int n = nf; n < 256; n += nf) {
-        for (int m = 0; m < nf && n+m < 256; ++m) {
-            gxyz_offset[n+m] = gxyz_offset[m];
-        }
-    }
-}
-
 void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                           int shm_size, int gout_stride_max)
 {
@@ -437,7 +395,7 @@ extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bo
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    float dm_penalty, int64_t *pool, int *head, int workers);
+                    float dm_penalty, int64_t *pool, int *head, int workers, cudaStream_t stream);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -447,7 +405,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                int64_t *pool, int nbas_cell0, int *bas, double omega)
+                int64_t *pool, int nbas_cell0, int *bas, double omega, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -490,14 +448,13 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int)*3);
+    cudaMemsetAsync(head, 0, sizeof(int)*3, stream);
 
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
-                           diffuse_exps, dm_penalty, pool, head, workers)) {
-        GXYZOffset gxyz_offset[256*3];
-        RYS_make_gxyz_offset(gxyz_offset, bounds);
+                           diffuse_exps, dm_penalty, pool, head, workers, stream)) {
+        const GXYZOffset *gxyz_offset = RYS_get_gxyz_offset(li, lj, lk, ll);
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
@@ -506,9 +463,9 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
         auto launch = [&](auto offset, int tile_chunk) {
             checkCudaErrors(
-                cudaMemcpyToSymbol(c_gxyz_offset, gxyz_offset+offset,
+                cudaMemcpyToSymbolAsync(c_gxyz_offset, gxyz_offset+offset,
                                    tile_chunk*sizeof(GXYZOffset),
-                                   0, cudaMemcpyHostToDevice));
+                                   0, cudaMemcpyHostToDevice, stream));
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
@@ -523,7 +480,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             }
             dim3 threads(scheme[0], scheme[1]);
             int reserved_shm_size = scheme[3];
-            rys_k_kernel<<<workers, threads, buflen>>>(
+            rys_k_kernel<<<workers, threads, buflen, stream>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,

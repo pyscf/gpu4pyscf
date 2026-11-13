@@ -232,7 +232,8 @@ class Int2c2eOpt:
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('fill_int2c2e failed')
 
@@ -278,7 +279,8 @@ class Int2c2eOpt:
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('fill_int2c2e_ip1 failed')
         # anti-symmetric
@@ -338,7 +340,8 @@ class Int2c2eOpt:
             ctypes.c_int(nbatches_shl_pair),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
         if err != 0:
             raise RuntimeError('int2c2e_deriv failed')
         return grad_sigma

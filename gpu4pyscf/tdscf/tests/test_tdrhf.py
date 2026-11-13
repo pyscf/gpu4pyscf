@@ -180,6 +180,85 @@ class KnownValues(unittest.TestCase):
         td_scan(mol)
         self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
 
+
+class RHFRestart(unittest.TestCase):
+    def test_rhf_lazy_scf_restart_and_transition_density(self):
+        for method in ['TDA', 'TDHF']:
+            with self.subTest(method=method):
+                mol = gto.M(atom='O 0 0 0; H 0 -.757 .587; H 0 .721 .633',
+                            basis='sto-3g', verbose=0)
+                mf = mol.RHF().to_gpu()
+                mf.conv_tol = 1e-12
+                assert mf.mo_energy is None
+                td = getattr(mf, method)().set(nstates=2, conv_tol=1e-10, lindep=1e-24)
+                td.kernel()
+                assert mf.converged and np.all(td.converged)
+                a, b = td.get_ab()
+                size = a.shape[0]*a.shape[1]
+                a, b = a.reshape(size, size), b.reshape(size, size)
+                dense = a if method == 'TDA' else np.block([[a, b], [-b, -a]])
+                expected = np.sort(np.linalg.eigvals(dense).real)
+                expected = expected[expected > td.positive_eig_threshold][:2]
+                np.testing.assert_allclose(cp.asnumpy(td.e), expected, atol=1e-10, rtol=0)
+
+                # Loading genuine orbitals from host storage must not change the response.
+                host_mf = mf.copy()
+                for name in ('mo_coeff', 'mo_energy', 'mo_occ'):
+                    setattr(host_mf, name, cp.asnumpy(getattr(mf, name)))
+                host_td = getattr(host_mf, method)()
+                vind, _ = host_td.gen_vind()
+                np.testing.assert_allclose(vind(cp.eye(len(dense))).get(), dense.T,
+                                           atol=1e-10, rtol=1e-10)
+
+                # Reuse the public list-of-(X,Y) state, rather than replacing the solver.
+                reference_e = cp.asnumpy(td.e).copy()
+                td.max_cycle = 1
+                td.kernel()
+                assert np.all(td.converged)
+                np.testing.assert_allclose(cp.asnumpy(td.e), reference_e, atol=1e-10, rtol=0)
+                co = mf.mo_coeff[:, mf.mo_occ == 2].get()
+                cv = mf.mo_coeff[:, mf.mo_occ == 0].get()
+                r = mol.intor('int1e_r', comp=3)
+                dipoles = []
+                for energy, (x, y) in zip(cp.asnumpy(td.e), td.xy):
+                    x = cp.asnumpy(x)
+                    y = cp.asnumpy(y) if isinstance(y, (np.ndarray, cp.ndarray)) else np.zeros_like(x)
+                    vector = x.ravel() if method == 'TDA' else np.r_[x.ravel(), y.ravel()]
+                    assert np.linalg.norm(dense @ vector - energy*vector) < 1e-10
+                    density = 2*(co @ x @ cv.T + cv @ y.T @ co.T)
+                    dipoles.append(np.einsum('kpq,pq->k', r, density))
+                dipoles = np.asarray(dipoles)
+                np.testing.assert_allclose(td.transition_dipole(), dipoles, atol=1e-11)
+                oscillator = (2/3)*cp.asnumpy(td.e)*np.sum(dipoles**2, axis=1)
+                np.testing.assert_allclose(td.oscillator_strength(), oscillator, atol=1e-12)
+                np.testing.assert_allclose(td.transition_dipole(), td.to_cpu().transition_dipole(), atol=1e-11)
+
+                x = td.xy[0][0].get().copy()
+                weights, nto = td.get_nto(state=1, verbose=0)
+                singular = np.linalg.svd(x/np.linalg.norm(x), compute_uv=False)
+                np.testing.assert_allclose(weights, singular**2, atol=1e-11)
+                np.testing.assert_allclose(nto.T @ mf.get_ovlp().get() @ nto, np.eye(mol.nao), atol=1e-10)
+                np.testing.assert_allclose(td.xy[0][0].get(), x, atol=0, rtol=0)
+
+    def test_rhf_scanner_geometry_and_changed_basis(self):
+        mol = gto.M(atom='H 0 0 0; H 0 0 .75', basis='sto-3g', verbose=0)
+        mf = mol.RHF().to_gpu().run(conv_tol=1e-12)
+        td = mf.TDA().set(nstates=1, conv_tol=1e-10, lindep=1e-24).run()
+        scanner = td.as_scanner()
+        assert scanner.as_scanner() is scanner
+        coords = mol.atom_coords(unit='Angstrom')
+        coords[1, 2] += .03
+        scanned = scanner(coords)
+        fresh = scanner._scf.TDA().set(nstates=1, conv_tol=1e-10, lindep=1e-24).run()
+        np.testing.assert_allclose(scanned, fresh.e_tot, atol=1e-10, rtol=0)
+        larger = scanner.mol.copy().build(basis='6-31g')
+        scanned = scanner(larger)
+        fresh = scanner._scf.TDA().set(nstates=1, conv_tol=1e-10, lindep=1e-24).run()
+        assert np.all(scanner.converged)
+        assert scanner.xy[0][0].shape == (1, larger.nao-1)
+        np.testing.assert_allclose(scanned, fresh.e_tot, atol=1e-10, rtol=0)
+
+
 if __name__ == "__main__":
     print("Full Tests for rhf-TDA and rhf-TDHF")
     unittest.main()

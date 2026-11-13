@@ -18,8 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
@@ -372,7 +370,7 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
                      uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                      float *q_cond_ij, float *q_cond_kl,
                      int *ij_pair_loc, int *kl_pair_loc,
-                     float cutoff, uint32_t *pool, int *bas)
+                     float cutoff, uint32_t *pool, int *bas, cudaStream_t stream)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -414,7 +412,7 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
 
     int nf = nfi * nfj * nfk * nfl;
     int scheme[4];
@@ -430,7 +428,7 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
         return 1;
     }
 
-    int4c2e_kernel<<<workers, threads, buflen>>>(
+    int4c2e_kernel<<<workers, threads, buflen, stream>>>(
         out, *envs, bounds, q_cond_ij, q_cond_kl, ij_pair_loc, kl_pair_loc,
         pool, head, nf, nao_pairs, reserved_shm_size, omega, lr_factor, sr_factor);
 

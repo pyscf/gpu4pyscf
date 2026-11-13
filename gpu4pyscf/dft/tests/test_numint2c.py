@@ -18,7 +18,6 @@ import pyscf
 import cupy
 from pyscf import lib, scf
 from pyscf.dft.numint2c import NumInt2C as pyscf_numint2c
-from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft import Grids
 from gpu4pyscf.dft import numint2c
 from gpu4pyscf.dft import numint
@@ -331,6 +330,74 @@ class KnownValues(unittest.TestCase):
             
             # CPU vs GPU check
             self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
+
+
+class MultiCollinearResponse(unittest.TestCase):
+    direction = np.array([2., -1., 2.]) / 3
+
+    @staticmethod
+    def _adapter(xc, cpu=False):
+        ni = pyscf_numint2c() if cpu else NumInt2C()
+        ni.collinear = 'mcol'
+        ni.spin_samples = 86
+        return ni.mcfun_eval_xc_adapter(xc)
+
+    @classmethod
+    def _density(cls, xc):
+        nvar = 1 if xc == 'LDA,VWN' else 4
+        total = np.array([[1.1, .8], [.08, .04], [-.05, -.03], [.02, -.01]])[:nvar]
+        spin = np.array([[1.1, .8], [.04, .02], [-.03, -.01], [.01, -.006]])[:nvar]
+        spin[0] *= .3
+        rho = np.concatenate([total[None], cls.direction[:, None, None] * spin[None]])
+        if nvar > 1:
+            rho[1:, 1:] += np.random.default_rng(17).normal(scale=.005, size=(3, 3, 2))
+        return rho
+
+    @staticmethod
+    def _evaluate(adapter, xc, rho, deriv):
+        return [cupy.asnumpy(a) for a in adapter(xc, cupy.asarray(rho), deriv=deriv)]
+
+    def _check_spin_derivatives_match_mcfun(self, xc):
+        if mcfun is None:
+            self.skipTest('mcfun library not found.')
+        rho = self._density(xc)
+        gpu, cpu = self._adapter(xc), self._adapter(xc, cpu=True)
+        for deriv in range(3):
+            with self.subTest(xc=xc, deriv=deriv):
+                actual = self._evaluate(gpu, xc, rho, deriv)
+                expected = cpu(xc, rho, deriv=deriv)
+                self.assertEqual(len(actual), deriv + 1)
+                for a, b in zip(actual, expected):
+                    np.testing.assert_allclose(a, b, atol=2e-11, rtol=2e-11)
+
+    def test_mcfun_spin_lda(self):
+        self._check_spin_derivatives_match_mcfun('LDA,VWN')
+
+    def test_mcfun_spin_gga(self):
+        self._check_spin_derivatives_match_mcfun('PBE')
+
+    def _check_spin_rotation_covariance(self, xc):
+        axis = np.array([1., 2., -1.]) / np.sqrt(6)
+        skew = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]],
+                         [-axis[1], axis[0], 0]])
+        rotation = np.eye(3) + np.sin(.37)*skew + (1-np.cos(.37))*(skew @ skew)
+        transform = np.eye(4)
+        transform[1:, 1:] = rotation
+        adapter = self._adapter(xc)
+        rho = self._density(xc)
+        values = self._evaluate(adapter, xc, rho, 2)
+        rotated = np.einsum('ab,bxg->axg', transform, rho)
+        actual = self._evaluate(adapter, xc, rotated, 2)
+        expected = [values[0], np.einsum('ab,bxg->axg', transform, values[1]),
+                    np.einsum('ab,bxcyg,dc->axdyg', transform, values[2], transform)]
+        for a, b in zip(actual, expected):
+            np.testing.assert_allclose(a, b, atol=2e-9, rtol=2e-9)
+
+    def test_spin_rotation_covariance_lda(self):
+        self._check_spin_rotation_covariance('LDA,VWN')
+
+    def test_spin_rotation_covariance_gga(self):
+        self._check_spin_rotation_covariance('PBE')
 
 
 if __name__ == "__main__":

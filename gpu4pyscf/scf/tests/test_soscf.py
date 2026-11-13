@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import unittest
+import scipy.linalg
+import numpy as np
 import cupy as cp
 from pyscf import gto
 from gpu4pyscf import scf
@@ -220,6 +222,62 @@ class KnownValues(unittest.TestCase):
         mf_ref = scf.UHF(h2o_z0).density_fit().run()
         mf = scf.UHF(h2o_z0).density_fit().newton().density_fit(auxbasis=[[0, [1., 1.]]]).run()
         self.assertAlmostEqual(mf_ref.e_tot, mf.e_tot, 8)
+
+
+
+class SmallNewtonContracts(unittest.TestCase):
+    def _check_accumulated_complex_rotations(self, unrestricted):
+        mol = gto.M(atom='Li 0 0 0; H 0 0 1.6', basis='sto-3g', verbose=0)
+        reference = mol.RHF().run(conv_tol=1e-12)
+        base = scf.UHF(mol) if unrestricted else scf.RHF(mol)
+        obj = base.newton()
+        coeff = cp.asarray(reference.mo_coeff)
+        occ = cp.asarray(reference.mo_occ)
+        if unrestricted:
+            coeff = cp.stack([coeff, coeff])
+            occ = cp.stack([occ*.5, occ*.5])
+        occupation = occ[0] if unrestricted else occ
+        mask = (occupation[:, None] == 0) & (occupation[None, :] > 0)
+        nvar = int(mask.sum())
+        dx = cp.linspace(.002, .009, nvar) * (1+.3j)
+        dx = cp.concatenate([dx, -.7*dx]) if unrestricted else dx
+        first = obj.update_rotate_matrix(dx, occ)
+        actual = obj.update_rotate_matrix(-.4*dx, occ, u0=first)
+        for spin in range(2 if unrestricted else 1):
+            step = dx[spin*nvar:(spin+1)*nvar] if unrestricted else dx
+            generator = np.zeros((mol.nao, mol.nao), dtype=complex)
+            generator[mask.get()] = step.get()
+            generator -= generator.conj().T
+            expected = scipy.linalg.expm(generator) @ scipy.linalg.expm(-.4*generator)
+            rotation = actual[spin].get() if unrestricted else actual.get()
+            np.testing.assert_allclose(rotation, expected, atol=1e-13)
+            np.testing.assert_allclose(rotation.conj().T @ rotation, np.eye(mol.nao), atol=1e-13)
+        moved = obj.rotate_mo(coeff, actual)
+        s = mol.intor('int1e_ovlp')
+        for c in (moved if unrestricted else [moved]):
+            np.testing.assert_allclose(c.get().conj().T @ s @ c.get(), np.eye(mol.nao), atol=1e-12)
+
+    def test_accumulated_complex_rotations_restricted(self):
+        self._check_accumulated_complex_rotations(False)
+
+    def test_accumulated_complex_rotations_unrestricted(self):
+        self._check_accumulated_complex_rotations(True)
+
+    def test_uhf_newton_restricted_initial_orbitals(self):
+        mol = gto.M(atom='Li 0 0 0', basis='sto-3g', spin=1, verbose=0)
+        initial = mol.ROHF().run(conv_tol=1e-12)
+        expected = mol.UHF().run(conv_tol=1e-12)
+        obj = scf.UHF(mol).newton()
+        obj.conv_tol = 1e-11
+        obj.max_cycle = 20
+        value = obj.kernel(cp.asarray(initial.mo_coeff), cp.asarray(initial.mo_occ))
+        assert obj.converged
+        np.testing.assert_allclose(value, expected.e_tot, atol=1e-10)
+        np.testing.assert_array_equal(obj.mo_occ.sum(axis=1).get(), mol.nelec)
+        cpu = obj.to_cpu()
+        np.testing.assert_allclose(cpu.make_rdm1(), obj.make_rdm1().get(), atol=1e-12)
+        np.testing.assert_allclose(cpu.energy_tot(), obj.e_tot, atol=1e-10)
+
 
 if __name__ == "__main__":
     print("Full Tests for Newton solver")

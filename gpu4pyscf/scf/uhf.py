@@ -333,7 +333,6 @@ class UHF(hf.SCF):
     _finalize                = uhf_cpu.UHF._finalize
 
     # TODO: Enable followings after testing
-    stability               = NotImplemented
     mulliken_spin_pop       = NotImplemented
     mulliken_meta_spin      = NotImplemented
     det_ovlp                = NotImplemented
@@ -374,6 +373,7 @@ class UHF(hf.SCF):
 
     def init_guess_by_sap(self, mol=None, breaksym=None):
         if mol is None: mol = self.mol
+        assert breaksym is None
         sap_basis = process_sap_basis(self, mol, self.sap_basis)
 
         Vsap = make_sap(mol, sap_basis=sap_basis)
@@ -470,3 +470,7 @@ class UHF(hf.SCF):
         '''
         from gpu4pyscf import dft
         return self._transfer_attrs_(dft.UKS(self.mol, xc=xc))
+
+    def stability(self, internal=True, external=False, verbose=None, return_status=False, **kwargs):
+        from gpu4pyscf.scf.stability import uhf_stability
+        return uhf_stability(self, internal, external, verbose, return_status, **kwargs)

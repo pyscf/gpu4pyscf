@@ -498,13 +498,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
         b_a2b -= cp.einsum('ibja->iajb', eri_mo[:, nocc_a:, :nocc_b]) * hyb
 
     if isinstance(mf, scf.hf.KohnShamDFT):
-        from pyscf.dft import xc_deriv
-        from pyscf.dft import numint2c
-
-        ni0 = mf._numint
-        ni = numint2c.NumInt2C()
-        ni.collinear = 'mcol'
-        ni.collinear_samples = collinear_samples
+        ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.nlc or ni.libxc.is_nlc(mf.xc):
             logger.warn(
@@ -561,12 +555,12 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
             mem_now = lib.current_memory()[0]
             max_memory = max(2000, mf.max_memory * 0.8 - mem_now)
             # it should be optimized, which is the disadvantage of mc approach.
-            fxc = cache_xc_kernel_sf(ni0, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
+            fxc = cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
             p0, p1 = 0, 0  # the two parameters are used for counts the batch of grids.
-            opt = getattr(ni0, 'gdftopt', None)
+            opt = getattr(ni, 'gdftopt', None)
             if opt is None:
-                ni0.build(mol, mf.grids.coords)
-                opt = ni0.gdftopt
+                ni.build(mol, mf.grids.coords)
+                opt = ni.gdftopt
             _sorted_mol = opt._sorted_mol
             orbo_a = opt.sort_orbitals(orbo_a, axis=[0])
             orbv_a = opt.sort_orbitals(orbv_a, axis=[0])
@@ -574,7 +568,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
             orbv_b = opt.sort_orbitals(orbv_b, axis=[0])
             if xctype == 'LDA':
                 ao_deriv = 0
-                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
                     p1 += weight.shape[0]
                     wfxc = fxc[0, 0][..., p0:p1] * weight
@@ -604,7 +598,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
 
             elif xctype == 'GGA':
                 ao_deriv = 1
-                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
                     p1 += weight.shape[0]
                     wfxc = fxc[..., p0:p1] * weight
@@ -642,7 +636,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
 
             elif xctype == 'MGGA':
                 ao_deriv = 1
-                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
                     p1 += weight.shape[0]
                     wfxc = fxc[..., p0:p1] * weight
@@ -1209,18 +1203,25 @@ class SpinFlipTDA(TDBase):
                 float or ndarray
                 Oscillator strength(s) between the reference and target state(s).
         '''
+        assert 1 <= ref <= len(self.xy)
+        if np.isscalar(state) and state == ref:
+            raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
             states = np.atleast_1d(state)
         states = states[states != ref]
 
+        if states.size == 0:
+            return np.empty(0)
         trans_dip = self.transition_dipole(ref, states)
 
         ref -= 1
         states -= 1
         es = self.e[states] - self.e[ref]
-        f = (2./3.) * lib.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        f = (2./3.) * cp.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        f = f.get()  # cp.einsum always returns a device array (cupy uploads host
+        # operands); return host observables, as the CPU version does
         if isinstance(state, int):
             return f[0]
         else:
@@ -1231,11 +1232,16 @@ class SpinFlipTDA(TDBase):
         Transition dipole moments between excited states for Spin-flip TDDFT/TDA.
         Only applicable to length gauge.
         '''
+        assert 1 <= ref <= len(self.xy)
+        if np.isscalar(state) and state == ref:
+            raise ValueError('The target state must differ from the reference state')
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
             states = np.atleast_1d(state)
         states = states[states != ref]
+        if states.size == 0:
+            return np.empty((0, 3))
         ref -= 1
         states -= 1
 
@@ -1302,6 +1308,9 @@ class SpinFlipTDA(TDBase):
     def spin_square(self, state=None):
         r'''
         <S^2> of excited states for Spin-flip TDDFT/TDA.
+
+        state uses zero-based indices (unlike transition observables).
+        None selects all states.
         Ref: J. Chem. Phys. 2011, 134, 134101.
         '''
         mf = self._scf
@@ -1414,8 +1423,8 @@ class SpinFlipTDA(TDBase):
         '''
         log = logger.new_logger(self, verbose)
         mo_occ = (self._scf.mo_occ[0], self._scf.mo_occ[1])
-        nocc_a = np.count_nonzero(mo_occ[0] == 1)
-        nocc_b = np.count_nonzero(mo_occ[1] == 1)
+        nocc_a = int(cp.count_nonzero(mo_occ[0] == 1))
+        nocc_b = int(cp.count_nonzero(mo_occ[1] == 1))
 
         S2s = self.spin_square()
         for i in range(self.nstates):
@@ -1424,11 +1433,12 @@ class SpinFlipTDA(TDBase):
             e_ev = np.asarray(self.e[i]) * nist.HARTREE2EV
             log.note('Excited State %3d: %12.5f eV   <S^2>: %6.4f', i + 1, e_ev, S2)
             if log.verbose >= logger.INFO:
+                xw = abs(x).get() if isinstance(x, cp.ndarray) else abs(x)  # logging-only host copy
                 if self.extype == 0:
-                    for o, v in zip(*np.where(abs(x) > 0.1)):
+                    for o, v in zip(*np.where(xw > 0.1)):
                         log.info('    %4db -> %4da %12.5f', o + 1, v + 1 + nocc_a, x[o, v])
                 elif self.extype == 1:
-                    for o, v in zip(*np.where(abs(x) > 0.1)):
+                    for o, v in zip(*np.where(xw > 0.1)):
                         log.info('    %4da -> %4db %12.5f', o + 1, v + 1 + nocc_b, x[o, v])
 
 
@@ -1771,7 +1781,7 @@ class SpinFlipTDHF(TDBase):
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
             x0 = [(x.ravel(), y.ravel()) for x, y in x0]
-            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
+            x0 = cp.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         real_system = mf.mo_coeff[0].dtype == np.float64 or mf.mo_coeff[0].dtype == cp.float64
         pickeig = self.gen_pickeig(extype=self.extype, real=real_system)

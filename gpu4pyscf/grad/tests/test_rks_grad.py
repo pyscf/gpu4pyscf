@@ -16,7 +16,6 @@ import pyscf
 import numpy
 import cupy
 import unittest
-import pytest
 from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
 from gpu4pyscf.dft import gen_grid
@@ -333,6 +332,67 @@ class KnownValues(unittest.TestCase):
 
         assert numpy.abs(test_energy - ref_energy) < 1e-8
         assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 2e-7
+
+    def test_explicit_nlc_grids_response(self):
+        mol = pyscf.M(atom='O .1 .2 0; H .8 .1 .5; H -.5 .7 .6',
+                      basis='sto-3g', verbose=0)
+        mf_cpu = mol.RKS(xc='wb97m-v')
+        mf_cpu.grids.atom_grid = (20, 50)
+        mf_cpu.grids.prune = None
+        mf_cpu.nlcgrids.atom_grid = (10, 50)
+        mf_cpu.nlcgrids.prune = None
+        mf_cpu.small_rho_cutoff = 0
+        mf_cpu.conv_tol = 1e-12
+        mf_gpu = mf_cpu.to_gpu()
+        mf_cpu.kernel()
+        mf_gpu.kernel()
+        numpy.testing.assert_allclose(mf_gpu.e_tot, mf_cpu.e_tot, atol=1e-8, rtol=0)
+        default = mf_gpu.nuc_grad_method().set(grid_response=True).kernel()
+        gradient = mf_gpu.nuc_grad_method().set(grid_response=True)
+        gradient.grids = mf_gpu.grids.copy().reset()
+        gradient.nlcgrids = mf_gpu.nlcgrids.copy().reset()
+        actual = gradient.kernel()
+        numpy.testing.assert_allclose(actual, default, atol=1e-10, rtol=0)
+        reference = mf_cpu.nuc_grad_method().set(grid_response=True).kernel()
+        numpy.testing.assert_allclose(actual, reference, atol=1e-6, rtol=0)
+        numpy.testing.assert_allclose(actual.sum(axis=0), 0, atol=1e-7, rtol=0)
+
+    def test_explicit_nlc_grids_without_response(self):
+        mol = pyscf.M(atom='O .1 .2 0; H .8 .1 .5; H -.5 .7 .6',
+                      basis='sto-3g', verbose=0)
+        mf_cpu = mol.RKS(xc='wb97m-v')
+        mf_cpu.grids.atom_grid = (20, 50)
+        mf_cpu.grids.prune = None
+        mf_cpu.nlcgrids.atom_grid = (10, 50)
+        mf_cpu.nlcgrids.prune = None
+        mf_cpu.small_rho_cutoff = 0
+        mf_cpu.conv_tol = 1e-12
+        mf_gpu = mf_cpu.to_gpu()
+        mf_cpu.kernel()
+        mf_gpu.kernel()
+        numpy.testing.assert_allclose(mf_gpu.e_tot, mf_cpu.e_tot, atol=1e-8, rtol=0)
+        default = mf_gpu.nuc_grad_method().set(grid_response=False).kernel()
+        gradient = mf_gpu.nuc_grad_method().set(grid_response=False)
+        gradient.grids = mf_gpu.grids.copy().reset()
+        gradient.nlcgrids = mf_gpu.nlcgrids.copy().reset()
+        actual = gradient.kernel()
+        numpy.testing.assert_allclose(actual, default, atol=1e-10, rtol=0)
+        reference = mf_cpu.nuc_grad_method().set(grid_response=False).kernel()
+        numpy.testing.assert_allclose(actual, reference, atol=1e-6, rtol=0)
+
+    @unittest.skipIf(dftd3 is None or dftd4 is None, "requires the dftd3 and dftd4 libraries")
+    def test_dispersion_ghost_atoms(self):
+        mol = pyscf.M(atom='ghost-H 2 0 0; O 0 0 0; X-H 0 2 0; H 0 0 1; H 0 1 0', verbose=0)
+        real_mol = pyscf.M(atom='O 0 0 0; H 0 0 1; H 0 1 0', verbose=0)
+        mf = mol.RKS(xc='pbe').to_gpu()
+        real_mf = real_mol.RKS(xc='pbe').to_gpu()
+        atom_idx = [1,3,4]
+        for version in ['d3bj', 'd4']:
+            with self.subTest(version=version):
+                mf.disp = real_mf.disp = version
+                expected = numpy.zeros([5,3])
+                expected[atom_idx] = real_mf.nuc_grad_method().get_dispersion()
+                numpy.testing.assert_allclose(mf.nuc_grad_method().get_dispersion(), expected, atol=1e-12, rtol=0)
 
 
 if __name__ == "__main__":

@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
@@ -79,8 +77,8 @@ void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars e
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -242,10 +240,10 @@ extern "C" {
 int int2c2e_deriv(double *grad, double *sigma, double *dm, PBCIntEnvVars *envs,
                   double omega, double lr_factor, double sr_factor, int shm_size,
                   int nbatches_shl_pair, int *shl_pair_offsets,
-                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
+                  uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int2c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int2c2e_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int2c2e_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             grad, sigma, dm, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();

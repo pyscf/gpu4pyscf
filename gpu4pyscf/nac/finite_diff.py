@@ -165,15 +165,13 @@ def get_mf(mol, mf, s, mo_coeff):
     if isinstance(mf, dft.rks.RKS):
         mf_new = dft.RKS(mol)
         mf_new.xc = mf.xc
-        if len(mf.grids.atom_grid) > 0:
-            mf_new.grids.atom_grid = mf.grids.atom_grid
-        else:
-            mf_new.grids.level = mf.grids.level
+        mf_new.grids = mf.grids.copy().reset(mol)
     else:
         mf_new = scf.RHF(mol)
     if getattr(mf, 'with_df', None) is not None:
-        mf_new = mf_new.density_fit()
+        mf_new = mf_new.density_fit(auxbasis=mf.with_df.auxbasis)
     mf_new.conv_tol = mf.conv_tol
+    mf_new.conv_tol_grad = mf.conv_tol_grad
     mf_new.conv_tol_cpscf = mf.conv_tol_cpscf
     mf_new.max_cycle = mf.max_cycle
     mf_new.kernel()

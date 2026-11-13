@@ -16,8 +16,11 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import lib
 from pyscf.pbc import gto as pgto
+from pyscf.pbc import tools as pbc_tools
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import aft as aft_cpu, aft_jk as aft_jk_cpu
 from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
@@ -52,6 +55,199 @@ def tearDownModule():
     del cell, cell1, kpts
 
 class KnownValues(unittest.TestCase):
+    def setUp(self):
+        self.cell = pgto.M(
+            atom='C .2 .3 .4; H 1.4 1.2 1.6', unit='Bohr', spin=1,
+            a=np.diag([5., 5.5, 6.]), mesh=[15, 17, 19],
+            basis={'C': [[0, [.9, 1.]], [1, [.5, 1.]]],
+                   'H': [[0, [.6, 1.]]]}, pseudo='gth-pade',
+            precision=1e-9, verbose=0)
+
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
+    def test_gamma_matrices_and_cpu_conversion(self):
+        cell = self.cell
+        mydf = aft.AFTDF(cell)
+        mydf.mesh = np.array([13, 15, 17])
+        mydf.max_memory = 777
+        mydf.time_reversal_symmetry = False
+        mydf_cpu = mydf.to_cpu()
+        self.assertIsInstance(mydf_cpu, aft_cpu.AFTDF)
+        self.assertIs(mydf_cpu.cell, cell)
+        self.assertEqual(mydf_cpu.max_memory, mydf.max_memory)
+        self.assertFalse(mydf_cpu.time_reversal_symmetry)
+        np.testing.assert_array_equal(mydf_cpu.mesh, mydf.mesh)
+        np.testing.assert_array_equal(mydf_cpu.kpts, mydf.kpts)
+
+        ref = mydf_cpu.get_nuc(kpts=np.zeros(3))
+        actual = mydf.get_nuc()
+        self.assertIsInstance(actual, cp.ndarray)
+        assert actual.ndim == 2
+        self.assertEqual(actual.dtype, np.float64)
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+
+        ref = mydf_cpu.get_pp(kpts=np.zeros(3))
+        actual = mydf.get_pp()
+        self.assertIsInstance(actual, cp.ndarray)
+        assert actual.ndim == 2
+        self.assertEqual(actual.dtype, np.float64)
+        np.testing.assert_allclose(actual.get(), ref, atol=1e-9, rtol=0)
+        single = mydf.get_pp(kpts=np.zeros(3))
+        np.testing.assert_allclose(single.get(), actual.get(), atol=1e-12, rtol=0)
+
+    def test_reset_scaled_kpts_and_range_cache(self):
+        cell = self.cell
+        scaled = np.array([[.13, -.07, .09], [-.13, .07, -.09]])
+        mydf = aft.AFTDF(cell, cell.get_abs_kpts(scaled))
+        mydf.mesh = np.array([13, 15, 17])
+        original_mesh = mydf.mesh.copy()
+        original_kpts = mydf.kpts.copy()
+        with mydf.range_coulomb(.4) as cached:
+            self.assertIsNot(cached, mydf)
+            self.assertEqual(cached.cell.omega, .4)
+        self.assertEqual(cell.omega, 0)
+        with mydf.range_coulomb(.4) as reused:
+            self.assertIs(reused, cached)
+        self.assertEqual(len(mydf._rsh_df), 1)
+        moved, _ = _finite_diff_cells(cell, 0, 0, disp=.04)
+        moved.mesh = np.array([17, 19, 21])
+        self.assertIs(mydf.reset(moved), mydf)
+        self.assertIs(mydf.cell, moved)
+        self.assertEqual(mydf._rsh_df, {})
+        np.testing.assert_allclose(moved.get_scaled_kpts(mydf.kpts), scaled,
+                                   atol=1e-14, rtol=0)
+        np.testing.assert_allclose(mydf.kpts, moved.get_abs_kpts(scaled),
+                                   atol=1e-14, rtol=0)
+        self.assertGreater(np.max(abs(mydf.kpts-original_kpts)), 1e-4)
+        # reset preserves the explicitly configured quadrature, as on CPU.
+        np.testing.assert_array_equal(mydf.mesh, original_mesh)
+        with mydf.range_coulomb(.4) as rebuilt:
+            self.assertIsNot(rebuilt, cached)
+            self.assertIs(rebuilt.cell, moved)
+        self.assertEqual(moved.omega, 0)
+        self.assertIs(mydf.reset(), mydf)
+        self.assertEqual(mydf._rsh_df, {})
+        self.assertIs(mydf.cell, moved)
+        np.testing.assert_array_equal(mydf.mesh, original_mesh)
+
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
+    def test_symmetry_kpoints_reset(self):
+        cell = self.cell
+        points = cell.make_kpts([3, 1, 1], time_reversal_symmetry=True)
+        cpu_points = cell.make_kpts([3, 1, 1], time_reversal_symmetry=True)
+        self.assertIsInstance(points, KPoints)
+        self.assertLess(points.nkpts_ibz, points.nkpts)
+        mydf = aft.AFTDF(cell, points)
+        reference = aft_cpu.AFTDF(cell, cpu_points)
+        self.assertIs(mydf.kpts, points)
+        scaled = points.kpts_scaled.copy()
+        original_mesh = np.array(mydf.mesh)
+        moved, _ = _finite_diff_cells(cell, 0, 0, disp=.04)
+        moved.mesh = np.array([17, 19, 21])
+        self.assertIs(mydf.reset(moved), mydf)
+        reference.reset(moved)
+        self.assertIs(mydf.kpts, points)
+        self.assertIs(points.cell, moved)
+        np.testing.assert_allclose(points.kpts_scaled, scaled, atol=1e-14, rtol=0)
+        np.testing.assert_allclose(points.kpts, moved.get_abs_kpts(scaled),
+                                   atol=1e-14, rtol=0)
+        np.testing.assert_allclose(points.kpts, reference.kpts, atol=1e-14, rtol=0)
+        np.testing.assert_allclose(points.weights_ibz, cpu_points.weights_ibz,
+                                   atol=1e-14, rtol=0)
+        self.assertLess(points.nkpts_ibz, points.nkpts)
+        np.testing.assert_array_equal(mydf.mesh, original_mesh)
+
+    def _check_long_range_mesh_and_weighted_kernels(self, scaled):
+        cell = self.cell
+        cell.omega = .4
+        original_mesh = np.array(cell.mesh)
+        mydf = aft.AFTDF(cell)
+        reference = aft_cpu.AFTDF(cell)
+        expected_mesh = cell.cutoff_to_mesh(
+            aft_cpu.estimate_ke_cutoff_for_omega(cell, cell.omega))
+        np.testing.assert_array_equal(mydf.mesh, expected_mesh)
+        np.testing.assert_array_equal(mydf.mesh, reference.mesh)
+        np.testing.assert_array_equal(cell.mesh, original_mesh)
+        Gv, _, weight = cell.get_Gv_weights(mydf.mesh)
+        kpt = cell.get_abs_kpts(scaled)
+        for omega, lr, sr in ((0, .37, .37), (None, .37, .37),
+                              (None, .65, 0)):
+            with self.subTest(kpt=scaled, omega=omega, lr=lr, sr=sr):
+                actual = mydf.weighted_coulG(
+                    kpt=kpt, omega=omega, lr_factor=lr, sr_factor=sr)
+                expected = pbc_tools.get_coulG(
+                    cell, k=kpt, mesh=mydf.mesh, Gv=Gv,
+                    omega=cell.omega if omega is None else omega)
+                np.testing.assert_allclose(actual.get(), expected * weight * lr,
+                                           atol=1e-13, rtol=1e-12)
+
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
+    def test_long_range_mesh_and_weighted_kernels_gamma(self):
+        self._check_long_range_mesh_and_weighted_kernels(np.zeros(3))
+
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.9'),
+                         'PySCF 2.8: different AFT shape, reset, and range-separated mesh conventions')
+    def test_long_range_mesh_and_weighted_kernels_nonzero_kpoint(self):
+        self._check_long_range_mesh_and_weighted_kernels(np.array([.13, -.07, .09]))
+
+    def test_aft_gamma_derivative_with_kpts(self):
+        cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                       basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                       mesh=[15]*3, precision=1e-8, verbose=0)
+        dm = cp.eye(cell.nao)
+        obj = aft.AFTDF(cell)
+
+        # Coulomb energy derivatives with default Gamma sampling.
+        refj = obj.get_ej_derivatives(dm)
+        assert refj.shape == (cell.natm+3, 3)
+        assert refj.dtype == np.float64
+
+        # An explicit single Gamma point gives the same derivatives.
+        result = obj.get_ej_derivatives(dm, kpts=np.zeros(3))
+        assert result.shape == refj.shape
+        assert result.dtype == np.float64
+        assert abs(result - refj).max() < 1e-10
+
+        # A one-point Gamma batch preserves the energy-derivative layout.
+        result = obj.get_ej_derivatives(dm, kpts=np.zeros((1, 3)))
+        assert result.shape == refj.shape
+        assert result.dtype == np.float64
+        assert abs(result - refj).max() < 1e-10
+
+        # Exchange energy derivatives with default Gamma sampling.
+        refk = obj.get_ek_derivatives(dm)
+        assert refk.shape == (cell.natm+3, 3)
+        assert refk.dtype == np.float64
+
+        # An explicit single Gamma point gives the same derivatives.
+        result = obj.get_ek_derivatives(dm, kpts=np.zeros(3))
+        assert result.shape == refk.shape
+        assert result.dtype == np.float64
+        assert abs(result - refk).max() < 1e-10
+
+        # A one-point Gamma batch preserves the energy-derivative layout.
+        result = obj.get_ek_derivatives(dm, kpts=np.zeros((1, 3)))
+        assert result.shape == refk.shape
+        assert result.dtype == np.float64
+        assert abs(result - refk).max() < 1e-10
+
+    def test_get_jk_preserves_density_shape(self):
+        cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                        basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                        mesh=[15]*3, precision=1e-8, verbose=0)
+        obj = aft.AFTDF(cell)
+        dm = cp.eye(cell.nao)
+        spin_dm = cp.stack([dm*.6, dm*.4])
+        for density in (dm, dm[None], spin_dm, spin_dm[:, None]):
+            vj, vk = obj.get_jk(density)
+            assert vj.shape == vk.shape == density.shape
+            assert vj.dtype == vk.dtype == np.float64
+            refj, refk = obj.get_jk(density, kpts=np.zeros((1, 3)))
+            assert abs(vj - refj).max() < 1e-10
+            assert abs(vk - refk).max() < 1e-10
+
     def test_aft_get_pp(self):
         ref = aft_cpu.AFTDF(cell).get_pp(kpts=kpts[0])
         v1 = aft.AFTDF(cell).get_pp(kpts=kpts[0]).get()
@@ -399,7 +595,7 @@ class KnownValues(unittest.TestCase):
             assert abs(ek_ewald - ref).max() < 5e-8
 
     @unittest.skipIf(num_devices > 1, '')
-    def test_ek_ip1_kpts(self):
+    def test_ek_ip1_kpts_high_cost(self):
         cell = pgto.M(
             atom = '''
             O   0.000    0.    0.1174
@@ -413,6 +609,20 @@ class KnownValues(unittest.TestCase):
             basis=[[0, [.25, 1]], [1, [.3, 1]]],
         )
         kpts = cell.make_kpts([3,2,1])
+        self._check_ek_ip1_kpts(cell, kpts)
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_ek_ip1_kpts(self):
+        # Retain s/p shells and non-Gamma sampling with fewer atoms and k-points.
+        cell = pgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]], verbose=0,
+        )
+        kpts = cell.make_kpts([2,1,1])
+        self._check_ek_ip1_kpts(cell, kpts)
+
+    def _check_ek_ip1_kpts(self, cell, kpts):
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         myaft = aft.AFTDF(cell)
         grad_sigma = aft_jk.get_ek_derivatives(myaft, dm, kpts=kpts)
@@ -609,6 +819,187 @@ class KnownValues(unittest.TestCase):
         exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell, kpts, omega)
         assert abs(exx_0 - ref[0]) < 1e-12
         assert abs(exx_1 - ref[1]).max() < 1e-8
+
+class FFTCoulombDerivative_high_cost(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cell = pgto.M(
+            atom='He .2 .3 .4; He 1.4 1.2 1.6', unit='Bohr',
+            a=np.diag([5., 5.5, 6.]), mesh=[25, 27, 29],
+            basis=[[0, [.8, 1.]], [1, [.6, 1.]]], pseudo='gth-pade',
+            precision=1e-11, verbose=0)
+
+    def _density(self, nkpts):
+        coeff = np.random.default_rng(27).normal(size=(nkpts, self.cell.nao, 3))
+        return np.einsum('kip,kjp->kij', coeff, coeff) / self.cell.nao
+
+    def _cpu_gradient(self, density, kpts):
+        cell = self.cell
+        nkpts = 1 if kpts is None else len(kpts)
+        matrices = fft_cpu.FFTDF(cell, kpts=kpts).get_j_e1(density, kpts=kpts)
+        matrices = np.asarray(matrices).reshape(3, nkpts, cell.nao, cell.nao)
+        dms = density.reshape(nkpts, cell.nao, cell.nao)
+        result = np.empty((cell.natm, 3))
+        for atom, (_, _, p0, p1) in enumerate(cell.aoslice_by_atom()):
+            result[atom] = np.einsum('xkpq,kqp->x', matrices[:, :, p0:p1],
+                                     dms[:, :, p0:p1]).real * (2 / nkpts)
+        return result
+
+    def _cpu_energy(self, cell, density, kpts):
+        nkpts = 1 if kpts is None else len(kpts)
+        vj = fft_cpu.FFTDF(cell, kpts=kpts).get_jk(density, kpts=kpts, with_k=False)[0]
+        return .5 * np.einsum('kij,kji->', np.asarray(vj).reshape(nkpts, cell.nao, cell.nao),
+                              density.reshape(nkpts, cell.nao, cell.nao)).real / nkpts
+
+    def _check_derivative(self, kpts):
+        cell = self.cell
+        nkpts = 1 if kpts is None else len(kpts)
+        density = self._density(nkpts)
+        if kpts is None:
+            density = density[0]
+        reference = self._cpu_gradient(density, kpts)
+        for order in ('C', 'F'):
+            with self.subTest(order=order):
+                dm_gpu = cp.array(density, order=order)
+                before = dm_gpu.copy()
+                actual = fft.FFTDF(cell, kpts=kpts).get_j_e1(dm_gpu, kpts=kpts)
+                self.assertIsInstance(actual, np.ndarray)
+                self.assertEqual(actual.shape, (cell.natm, 3))
+                np.testing.assert_allclose(actual, reference, atol=1e-10, rtol=0)
+                np.testing.assert_array_equal(dm_gpu.get(), before.get())
+        coords = cell.atom_coords()
+        # Fixed Cartesian AO DMs and lattice keep Cartesian/fractional k-points fixed.
+        step = 1e-4
+        fd = np.empty((cell.natm, 3))
+        for atom in range(cell.natm):
+            for axis in range(3):
+                plus, minus = coords.copy(), coords.copy()
+                plus[atom, axis] += step
+                minus[atom, axis] -= step
+                p = cell.set_geom_(plus, unit='Bohr', inplace=False)
+                m = cell.set_geom_(minus, unit='Bohr', inplace=False)
+                fd[atom, axis] = (self._cpu_energy(p, density, kpts)
+                                  - self._cpu_energy(m, density, kpts)) / (2 * step)
+        np.testing.assert_allclose(reference, fd, atol=3e-8, rtol=0)
+
+    def test_gamma_coulomb_derivative(self):
+        self._check_derivative(None)
+
+    def test_kpoint_coulomb_derivative(self):
+        self._check_derivative(self.cell.make_kpts([2, 1, 1]))
+
+    def test_coulomb_derivative_default_kpts(self):
+        kpts = self.cell.make_kpts([2, 1, 1])
+        density = self._density(len(kpts))
+        mydf = fft.FFTDF(self.cell, kpts=kpts)
+        result = mydf.get_j_e1(cp.asarray(density))
+        self.assertEqual(result.shape, (self.cell.natm, 3))
+        np.testing.assert_allclose(result, self._cpu_gradient(density, kpts),
+                                   atol=1e-10, rtol=0)
+        np.testing.assert_allclose(result, mydf.get_j_e1(density, kpts=kpts),
+                                   atol=1e-12, rtol=0)
+
+
+class FactorizedExchange(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from scipy.linalg import eigh
+        cls.cell = pgto.M(atom='He .3 .4 .2', unit='Bohr',
+                          a=np.diag([5., 5.5, 6.]), mesh=[9, 9, 9],
+                          basis=[[0, [1.2, 1.]], [1, [.8, 1.]]],
+                          precision=1e-10, verbose=0)
+        cls.kpts = cls.cell.make_kpts([3, 1, 1])
+        cpu = aft_cpu.AFTDF(cls.cell, cls.kpts)
+        overlap = cls.cell.pbc_intor('int1e_ovlp', hermi=1, kpts=cls.kpts)
+        hcore = (cls.cell.pbc_intor('int1e_kin', hermi=1, kpts=cls.kpts)
+                 + cpu.get_nuc(cls.kpts))
+        energy, coeff = zip(*(eigh(h, s) for h, s in zip(hcore, overlap)))
+        coeff = np.asarray(coeff)
+        # Fix the time-reversed gauge using actual one-electron Bloch orbitals.
+        coeff[0] = coeff[0].real
+        coeff[2] = coeff[1].conj()
+        for k, c in enumerate(coeff):
+            np.testing.assert_allclose(c.conj().T @ overlap[k] @ c, np.eye(cls.cell.nao),
+                                       atol=1e-11, rtol=0)
+            np.testing.assert_allclose(hcore[k] @ c, (overlap[k] @ c) * energy[k],
+                                       atol=1e-10, rtol=0)
+        occ, vir = coeff[:, :, :1], coeff[:, :, 1:2]
+        cls.factors = {'occupied': (np.sqrt(2)*occ, np.sqrt(2)*occ.conj()),
+                       'transition': (vir, occ.conj())}
+        cls.densities = {key: left @ right.transpose(0, 2, 1)
+                         for key, (left, right) in cls.factors.items()}
+        cls.references = {key: cpu.get_jk(dm, hermi=int(key == 'occupied'),
+                                         kpts=cls.kpts, with_j=False, exxdiv=None)[1]
+                          for key, dm in cls.densities.items()}
+
+    def _gpu(self, key, time_reversal=True, tagged=False, folded=False):
+        from gpu4pyscf.df.df_jk import factorize_dm
+        points = self.kpts
+        if folded:
+            scaled = self.cell.get_scaled_kpts(points)
+            points = self.cell.get_abs_kpts(scaled - np.floor(scaled + .5))
+        dm = cp.asarray(self.densities[key])
+        if tagged:
+            left, right = self.factors[key]
+            dm = tag_array(dm, factor_l=cp.asarray(left),
+                           factor_r=cp.asarray(right))
+        left, right = factorize_dm(dm)
+        self.assertIsNotNone(right)
+        self.assertLess(2*left.shape[-1], self.cell.nao)
+        np.testing.assert_allclose((left @ right.swapaxes(-1, -2)).get(), dm.get(),
+                                   atol=1e-12, rtol=0)
+        before = dm.copy()
+        left_before, right_before = left.copy(), right.copy()
+        mydf = aft.AFTDF(self.cell, points)
+        mydf.time_reversal_symmetry = time_reversal
+        result = aft_jk.get_k_kpts(mydf, dm, hermi=int(key == 'occupied'),
+                                   kpts=points, exxdiv=None)
+        np.testing.assert_array_equal(dm.get(), before.get())
+        np.testing.assert_array_equal(left.get(), left_before.get())
+        np.testing.assert_array_equal(right.get(), right_before.get())
+        return result.get()
+
+    def _check_transition_density_time_reversal(self, symmetry):
+        for tagged in (False, True):
+            with self.subTest(symmetry=symmetry, tagged=tagged):
+                actual = self._gpu('transition', symmetry, tagged)
+                np.testing.assert_allclose(actual, self.references['transition'],
+                                           atol=1e-9, rtol=0)
+
+    def test_transition_density_time_reversal_enabled(self):
+        self._check_transition_density_time_reversal(True)
+
+    def test_transition_density_time_reversal_disabled(self):
+        self._check_transition_density_time_reversal(False)
+
+    def _check_occupied_density_time_reversal(self, symmetry):
+        for tagged in (False, True):
+            with self.subTest(symmetry=symmetry, tagged=tagged):
+                actual = self._gpu('occupied', symmetry, tagged)
+                np.testing.assert_allclose(actual, self.references['occupied'],
+                                           atol=1e-9, rtol=0)
+                np.testing.assert_allclose(actual, actual.conj().transpose(0, 2, 1),
+                                           atol=1e-10, rtol=0)
+
+    def test_occupied_density_time_reversal_enabled(self):
+        self._check_occupied_density_time_reversal(True)
+
+    def test_occupied_density_time_reversal_disabled(self):
+        self._check_occupied_density_time_reversal(False)
+
+    def test_exchange_linearity(self):
+        from gpu4pyscf.df.df_jk import factorize_dm
+        scale = .37 + .2j
+        # Both terms share an occupied right factor, so the sum remains rank one.
+        density = self.densities['occupied'] + scale*self.densities['transition']
+        dm = cp.asarray(density)
+        left, right = factorize_dm(dm)
+        self.assertLess(2*left.shape[-1], self.cell.nao)
+        mydf = aft.AFTDF(self.cell, self.kpts)
+        result = aft_jk.get_k_kpts(mydf, dm, hermi=0, kpts=self.kpts, exxdiv=None)
+        expected = self.references['occupied'] + scale*self.references['transition']
+        np.testing.assert_allclose(result.get(), expected, atol=1e-9, rtol=0)
+
 
 if __name__ == '__main__':
     print("Full Tests for aft")

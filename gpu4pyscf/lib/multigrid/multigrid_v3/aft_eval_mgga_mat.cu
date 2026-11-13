@@ -17,12 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuComplex.h>
+#include "constant_objects.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "constant_objects.cuh"
 #include "utils.cuh"
 #include "aft_recursion.cuh"
 
@@ -287,7 +284,7 @@ extern "C" {
 int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtauG,
                       PBCIntEnvVars *envs, int64_t *bas_ij_idx,
                       double *G_bases, double *L_bases, int *mesh_cum,
-                      int *nimgs_cum, int *mesh, int npair)
+                      int *nimgs_cum, int *mesh, int npair, cudaStream_t stream)
 {
     int mesh_x = mesh[0];
     int mesh_y = mesh[1];
@@ -297,7 +294,7 @@ int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtau
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
-    orth_mgga_mat_kernel<<<ntile_batch*npair, THREADS>>>(
+    orth_mgga_mat_kernel<<<ntile_batch*npair, THREADS, 0, stream>>>(
         out, vrhoG, vtauG, *envs, bas_ij_idx, G_bases, L_bases,
         mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y, ntiles_z);
     cudaError_t err = cudaGetLastError();

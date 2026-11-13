@@ -14,6 +14,7 @@
 
 
 import unittest
+import pytest
 import numpy as np
 import cupy as cp
 import pyscf, gpu4pyscf
@@ -124,7 +125,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-7
         assert test_n_cycle <= ref_n_cycle + 5
 
-    def test_gdm_uks_spin_eq_0(self):
+    def test_gdm_uks_spin_eq_0_high_cost(self):
         mol = pyscf.M(
             atom = """
                 C        0.98632600      -1.52268500      -0.15943600
@@ -214,6 +215,23 @@ class KnownValues(unittest.TestCase):
         assert test_n_cycle <= ref_n_cycle + 15
 
     def test_gdm_uks_spin_neq_0(self):
+        mol = pyscf.M(atom='O 0 0 0; H 0 -.757 .587; H 0 .757 .587',
+                      basis='sto3g', charge=1, spin=1, verbose=0)
+        mf = UKS(mol, xc='wb97x').density_fit()
+        mf.grids.level = 1
+        mf.conv_tol = 1e-10
+        mf.conv_tol_grad = 1e-6
+        dm = mf.get_init_guess(key='qchem_sad')
+        ref = mf.copy().run(dm0=dm)
+        test = gdm(mf)
+        test.kernel(dm0=dm)
+        test = test.undo_gdm()
+        assert test.converged and ref.converged
+        assert abs(test.e_tot - ref.e_tot) < 1e-8
+        assert abs(test.spin_square()[0] - ref.spin_square()[0]) < 1e-6
+        assert abs(test.Gradients().kernel() - ref.Gradients().kernel()).max() < 5e-5
+
+    def test_gdm_uks_spin_neq_0_high_cost(self):
         mol = pyscf.M(
             atom = """
                 C        0.94054455      -0.01152091      -0.00390959
@@ -332,6 +350,60 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_energy - ref_energy) < 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-7
         assert test_n_cycle <= ref_n_cycle + 5
+
+    def test_gdm_linear_dependent_basis(self):
+        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        try:
+            gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-2
+            mol = pyscf.M(
+                atom = """
+                    O  0.0000  0.7375 -0.0528
+                    O  0.0000 -0.3375 -0.0528
+                    H  0.8190  0.8170  0.4220
+                    H -0.8190 -0.4170  0.4220
+                """, # O-O bond is 0.4 A shorter
+                basis = { "O": "def2-tzvppd", "H": "sto-3g" },
+                verbose = 4,
+            )
+            mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
+            mf.conv_tol = 1e-12
+            ref_energy = mf.kernel()
+            assert mf.converged
+            assert mf.mo_coeff.shape[0] != mf.mo_coeff.shape[1] # Check linear dependency
+            ref_gradient = mf.Gradients().kernel()
+            ref_n_cycle = mf.cycles
+            del mf
+
+            mf = RHF(mol).density_fit(auxbasis = "def2-universal-jkfit")
+            mf.conv_tol = 1e-12
+            mf = gdm(mf)
+            test_energy = mf.kernel()
+            mf = mf.undo_gdm()
+            assert mf.converged
+            assert mf.mo_coeff.shape[0] != mf.mo_coeff.shape[1] # Check linear dependency
+            test_gradient = mf.Gradients().kernel()
+            test_n_cycle = mf.cycles
+
+            assert np.abs(test_energy - ref_energy) < 1e-10
+            assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-7
+            assert test_n_cycle <= ref_n_cycle + 5
+        finally:
+            gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
+
+    def test_gdm_rohf_disabled(self):
+        mol = pyscf.M(
+            atom = """
+                Li 0 0 0
+            """,
+            basis = "def2-tzvp",
+            spin = 1,
+            verbose = 0,
+        )
+        mf = mol.RHF().to_gpu()
+        assert mf.istype('ROHF')
+
+        with pytest.raises(NotImplementedError, match="GDM does not support ROHF yet"):
+            mf = gdm(mf)
 
 if __name__ == "__main__":
     print("Full Tests for GDM")

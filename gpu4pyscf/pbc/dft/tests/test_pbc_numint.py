@@ -618,6 +618,139 @@ S
         v = kni.nr_uks_fxc(cell, grids, xc, cp.array(dm_he), cp.array(dm1), hermi=1, kpts=kpts)
         self.assertAlmostEqual(abs(v.get()-ref).max(), 0, 10)
 
+class SpinAdaptedKernel(unittest.TestCase):
+    def _check_spin_adapted_kernel(self, kmesh, xc, singlet, sign):
+        small_cell = pbcgto.M(
+            atom='Be .2 .3 .4', unit='Bohr', a=np.eye(3)*6,
+            basis=[[0, [1.2, 1.]], [0, [.5, 1.]], [1, [.8, 1.]]],
+            mesh=[13]*3, precision=1e-11, verbose=0)
+        small_grids = gen_grid.UniformGrids(small_cell)
+        cpu_grids = small_grids.to_cpu()
+        kpts = small_cell.make_kpts(kmesh)
+        ground, perturbation = [], []
+        for overlap in small_cell.pbc_intor('int1e_ovlp', kpts=kpts):
+            # Occupy orthonormal 1s/2s-like orbitals. A one-orbital density
+            # sits exactly at TPSS's clipped tau=tau_W derivative boundary.
+            orbitals = []
+            for index in range(3):
+                vector = np.eye(small_cell.nao, dtype=overlap.dtype)[:, index].copy()
+                for previous in orbitals:
+                    vector -= previous * (previous.conj() @ overlap @ vector)
+                vector /= np.sqrt(vector.conj() @ overlap @ vector)
+                orbitals.append(vector)
+            occupied = np.column_stack(orbitals[:2])
+            ground.append(2 * occupied @ occupied.conj().T)
+            transition = np.outer(orbitals[2], orbitals[1].conj())
+            perturbation.append(transition + transition.conj().T)
+        ground = np.asarray(ground)
+        perturbation = np.asarray(perturbation)[None]
+        ni = numint.KNumInt()
+        cpu_ni = dft_cpu.numint.KNumInt()
+        cached = ni.cache_xc_kernel1(
+            small_cell, small_grids, xc, cp.asarray(ground),
+            spin=1, kpts=kpts, is_rhf=True)[2]
+        spin_ground = np.stack([ground/2, ground/2])
+        spin_delta = np.stack([perturbation, sign*perturbation])
+        reference = cpu_ni.nr_uks_fxc(
+            small_cell, cpu_grids, xc, spin_ground,
+            spin_delta, hermi=1, kpts=kpts)
+        unrestricted = ni.nr_uks_fxc(
+            small_cell, small_grids, xc, cp.asarray(spin_ground),
+            cp.asarray(spin_delta), hermi=1, kpts=kpts)
+        for fxc in (None, cached):
+            actual = ni.nr_rks_fxc_st(
+                small_cell, small_grids, xc, cp.asarray(ground),
+                cp.asarray(perturbation), hermi=1,
+                singlet=singlet, fxc=fxc, kpts=kpts)
+            np.testing.assert_allclose(actual.get(), reference[0],
+                                       atol=1e-9, rtol=0)
+            np.testing.assert_allclose(actual.get(), unrestricted[0].get(),
+                                       atol=1e-11, rtol=0)
+            np.testing.assert_allclose(sign*actual.get(), reference[1],
+                                       atol=1e-9, rtol=0)
+
+    def test_spin_adapted_kernel_gamma_lda_singlet(self):
+        self._check_spin_adapted_kernel([1, 1, 1], 'LDA,VWN', True, 1)
+
+    def test_spin_adapted_kernel_gamma_lda_triplet(self):
+        self._check_spin_adapted_kernel([1, 1, 1], 'LDA,VWN', False, -1)
+
+    def test_spin_adapted_kernel_gamma_gga_singlet(self):
+        self._check_spin_adapted_kernel([1, 1, 1], 'PBE', True, 1)
+
+    def test_spin_adapted_kernel_gamma_gga_triplet(self):
+        self._check_spin_adapted_kernel([1, 1, 1], 'PBE', False, -1)
+
+    def test_spin_adapted_kernel_gamma_mgga_singlet(self):
+        self._check_spin_adapted_kernel([1, 1, 1], 'TPSS', True, 1)
+
+    def test_spin_adapted_kernel_gamma_mgga_triplet(self):
+        self._check_spin_adapted_kernel([1, 1, 1], 'TPSS', False, -1)
+
+    def test_spin_adapted_kernel_kpoints_lda_singlet(self):
+        self._check_spin_adapted_kernel([2, 1, 1], 'LDA,VWN', True, 1)
+
+    def test_spin_adapted_kernel_kpoints_lda_triplet(self):
+        self._check_spin_adapted_kernel([2, 1, 1], 'LDA,VWN', False, -1)
+
+    def test_spin_adapted_kernel_kpoints_gga_singlet(self):
+        self._check_spin_adapted_kernel([2, 1, 1], 'PBE', True, 1)
+
+    def test_spin_adapted_kernel_kpoints_gga_triplet(self):
+        self._check_spin_adapted_kernel([2, 1, 1], 'PBE', False, -1)
+
+    def test_spin_adapted_kernel_kpoints_mgga_singlet(self):
+        self._check_spin_adapted_kernel([2, 1, 1], 'TPSS', True, 1)
+
+    def test_spin_adapted_kernel_kpoints_mgga_triplet(self):
+        self._check_spin_adapted_kernel([2, 1, 1], 'TPSS', False, -1)
+
+    def test_ao_gamma_shapes(self):
+        cell = pbcgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                        basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                        mesh=[15]*3, precision=1e-8, verbose=0)
+        for deriv in (0, 1):
+            coords = cell.get_uniform_grids()[:20]
+            default = numint.eval_ao_kpts(cell, coords, deriv=deriv)
+            single = numint.eval_ao_kpts(cell, coords, np.zeros(3), deriv=deriv)
+            batch = numint.eval_ao_kpts(cell, coords, np.zeros((1, 3)), deriv=deriv)
+            reference = numint.eval_ao(cell, coords, kpt=None, deriv=deriv)
+            assert default.shape == single.shape == reference.shape
+            assert batch.shape == (1,) + default.shape
+            cp.testing.assert_allclose(default, reference, atol=1e-12, rtol=0)
+            cp.testing.assert_allclose(default, single, atol=1e-12, rtol=0)
+            cp.testing.assert_allclose(default, batch[0], atol=1e-12, rtol=0)
+
+    def test_xc_preserves_density_shape(self):
+        cell = pbcgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
+                       basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
+                       mesh=[15]*3, precision=1e-8, verbose=0)
+        grids = gen_grid.UniformGrids(cell).build()
+        ni = numint.KNumInt()
+
+        dm = cp.eye(cell.nao)
+        dm_batch = dm[None]
+        ne, exc, v = numint.nr_rks(ni, cell, grids, 'lda,vwn', dm)
+        neb, excb, vb = numint.nr_rks(ni, cell, grids, 'lda,vwn', dm_batch)
+        assert v.ndim == 2
+        assert v.shape == dm.shape
+        assert vb.shape == dm_batch.shape
+        cp.testing.assert_allclose(v, vb[0], atol=1e-11, rtol=0)
+        np.testing.assert_allclose(ne, neb, atol=1e-11, rtol=0)
+        np.testing.assert_allclose(exc, excb, atol=1e-11, rtol=0)
+
+        dm = cp.stack([dm*.6, dm*.4])
+        dm_batch = dm[:, None]
+        ne, exc, v = numint.nr_uks(ni, cell, grids, 'lda,vwn', dm)
+        neb, excb, vb = numint.nr_uks(ni, cell, grids, 'lda,vwn', dm_batch)
+        assert v.ndim == 3
+        assert v.shape == dm.shape
+        assert vb.shape == dm_batch.shape
+        cp.testing.assert_allclose(v, vb[:, 0], atol=1e-11, rtol=0)
+        np.testing.assert_allclose(ne, neb, atol=1e-11, rtol=0)
+        np.testing.assert_allclose(exc, excb, atol=1e-11, rtol=0)
+
+
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")
     unittest.main()

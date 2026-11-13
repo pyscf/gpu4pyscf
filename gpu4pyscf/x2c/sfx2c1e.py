@@ -37,7 +37,7 @@ __all__ = [
 
 def sfx2c1e(mf):
     assert isinstance(mf, hf.SCF)
-    if isinstance(mf, x2c._X2C_SCF):
+    if isinstance(mf, (SFX2C1E_SCF, x2c._X2C_SCF)):
         if mf.with_x2c is None:
             mf.with_x2c = SpinFreeX2CHelper(mf.mol)
         else:
@@ -84,7 +84,7 @@ class SFX2C1E_SCF(hf.SCF):
                 hcore = block_diag([hcore, hcore])
             return hcore
         else:
-            return super(x2c._X2C_SCF, self).get_hcore(mol)
+            return super().get_hcore(mol)
 
     def dip_moment(self, mol=None, dm=None, unit='Debye', verbose=logger.NOTE,
                    picture_change=True, **kwargs):
@@ -111,24 +111,24 @@ class SFX2C1E_SCF(hf.SCF):
         if isinstance(self, ghf.GHF):
             nao = mol.nao_nr()
             dm = dm[:nao,:nao] + dm[nao:,nao:]
+        dm = cp.asnumpy(dm)
 
         with mol.with_common_orig((0,0,0)):
             if picture_change:
                 xmol = self.with_x2c.get_xmol()
-                dm = xmol.apply_C_mat_CT(dm).get()
-                nao = xmol.nao
-                int1e_r = xmol.intor_symmetric('int1e_r')
-                prp = xmol.intor_symmetric('int1e_sprsp').reshape(3,4,nao,nao)[:,3]
+                with lib.temporary_env(xmol, cart=mol.cart):
+                    nao = xmol.nao
+                    int1e_r = xmol.intor_symmetric('int1e_r')
+                    prp = xmol.intor_symmetric('int1e_sprsp').reshape(3,4,nao,nao)[:,3]
                 c1 = 0.5/lib.param.LIGHT_SPEED
                 ao_dip = self.with_x2c.picture_change((int1e_r, prp*c1**2))
             else:
-                dm = cp.asnumpy(dm)
                 ao_dip = mol.intor_symmetric('int1e_r')
 
         charges = mol.atom_charges()
         coords  = mol.atom_coords()
         nucl_dip = np.einsum('i,ix->x', charges, coords)
-        el_dip = np.einsum('xij,ji->x', ao_dip, dm).real
+        el_dip = np.einsum('xij,ji->x', cp.asnumpy(ao_dip), dm).real
         mol_dip = nucl_dip - el_dip
 
         if unit.upper() == 'DEBYE':
@@ -142,7 +142,7 @@ class SFX2C1E_SCF(hf.SCF):
         if self.with_x2c and not hasattr(dst, 'with_x2c'):
             logger.warn(self, 'Destination object of to_hf/to_ks method is not '
                         'an X2C object. Convert dst to X2C object.')
-            dst = dst.sfx2c()
+            dst = sfx2c1e(dst)
         return hf.SCF._transfer_attrs_(self, dst)
 
     device = utils.device

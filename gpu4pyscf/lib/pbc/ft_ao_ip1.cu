@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "pbc.cuh"
@@ -106,8 +104,8 @@ void ft_aopair_deriv_kernel(double *grad, double *sigma,
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
     double *rjri = shared_memory + gx_len * 6 + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -441,7 +439,7 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
     double *gyI = gxR + gx_len*3;
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
-    int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     double s0xR, s1xR, s2xR;
     double s0xI, s1xI, s2xI;
     double s0yR, s1yR, s2yR;
@@ -617,14 +615,14 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
 
 extern "C" {
 int PBC_ft_ao_deriv(double *grad, double *sigma, double *auxvec, double2 *dm_auxG,
-                    double *GvT, RysIntEnvVars *envs, int ngrids)
+                    double *GvT, RysIntEnvVars *envs, int ngrids, cudaStream_t stream)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
     dim3 blocks(nbatches_grids, nbatches_shls);
-    ft_ao_deriv_kernel<<<blocks, threads>>>(
+    ft_ao_deriv_kernel<<<blocks, threads, 0, stream>>>(
             grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -638,7 +636,7 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
                          double2 *vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int permutation_symmetry)
+                         int permutation_symmetry, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || ngrids == 0) {
         return 0;
@@ -647,7 +645,7 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
     dim3 threads(NG_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
-    ft_aopair_deriv_kernel<<<blocks, threads, shm_size>>>(
+    ft_aopair_deriv_kernel<<<blocks, threads, shm_size, stream>>>(
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
@@ -662,7 +660,7 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
                          double2 *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int permutation_symmetry)
+                         int permutation_symmetry, cudaStream_t stream)
 {
     if (nbatches_shl_pair == 0 || ngrids == 0) {
         return 0;
@@ -671,7 +669,7 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
     dim3 threads(NG_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
-    ft_aopair_deriv_kernel<<<blocks, threads, shm_size>>>(
+    ft_aopair_deriv_kernel<<<blocks, threads, shm_size, stream>>>(
             out, sigma, NULL, dm_vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();

@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
@@ -161,8 +159,8 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
     float *gx = shared_memory + nsp_per_block * (nroots * 2 + 6) + sp_id;
     // gz can be reused for gbuf
     float *gbuf = gx + g_size * nsp_per_block * 2;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     for (int task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
@@ -401,10 +399,10 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
 extern "C" {
 int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                      uint32_t *bas_ij_idx, float *diffuse_exps,
-                     float *diffuse_ctr_coef, int npairs, double omega)
+                     float *diffuse_ctr_coef, int npairs, double omega, cudaStream_t stream)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
-    fill_s_estimator_kernel<<<sp_blocks, THREADS>>>(
+    fill_s_estimator_kernel<<<sp_blocks, THREADS, 0, stream>>>(
         s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega);
 
     cudaError_t err = cudaGetLastError();
@@ -418,9 +416,9 @@ int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, uint32_t *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
-                          double omega, double lr_factor, double sr_factor)
+                          double omega, double lr_factor, double sr_factor, cudaStream_t stream)
 {
-    int2e_qcond_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+    int2e_qcond_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
             q_out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             omega, lr_factor, sr_factor);
     cudaError_t err = cudaGetLastError();

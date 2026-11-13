@@ -17,9 +17,9 @@ import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib, gto, scf, dft
+from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
-import pytest
 
 atom = """
 O 0. 0. 0.1174; H -0.757 0. -0.4696; H 0.757 0. -0.4696
@@ -40,7 +40,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test_nac_tda_singlet_svwn(self):
+    def test_nac_tda_singlet_svwn_high_cost(self):
         mf = dft.RKS(mol, xc='svwn').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -88,7 +88,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tda_singlet_svwn(self):
+    def test_nac_grad_tda_singlet_svwn_high_cost(self):
         mf = dft.RKS(mol, xc='svwn').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -116,7 +116,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_b3lyp(self):
+    def test_nac_tda_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -164,7 +164,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tda_singlet_b3lyp(self):
+    def test_nac_grad_tda_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -193,7 +193,8 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_camb3lyp(self):
+    # Retain the full-basis counterpart of the small mixed-pair test below.
+    def test_nac_tda_singlet_camb3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='camb3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -241,7 +242,8 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tda_singlet_camb3lyp(self):
+    # Retain the full-basis counterpart of the small gradient-batch test below.
+    def test_nac_grad_tda_singlet_camb3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='camb3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -270,7 +272,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_tpss(self):
+    def test_nac_tda_singlet_tpss_high_cost(self):
         mf = dft.RKS(mol, xc='tpss').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -318,7 +320,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
-    def test_nac_grad_tda_singlet_tpss(self):
+    def test_nac_grad_tda_singlet_tpss_high_cost(self):
         mf = dft.RKS(mol, xc='tpss').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -346,7 +348,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tddft_singlet_b3lyp(self):
+    def test_nac_tddft_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -394,7 +396,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tddft_singlet_b3lyp(self):
+    def test_nac_grad_tddft_singlet_b3lyp_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -422,7 +424,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_tda_singlet_b3lyp_rissolver(self):
+    def test_nac_tda_singlet_b3lyp_rissolver_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -475,7 +477,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
-    def test_nac_grad_tda_singlet_b3lyp_rissolver(self):
+    def test_nac_grad_tda_singlet_b3lyp_rissolver_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -507,7 +509,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_grad_tda_singlet_b3lyp_rissolver_target_state(self):
+    def test_nac_grad_tda_singlet_b3lyp_rissolver_target_state_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -549,7 +551,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
-    def test_nac_z_vector_reuse(self):
+    def test_nac_z_vector_reuse_high_cost(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)

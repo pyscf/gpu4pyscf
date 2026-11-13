@@ -158,7 +158,7 @@ class KnownValues(unittest.TestCase):
         e_cpu = mf_cpu.kernel()
 
         mf_gpu = mf_cpu.to_gpu()
-        e_gpu = mf_cpu.kernel()
+        e_gpu = mf_gpu.kernel()
 
         self.assertAlmostEqual(e_gpu, e_cpu, 6)
         self.assertAlmostEqual(e_gpu, -74.3741809222222, 6)
