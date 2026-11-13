@@ -2534,9 +2534,15 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         t0 = log.timer("xc integration", *t0)
         return grad_sigma.get()
 
-    def to_cpu(self):
-        # Supply CPU libXC evaluation without converting multigrid machinery.
-        from pyscf.pbc.dft import numint as numint_cpu
-        return numint_cpu.NumInt()
+    if cp.cuda.runtime.is_hip:
+        def to_cpu(self):
+            # No GPU libXC on HIP: the XC-on-CPU fallback in gpu4pyscf/dft/numint.py
+            # calls to_cpu().eval_xc_eff(...). Supply a CPU numint for that without
+            # converting the multigrid machinery. On CUDA the integrator keeps
+            # upstream's behaviour and does not support conversion to CPU.
+            from pyscf.pbc.dft import numint as numint_cpu
+            return numint_cpu.NumInt()
+    else:
+        to_cpu = NotImplemented
 
     to_gpu = NotImplemented
