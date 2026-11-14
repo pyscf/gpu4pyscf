@@ -123,3 +123,22 @@ def test_reset_ksym():
         'C 0.,  0.,  0.; C 1.,  1.,  1.')
     mf.reset(cell)
     assert abs(mf.kpts.kpts_ibz - ref.kpts_ibz).max() < 1e-9
+
+
+def test_krks_multigrid_off_gamma():
+    cell = pgto.M(
+        atom='He .2 .3 .4; He 1.2 1.5 1.8', unit='Bohr',
+        a=np.diag([5., 5.5, 6.]), mesh=[25]*3,
+        basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+        precision=1e-9, verbose=0)
+    xc = 'pbe'
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    ref = cell.KRKS(kpts=kpts, xc=xc)
+    ref.conv_tol = 1e-10
+    mf = ref.to_gpu()
+    mf = mf.multigrid_numint()
+    ref.kernel()
+    mf.kernel()
+    assert ref.converged and mf.converged
+    np.testing.assert_allclose(mf.e_tot, ref.e_tot, atol=1e-8, rtol=0)
+    np.testing.assert_allclose(mf.make_rdm1().get(), ref.make_rdm1(), atol=1e-6, rtol=0)

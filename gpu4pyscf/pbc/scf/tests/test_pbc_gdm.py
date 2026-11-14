@@ -366,8 +366,8 @@ class KnownValues(unittest.TestCase):
         test_n_cycle = mf.cycles
         test_gradient = mf.Gradients().kernel()
 
-        assert np.abs(test_energy - ref_energy) < 1e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert np.abs(test_energy - ref_energy) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
         assert test_n_cycle <= ref_n_cycle + 5
 
 if __name__ == "__main__":

@@ -42,9 +42,11 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh, double_translation_indices
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
@@ -242,7 +244,7 @@ class PBCJKMatrixOpt:
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         kpts, is_single_kpt = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
         is_gamma_point = is_zero(kpts)
@@ -266,14 +268,14 @@ class PBCJKMatrixOpt:
             Ts_ji_lookup = cp.zeros((nimgs, nimgs))
             sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32) % cell.nbas
         else:
-            bvk_ncells = np.prod(kmesh)
+            bvk_ncells = np.prod(bvkmesh)
             nimgs = len(supmol.Ls)
             # When the size of BvK cell is smaller than the supmol, it's more
             # efficient to represent dms/vk in BvK cell
             if bvk_ncells < 7*nimgs:
-                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, bvkmesh, kpts)
                 nimgs = bvk_ncells
-                img_conj_mapping = conj_images_in_bvk_cell(kmesh)
+                img_conj_mapping = conj_images_in_bvk_cell(bvkmesh)
             else:
                 sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
             nimgs_uniq_pair, nkpts = expLk.shape
@@ -439,9 +441,9 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, _ = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
-        log.debug('bvk_kmesh = %s', kmesh)
-        bvk_ncells = np.prod(kmesh)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
+        log.debug('bvkmesh = %s', bvkmesh)
+        bvk_ncells = np.prod(bvkmesh)
 
         orbl, orbr = _factorize_dm(dm, kpts)
         dm = cp.asarray(dm)
@@ -481,12 +483,15 @@ class PBCJKMatrixOpt:
              (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
             raise NotImplementedError
 
-        if bvk_ncells == nkpts:
-            kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
-                         for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(kmesh))
-            t_rev_pairs = conj_images_in_bvk_cell(kmesh, return_pair=True)
-        else:
-            raise NotImplementedError
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+        # The common k-shift in kj - ki cancels, so transfer_mesh includes Gamma.
+        transfer_mesh = kmesh
+        qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+        kpt_iters = ((qpts[q], ki_idx, kj_idx, q == q_conj)
+                     for q, q_conj, ki_idx, kj_idx in
+                     kk_adapted_iter(kmesh, with_gamma_point))
+        t_rev_pairs = conj_kpts(kmesh, with_gamma_point, return_pair=True)
         log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))
 
         time_reversal_symmetry = self.time_reversal_symmetry
@@ -534,10 +539,7 @@ class PBCJKMatrixOpt:
             diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao1)
             unit += nao**2*bvk_ncells
 
-        ft_opt = FTOpt(cell, kmesh)
-        # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
-        # only supports the complete set of kpts within MP mesh.
-        ft_opt.permutation_symmetry = bvk_ncells == nkpts
+        ft_opt = FTOpt(cell, bvkmesh)
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
         mesh = self.mesh
@@ -626,7 +628,7 @@ class PBCJKMatrixOpt:
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         kpts, is_single_kpt = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
@@ -645,12 +647,12 @@ class PBCJKMatrixOpt:
             Ts_ji_lookup = cp.zeros((nimgs, nimgs))
             sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32) % cell.nbas
         else:
-            bvk_ncells = np.prod(kmesh)
+            bvk_ncells = np.prod(bvkmesh)
             nimgs = len(supmol.Ls)
             # When the size of BvK cell is smaller than the supmol, it's more
             # efficient to represent dms/vk in BvK cell
             if bvk_ncells < 7*nimgs:
-                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, bvkmesh, kpts)
                 nimgs = bvk_ncells
             else:
                 sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
@@ -800,9 +802,9 @@ class PBCJKMatrixOpt:
         assert cell.dimension == 3
 
         kpts, _ = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-        log.debug('bvk_kmesh = %s', kmesh)
-        bvk_ncells = np.prod(kmesh)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
+        log.debug('bvkmesh = %s', bvkmesh)
+        bvk_ncells = np.prod(bvkmesh)
 
         dm = cp.asarray(dm, order='C')
         dms = _format_dms(dm, kpts)
@@ -831,7 +833,7 @@ class PBCJKMatrixOpt:
         if not exclude_dd_block:
             wcoulG += wcoulG_SR
 
-        ft_opt = FTOpt(cell, kmesh).build()
+        ft_opt = FTOpt(cell, bvkmesh).build()
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
 
         avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .8)
@@ -1077,9 +1079,9 @@ class PBCJKMatrixOpt:
         omega = abs(omega)
 
         kpts, _ = _normalize_kpts(kpts)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
-        log.debug('bvk_kmesh = %s', kmesh)
-        bvk_ncells = np.prod(kmesh)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
+        log.debug('bvkmesh = %s', bvkmesh)
+        bvk_ncells = np.prod(bvkmesh)
         is_gamma_point = is_zero(kpts)
 
         dms = _format_dms(dm, kpts)
@@ -1123,8 +1125,11 @@ class PBCJKMatrixOpt:
         nao = dms.shape[-1]
         dms = dms.reshape(n_dm,nkpts,nao,nao)
 
-        ft_opt = FTOpt(cell, kmesh)
-        ft_opt.permutation_symmetry = bvk_ncells == nkpts
+        ft_opt = FTOpt(cell, bvkmesh)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+        transfer_mesh = kmesh
+        qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
         assert ft_opt.permutation_symmetry
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
@@ -1260,8 +1265,9 @@ class PBCJKMatrixOpt:
             ek_sigma = cp.zeros([cell.natm+3, 3])
             sigma = cp.zeros((3, 3))
             stream = cp.cuda.get_current_stream()
-            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
-                kpt = kpts[kp]
+            kpt_iters = kk_adapted_iter(kmesh, with_gamma_point)
+            for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+                kpt = qpts[kp]
                 Gvk = Gv + cp.asarray(kpt)
                 remove_G0 = is_zero(kpt)
                 wcoulG_0, wcoulG_1 = weighted_coulG_derivatives(Gvk, 0, remove_G0)
@@ -1600,25 +1606,25 @@ def _search_diffuse_pairs(cell, mesh):
     pair_mask = pair_max < precision
     return pair_mask
 
-def _Ls_to_Bvk_Ts(supmol, kmesh):
+def _Ls_to_Bvk_Ts(supmol, bvkmesh):
     cell = supmol.cell
     # supmol Ts can be mapped to the corresponding Ts in BvK cell
     Ts = np.linalg.solve(cell.lattice_vectors().T, supmol.Ls.T).T
     Ts = np.asarray(Ts.round(), dtype=np.int32)
-    Ts_in_bvk = Ts % kmesh
+    Ts_in_bvk = Ts % bvkmesh
     # Index of each BvK Ts is stored in bvk_address
-    bvk_address = np.ravel_multi_index(Ts_in_bvk.T, kmesh)
+    bvk_address = np.ravel_multi_index(Ts_in_bvk.T, bvkmesh)
     return bvk_address
 
-def _double_latsum_in_bvk(supmol, kmesh, kpts):
+def _double_latsum_in_bvk(supmol, bvkmesh, kpts):
     cell = supmol.cell
     # Index of each BvK Ts is stored in bvk_address
-    bvk_address = cp.asarray(_Ls_to_Bvk_Ts(supmol, kmesh), dtype=np.int32)
+    bvk_address = cp.asarray(_Ls_to_Bvk_Ts(supmol, bvkmesh), dtype=np.int32)
     I, ish = divmod(cp.asarray(supmol.bas_mask_idx, dtype=np.int32), cell.nbas)
     bvk_shell_idx = bvk_address[I] * cell.nbas + ish
-    Ts_ji_lookup = cp.asarray(double_translation_indices(kmesh), dtype=np.int32)
+    Ts_ji_lookup = cp.asarray(double_translation_indices(bvkmesh), dtype=np.int32)
 
-    bvk_Ls = translation_vectors_for_kmesh(cell, kmesh)
+    bvk_Ls = translation_vectors_for_kmesh(cell, bvkmesh)
     expLk = cp.exp(1j * asarray(bvk_Ls).dot(asarray(kpts).T))
     return bvk_shell_idx, Ts_ji_lookup, expLk
 

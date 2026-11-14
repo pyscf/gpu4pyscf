@@ -27,7 +27,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
-from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs, member
+from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -38,15 +38,9 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, conj_kpts, _get_kmesh
 
 PBC_LINDEP_MO_ENERGY_OFFSET = 1e5
-
-def _check_kpts(kpts):
-    if len(member(np.zeros(3), kpts)) == 0:
-        raise NotImplementedError(
-            'GPU PBC SCF requires k-point sampling to include the Gamma point')
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -392,7 +386,6 @@ class KSCF(pbchf.SCF):
             self.kpts = self.__dict__.pop('kpts')
 
         kpts = self.kpts
-        _check_kpts(kpts)
 
         with_df = self.with_df
         if len(kpts) > 1 and getattr(with_df, '_j_only', False):
@@ -419,10 +412,10 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        bvk_kmesh = None
+        bvkmesh = None
         if kpts_in_bvkcell:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
-        return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        return int1e.int1e_ovlp(cell, kpts, bvkmesh)
 
     def get_hcore(self, cell=None, kpts=None):
         from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
@@ -450,10 +443,10 @@ class KSCF(pbchf.SCF):
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
 
-        bvk_kmesh = None
+        bvkmesh = None
         if kpts_in_bvkcell:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
-        hcore += int1e.int1e_kin(cell, kpts, bvk_kmesh)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        hcore += int1e.int1e_kin(cell, kpts, bvkmesh)
         return hcore
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
@@ -537,9 +530,10 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
-        kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=False)
-        if nkpts == np.prod(kmesh):
-            return [x[:2] for x in kk_adapted_iter(kmesh, return_pair_index=False)]
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        if kmesh is not None:
+            return conj_kpts(kmesh, with_gamma_point, return_pair=True)
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
 

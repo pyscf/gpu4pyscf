@@ -25,7 +25,7 @@ from pyscf.pbc import dft, gto, scf
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from gpu4pyscf.pbc.properties import berry
 from gpu4pyscf.pbc.properties.berry import polarization as polarization_lib
-from gpu4pyscf.pbc.properties.berry.overlap import _commensurate_bvk_mesh
+from gpu4pyscf.pbc.properties.berry.overlap import _commensurate_bvkmesh
 
 
 HAS_LIBWANNIER90 = importlib.util.find_spec('libwannier90') is not None
@@ -410,7 +410,7 @@ class KnownValues(unittest.TestCase):
         kmesh = np.asarray([2, 1, 2])
         kpts = cell.make_kpts(kmesh, wrap_around=True, scaled_center=[.25, 0, 0])
         topology = berry.KPointMesh(cell, kpts)
-        np.testing.assert_array_equal(_commensurate_bvk_mesh(cell, kpts, kmesh), [4, 1, 2])
+        np.testing.assert_array_equal(_commensurate_bvkmesh(cell, kpts, kmesh), [4, 1, 2])
         rng = np.random.default_rng(31)
         coeff = rng.normal(size=(4, 2, 2)) + 1j * rng.normal(size=(4, 2, 2))
         values = berry.build_mmn(cell, coeff, kpts, kmesh)
@@ -442,7 +442,7 @@ class KnownValues(unittest.TestCase):
 
         shifted = mf.cell.get_abs_kpts([[.25 + 4e-7, 0, 0]])
         with self.assertRaises(ValueError):
-            _commensurate_bvk_mesh(mf.cell, shifted)
+            _commensurate_bvkmesh(mf.cell, shifted)
 
     def test_principal_phase_contract_and_phase_only_path(self):
         mf = self._mock_mf()

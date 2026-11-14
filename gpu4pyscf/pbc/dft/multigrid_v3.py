@@ -50,8 +50,9 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.tools import k2gamma, get_coulG, ke_to_mesh, mesh_to_ke
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts
+from gpu4pyscf.pbc.tools import get_coulG, ke_to_mesh, mesh_to_ke
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, fft_matrix, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
@@ -76,8 +77,7 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     assert _is_orthogonal_lattice(a), 'Must be orthogonal lattice'
     b = cell.reciprocal_vectors()
 
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
+    weight = 1.
 
     rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
     kern = libmgrid.orth_contract_aopair_dm
@@ -207,7 +207,6 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
 
     work = cp.empty_like(rhoG)
     if not with_tau:
@@ -222,7 +221,7 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
+        weight = vol / ngrids
 
         dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
@@ -279,7 +278,6 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
 
     nimgs = cell.nimgs
     Tx = np.arange(-nimgs[0], nimgs[0]+1, dtype=np.float64)
@@ -303,7 +301,7 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
+        weight = vol / ngrids
 
         dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
@@ -527,8 +525,7 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_grad
 
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
+    weight = 1.
 
     mg_envs = ni.mg_envs
 
@@ -1577,6 +1574,11 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
         return out
 
 def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
+    # A single non-Gamma point can produce a complex image-space density.
+    # The current real-valued multigrid kernels do not support.
+    assert len(kpts) > 1 or is_zero(kpts), \
+        'Single non-Gamma k-point sampling is not supported by multigrid'
+
     ni._ensure_initialized(kpts, xctype)
 
     cell = ni.sorted_cell
@@ -1595,16 +1597,17 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
     if bvk_ncells == 1:
         dm_sc = dms
     else:
-        if bvk_ncells != nkpts:
-            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        else:
-            expLk = fft_matrix(ni.kmesh)
+        kmesh, with_gamma_point = _get_kmesh(ni.cell, kpts, ni.bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+        expLk = fft_matrix(kmesh, with_gamma_point)
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
 
     dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao), out=out)
 
+    # Include the normalization when transforming to super-cell gamma-point dm
+    dm_sc *= 1. / nkpts
     if hermi == 1:
         dm_sc *= 2
 
@@ -1617,11 +1620,13 @@ def _inverse_wannier_transform_fock(ni, veff, kpts):
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
-        if len(kpts) != bvk_ncells:
-            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        kmesh, with_gamma_point = _get_kmesh(ni.cell, kpts, ni.bvkmesh)
+        if kmesh is not None:
+            expLk = fft_matrix(kmesh, with_gamma_point)
         else:
-            expLk = fft_matrix(ni.kmesh)
-        nkpts = expLk.shape[1]
+            # veff might be evaluated at arbitrary band points
+            expLk = cp.exp(1j * cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        nkpts = len(kpts)
         expLkz = expLk.view(np.float64).reshape(bvk_ncells, nkpts, 2)
         veff = contract('Lpq,Lkz->kpqz', veff, expLkz)
         veff = veff.view(np.complex128)[:,:,:,0]
@@ -1844,8 +1849,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
-        ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
+        ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
         ni.mesh = mesh
@@ -1980,8 +1985,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
-        ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
+        ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
         ni.mesh = mesh
@@ -2052,7 +2057,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         self._reciprocal_lattice_vectors = None
         return self
 
-    def build(self, kmesh=None, xctype='MGGA'):
+    def build(self, bvkmesh=None, xctype='MGGA'):
         log = logger.new_logger(self.cell)
         t0 = log.init_timer()
         cell = self.sorted_cell = SortedGTO.from_cell(
@@ -2060,15 +2065,15 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
 
         self.xctype = xctype
-        self.kmesh = kmesh
-        if kmesh is None:
+        self.bvkmesh = bvkmesh
+        if bvkmesh is None:
             bvkcell = cell
             bvkmesh_Ls = np.zeros((1, 3))
         else:
-            bvkcell = super_cell(cell, kmesh, wrap_around=True)
+            bvkcell = super_cell(cell, bvkmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in the super_cell function
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            bvkmesh_Ls = translation_vectors_for_kmesh(cell, kmesh, wrap_around=True)
+            bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, wrap_around=True)
         self.bvkcell = bvkcell
         self.bvkmesh_Ls = bvkmesh_Ls
         bvk_ncells = len(bvkmesh_Ls)
@@ -2156,13 +2161,13 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         return self
 
     def _ensure_initialized(self, kpts, xctype):
-        kmesh = k2gamma.kpts_to_kmesh(self.cell, kpts)
+        bvkmesh = kpts_to_bvkmesh(self.cell, kpts, bound_by_supmol=True)
         if (self.bvkcell is None or
-            any(self.kmesh != kmesh) or
+            any(self.bvkmesh != bvkmesh) or
             # LDA and GGA share the same initialization parameters.
             # MGGA requires a little bit higher energy cutoff and rcut
             (xctype == 'MGGA' and self.xctype != xctype)):
-            self.build(kmesh, xctype)
+            self.build(bvkmesh, xctype)
         return self
 
     get_nuc = get_nuc

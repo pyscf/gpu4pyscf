@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.df.fft_jk import (
     _ewald_exxdiv_for_G0, _format_dms, _format_jks, _factorize_dm)
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, fft_matrix, conj_images_in_bvk_cell)
+    kk_adapted_iter, fft_matrix, conj_kpts, _get_kmesh)
 
 def density_fit(mf, auxbasis=None, with_df=None):
     '''Generate density-fitting SCF object
@@ -77,7 +77,9 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
     pair_address, _ = mydf._cderi_idx
     pair_address = cp.asarray(pair_address, dtype=np.int32)
-    expLk = fft_matrix(mydf.kmesh)
+    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts, mydf.bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+    expLk = fft_matrix(kmesh, with_gamma_point)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
@@ -108,7 +110,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
 
     kj_idx = np.arange(nkpts)
-    conj_mapping = conj_images_in_bvk_cell(mydf.kmesh)
+    conj_mapping = conj_kpts(kmesh, with_gamma_point)
     # The ao-pair in vj_packed has the same storage order like the ao-pair in
     # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
     # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple
@@ -188,8 +190,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
-    unit = 3 * nao**2
-    blksize = avail_mem // (nkpts*unit * 16)
+    bvk_ncells = int(np.prod(mydf.bvkmesh))
+    unit = (2*nkpts + bvk_ncells) * nao**2
+    blksize = avail_mem // (unit * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
@@ -199,7 +202,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     for p0, p1 in lib.prange(0, naux, blksize)
                     for kp in mydf._cderi])
     k_adapt_dic = {}
-    for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts, mydf.bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+    for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(kmesh, with_gamma_point):
         # ki_idx is already sorted
         k_adapt_dic[kp] = kp_conj, kj_idx
 
@@ -241,7 +246,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         if orbr is None:
             orbr = [None] * nset # to support indexing orbr[i] below
         vk = cp.zeros(dms.shape, dtype=dtype)
-        buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)
+        buf = (cp.empty(nkpts*blksize*nao**2, dtype=dtype),
+               cp.empty(bvk_ncells*blksize*nao**2, dtype=dtype),
+               cp.empty(nkpts*blksize*nao**2, dtype=dtype))
         for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter,
                                        buf=buf[1], out=buf[0]):
             kp_conj, kj = k_adapt_dic[kp]

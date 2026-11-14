@@ -564,6 +564,7 @@ def get_sigma(
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if orbs is None:
         orbs = list(range(nmo))
@@ -643,7 +644,7 @@ def get_sigma(
         # Read (L|pq) for every ki and kj that conserves with kL and ki (-ki+kj+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|ki kj) is either Lpq_kL[ki] or Lpq_kL[kj].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kidx[ki_idx] != kj_idx).any()
             if not is_conj or (kidx[kj_idx] == ki_idx).all():
                 break
@@ -889,6 +890,7 @@ def get_sigma_outcore(
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if orbs is None:
         orbs = list(range(nmo))
@@ -938,7 +940,7 @@ def get_sigma_outcore(
         # Read (L|pq) for every ki and kj that conserves with kL and ki (-ki+kj+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|ki kj) is either Lpq_kL[ki] or Lpq_kL[kj].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kidx[ki_idx] != kj_idx).any()
             if not is_conj or (kidx[kj_idx] == ki_idx).all():
                 break
@@ -1130,6 +1132,7 @@ def get_sigma_exchange(gw, mo_coeff_full=None, mo_occ_full=None):
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
+    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if mo_coeff_full is None:
         mo_coeff_full = gw.mo_coeff
@@ -1161,7 +1164,7 @@ def get_sigma_exchange(gw, mo_coeff_full=None, mo_occ_full=None):
         # Read (L|pq) for every ki and kj that conserves with kL and ki (-ki+kj+kL=G).
         # GDF only stores one of the two conjugated momentum transfers kL and -kL,
         # (L|ki kj) is either Lpq_kL[ki] or Lpq_kL[kj].conj().transpose(0, 2, 1).
-        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
+        for kp, _, ki_idx, kj_idx in kk_adapted_iter(mydf.bvkmesh):
             is_conj = (kidx[ki_idx] != kj_idx).any()
             if not is_conj or (kidx[kj_idx] == ki_idx).all():
                 break

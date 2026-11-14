@@ -1324,6 +1324,50 @@ def test_lr_jk_contracted_basis():
     ref -= np.pi / omega**2 / cell.vol * charge * overlap
     assert abs(dat - ref).max() < 1e-8
 
+def test_get_ek_lr_off_gamma():
+    cell = pyscf.M(
+        atom='He .2 .3 .4; He 1.2 1.5 1.8',
+        a=np.diag([5., 5.5, 6.]), unit='Bohr',
+        basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+        mesh=[15]*3, precision=1e-9, verbose=0)
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    omega = .5
+    opt = rsjk.PBCJKMatrixOpt(cell, omega)
+    opt.mesh = cell.mesh
+    opt.exclude_dd_block = False
+    opt.build(kpts)
+
+    vk = opt._get_k_lr(dm, hermi=1, kpts=kpts, exxdiv='ewald',
+                      omega=omega, lr_factor=1., sr_factor=0.)
+    with cell.with_range_coulomb(omega):
+        ref = aft_cpu.AFTDF(cell, kpts).get_jk(
+            dm, kpts=kpts, with_j=False, exxdiv='ewald')[1]
+    np.testing.assert_allclose(vk.get(), ref, atol=1e-8, rtol=0)
+
+def test_get_ejk_lr_derivatives_off_gamma():
+    cell = pyscf.M(
+        atom='He .2 .3 .4; He 1.2 1.5 1.8',
+        a=np.diag([5., 5.5, 6.]), unit='Bohr',
+        basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+        mesh=[15]*3, precision=1e-9, verbose=0)
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    omega = .5
+    opt = rsjk.PBCJKMatrixOpt(cell, omega)
+    opt.mesh = cell.mesh
+    opt.exclude_dd_block = False
+    opt.build(kpts)
+
+    grad_sigma = opt._get_ejk_lr_derivatives(
+        dm, kpts=kpts, exxdiv='ewald', omega=omega,
+        j_factor=0., lr_factor=1., sr_factor=0.)
+    # RSJK includes the RHF exchange factor -1/2 in its energy derivatives.
+    ref = -.5 * aft.AFTDF(cell, kpts).get_ek_derivatives(
+        dm, kpts=kpts, exxdiv='ewald', omega=omega,
+        lr_factor=1., sr_factor=0.)
+    np.testing.assert_allclose(grad_sigma, ref, atol=1e-8, rtol=0)
+
 def test_j_sr_kpts_single_and_batch():
     cell = pyscf.M(atom='He .2 .3 .4; He 1.7 1.1 .8', a=np.eye(3)*5,
                    unit='Bohr', basis=[[0, [.8, 1.]], [1, [.6, 1.]]],

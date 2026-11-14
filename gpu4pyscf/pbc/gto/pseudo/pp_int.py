@@ -23,7 +23,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import most_diffuse_pgto, SortedGTO
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
-from gpu4pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 
 kern_map = {
     'int1e_ovlp':         ('PBCint1e_ovlp',         1, (0, 0)),
@@ -41,7 +41,7 @@ def _int_vnl(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
     cell = SortedGTO.from_cell(cell, decontract=True)
-    bvk_kmesh = k2gamma.kpts_to_kmesh(cell, kpts)
+    bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
     pcell = fakecell.copy(deep=False)
 
     def int_ket(_bas_fake, intor_name):
@@ -50,7 +50,7 @@ def _int_vnl(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
 
         kern_name, expected_comp, deriv_ij = kern_map[intor_name]
         pcell._bas = _bas_fake
-        return int1e.CrossInt1e(pcell, cell, bvk_kmesh).intor(
+        return int1e.CrossInt1e(pcell, cell, bvkmesh).intor(
             kern_name, expected_comp, deriv_ij, kpts)
 
     return [int_ket(fakecell._bas[hl_dims > 0], intors[0]),

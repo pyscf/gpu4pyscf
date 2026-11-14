@@ -73,8 +73,12 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([2, 2, 1], with_gamma_point=False)
         for mf_cls in (scf.KRHF, dft.KRKS):
             with self.subTest(mf_cls=mf_cls.__name__):
-                with self.assertRaisesRegex(NotImplementedError, 'include the Gamma point'):
-                    mf_cls(cell, kpts=kpts).kernel()
+                mf = mf_cls(cell, kpts=kpts)
+                ref = mf.to_cpu()
+                ref.kernel()
+                mf.kernel()
+                self.assertTrue(ref.converged and mf.converged)
+                self.assertAlmostEqual(mf.e_tot, ref.e_tot, delta=1e-7)
 
     def test_rhf_exx_None(self):
         cell = self.cell
@@ -383,6 +387,27 @@ class KnownValues(unittest.TestCase):
         assert np.array_equal(mf_scanner.with_df.mesh, [7, 7, 7])
         self.assertAlmostEqual(e1, mf1.e_tot, 9)
 
+    def test_krhf_gdf_off_gamma(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        cell = pbcgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8', unit='Bohr',
+            a=np.diag([5., 5.5, 6.]),
+            basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+            precision=1e-9, verbose=0)
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        auxbasis = {'He': [[0, [1.1, 1.]], [1, [.7, 1.]]]}
+        ref = cell.KRHF(kpts=kpts, exxdiv='ewald').density_fit(auxbasis=auxbasis)
+        ref.conv_tol = 1e-10
+        mf = ref.to_gpu()
+        # PySCF 2.8 does not preserve auxbasis when converting periodic GDF.
+        mf.with_df.auxbasis = auxbasis
+        ref.kernel()
+        mf.kernel()
+        assert ref.converged and mf.converged
+        assert isinstance(mf.with_df, GDF)
+        np.testing.assert_allclose(mf.e_tot, ref.e_tot, atol=1e-8, rtol=0)
+        np.testing.assert_allclose(mf.make_rdm1().get(), ref.make_rdm1(), atol=1e-6, rtol=0)
+
 class RestrictedSCFProperties(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -501,32 +526,37 @@ class RestrictedSCFProperties(unittest.TestCase):
         np.testing.assert_allclose(mf.make_rdm1(canonical, occupation).get(),
                                    density.get(), atol=1e-11, rtol=0)
 
-    def test_single_band_shape_and_normalization(self):
-        for name, (mf, cpu) in self.models.items():
-            with self.subTest(method=name):
-                energy, coeff = mf.get_bands(np.zeros(3))
-                batched = mf.get_bands(np.zeros((1, 3)))[0]
-                if name == 'KRHF':
-                    # The CPU Gamma-only band API shares the in-place cast
-                    # defect. Build its Fock with normal dtype promotion and
-                    # solve the generalized eigenproblem independently.
-                    band = np.zeros((1, 3))
-                    hcore = cpu.get_hcore(kpts=band)[0]
-                    potential = cpu.get_veff(kpts_band=band)[0]
-                    overlap = cpu.get_ovlp(kpts=band)[0]
-                    reference = eigh(hcore + potential, overlap, eigvals_only=True)
-                    self.assertEqual(mf.get_hcore(kpts=band).dtype, np.float64)
-                    self.assertEqual(mf.get_veff(kpts_band=band).dtype, np.complex128)
-                else:
-                    reference = cpu.get_bands(np.zeros(3))[0]
-                expected_shape = (self.cell.nao,)
-                self.assertEqual(energy.shape, expected_shape)
-                unbatched = batched[0]
-                np.testing.assert_allclose(energy.get(), unbatched.get(), atol=1e-11, rtol=0)
-                np.testing.assert_allclose(energy.get(), np.asarray(reference), atol=1e-9, rtol=0)
-                overlap = cp.asarray(self.cell.pbc_intor('int1e_ovlp'))
-                np.testing.assert_allclose((coeff.conj().T @ overlap @ coeff).get(),
-                                           np.eye(self.cell.nao), atol=1e-10, rtol=0)
+    def test_single_band_rhf(self):
+        mf, cpu = self.models['RHF']
+        energy, coeff = mf.get_bands(np.zeros(3))
+        batched = mf.get_bands(np.zeros((1, 3)))[0]
+        reference = cpu.get_bands(np.zeros(3))[0]
+        self.assertEqual(energy.shape, (self.cell.nao,))
+        np.testing.assert_allclose(energy.get(), batched[0].get(), atol=1e-11, rtol=0)
+        np.testing.assert_allclose(energy.get(), np.asarray(reference), atol=1e-9, rtol=0)
+        overlap = cp.asarray(self.cell.pbc_intor('int1e_ovlp'))
+        np.testing.assert_allclose((coeff.conj().T @ overlap @ coeff).get(),
+                                   np.eye(self.cell.nao), atol=1e-10, rtol=0)
+
+    def test_single_band_krhf(self):
+        mf, cpu = self.models['KRHF']
+        energy, coeff = mf.get_bands(np.zeros(3))
+        batched = mf.get_bands(np.zeros((1, 3)))[0]
+        # The CPU Gamma-only band API has an in-place cast defect. Build its
+        # Fock with normal dtype promotion and solve the eigenproblem directly.
+        band = np.zeros((1, 3))
+        hcore = cpu.get_hcore(kpts=band)[0]
+        potential = cpu.get_veff(kpts_band=band)[0]
+        overlap = cpu.get_ovlp(kpts=band)[0]
+        reference = eigh(hcore + potential, overlap, eigvals_only=True)
+        self.assertEqual(mf.get_hcore(kpts=band).dtype, np.float64)
+        self.assertEqual(mf.get_veff(kpts_band=band).dtype, np.complex128)
+        self.assertEqual(energy.shape, (self.cell.nao,))
+        np.testing.assert_allclose(energy.get(), batched[0].get(), atol=1e-11, rtol=0)
+        np.testing.assert_allclose(energy.get(), np.asarray(reference), atol=1e-9, rtol=0)
+        overlap = cp.asarray(self.cell.pbc_intor('int1e_ovlp'))
+        np.testing.assert_allclose((coeff.conj().T @ overlap @ coeff).get(),
+                                   np.eye(self.cell.nao), atol=1e-10, rtol=0)
 
 
 if __name__ == '__main__':
