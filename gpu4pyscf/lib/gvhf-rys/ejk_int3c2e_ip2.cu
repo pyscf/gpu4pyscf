@@ -31,22 +31,37 @@ void ejk_int3c2e_ipip_kernel(double *ejk, double *dm, double *density_auxvec,
                              double omega, double lr_factor, double sr_factor,
                              RysIntEnvVars envs, int *shl_pair_offsets,
                              uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
-                             int *ao_pair_loc, int aux_offset, int naux)
+                    int *ao_pair_loc, int aux_offset, int naux)
 {
+    setup_context();
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, ksh0);
+    SHARED_ARRAY(int, ksh1);
+    SHARED_ARRAY(int, nksh);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nf);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, g_size);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, aux_per_block);
+    SHARED_ARRAY(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
     // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -88,7 +103,6 @@ void ejk_int3c2e_ipip_kernel(double *ejk, double *dm, double *density_auxvec,
     register int aux_id = st_id - sp_id * aux_per_block;
 
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 6 + st_id;
@@ -497,11 +511,12 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
                     int *ao_pair_loc, int aux_offset, int naux, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ejk_int3c2e_ipip_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    ejk_int3c2e_ipip_kernel<<<blocks, THREADS, shm_size, stream>>>(
-            ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, aux_offset, naux);
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( ejk_int3c2e_ipip_kernel, blocks, threads, shm_size,
+        ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup, ao_pair_loc, aux_offset, naux, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip2: %s\n", cudaGetErrorString(err));

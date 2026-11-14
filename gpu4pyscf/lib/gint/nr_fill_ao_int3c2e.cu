@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
+
 
 #include "gint.h"
 #include "config.h"
@@ -33,6 +33,11 @@
 #include "g2e_root3.cu"
 #include "g3c2e.cu"
 
+#define GINT_CAT_(a, b) a##b
+#define GINT_CAT(a, b)  GINT_CAT_(a, b)
+#define GINT_LAUNCH_KERNEL(KERNEL, ...) \
+    LAUNCH_KERNEL(KERNEL, blocks, threads, 0, __VA_ARGS__, *envs, *eri, *offsets);
+
 static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
     int nrys_roots = envs->nrys_roots;
@@ -40,58 +45,59 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
 
-    dim3 threads(THREADSX, THREADSY);
-    dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
+    auto threads = make_block(THREADSX, THREADSY);
+    auto blocks = make_grid((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
     int li = envs->i_l;
     int lj = envs->j_l;
     int lk = envs->k_l;
     const int type_ijkl = li * 100 + lj * 10 + lk;
     switch (type_ijkl) {
         // nroots = 1
-        case 0: GINTfill_int3c2e_kernel0000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 1: GINTfill_int3c2e_kernel0010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 10: GINTfill_int3c2e_kernel0100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 100: GINTfill_int3c2e_kernel1000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 0: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0000, stream) break;
+        case 1: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0010, stream) break;
+        case 10: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel0100, stream) break;
+        case 100: GINT_LAUNCH_KERNEL(GINTfill_int3c2e_kernel1000, stream) break;
         // nroots = 2
-        case 2: GINTfill_int2e_kernel0020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 3: GINTfill_int2e_kernel0030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 101: GINTfill_int2e_kernel1010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 102: GINTfill_int2e_kernel1020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 110: GINTfill_int2e_kernel1100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 111: GINTfill_int2e_kernel1110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 200: GINTfill_int2e_kernel2000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 201: GINTfill_int2e_kernel2010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 210: GINTfill_int2e_kernel2100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 300: GINTfill_int2e_kernel3000<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 2: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel0020, stream) break;
+        case 3: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel0030, stream) break;
+        case 101: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1010, stream) break;
+        case 102: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1020, stream) break;
+        case 110: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1100, stream) break;
+        case 111: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1110, stream) break;
+        case 200: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2000, stream) break;
+        case 201: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2010, stream) break;
+        case 210: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2100, stream) break;
+        case 300: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3000, stream) break;
         // nroots = 3
-        case 103: GINTfill_int2e_kernel1030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 112: GINTfill_int2e_kernel1120<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 113: GINTfill_int2e_kernel1130<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 202: GINTfill_int2e_kernel2020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 203: GINTfill_int2e_kernel2030<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 211: GINTfill_int2e_kernel2110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 212: GINTfill_int2e_kernel2120<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 220: GINTfill_int2e_kernel2200<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 221: GINTfill_int2e_kernel2210<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 301: GINTfill_int2e_kernel3010<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 302: GINTfill_int2e_kernel3020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 310: GINTfill_int2e_kernel3100<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 311: GINTfill_int2e_kernel3110<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
-        case 320: GINTfill_int2e_kernel3200<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
+        case 103: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1030, stream) break;
+        case 112: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1120, stream) break;
+        case 113: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel1130, stream) break;
+        case 202: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2020, stream) break;
+        case 203: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2030, stream) break;
+        case 211: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2110, stream) break;
+        case 212: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2120, stream) break;
+        case 220: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2200, stream) break;
+        case 221: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel2210, stream) break;
+        case 301: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3010, stream) break;
+        case 302: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3020, stream) break;
+        case 310: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3100, stream) break;
+        case 311: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3110, stream) break;
+        case 320: GINT_LAUNCH_KERNEL(GINTfill_int2e_kernel3200, stream) break;
         default: {
-            dim3 threads(THREADSX*THREADSY);
-            dim3 blocks(ntasks_ij, ntasks_kl);
             const int gsize = 3*nrys_roots*(li+1)*(lj+1)*(lk+1);
-            cudaError_t err = cudaFuncSetAttribute(
+            const int shm_size = gsize*sizeof(double);
+            cudaError_t ferr = cudaFuncSetAttribute(
                 GINTfill_int3c2e_kernel,
                 cudaFuncAttributeMaxDynamicSharedMemorySize,
                 (gsize+16)*sizeof(double));
-            if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA Error of GINTfill_int3c2e_kernel: %s\n", cudaGetErrorString(err));
+            if (ferr != cudaSuccess) {
+                fprintf(stderr, "CUDA Error of GINTfill_int3c2e_kernel: %s\n", cudaGetErrorString(ferr));
                 return 1;
             }
-            const int shm_size = gsize*sizeof(double);
-            GINTfill_int3c2e_kernel<<<blocks, threads, shm_size, stream>>>(*envs, *eri, *offsets);
+            auto threads = make_block(THREADSX*THREADSY);
+            auto blocks = make_grid(ntasks_ij, ntasks_kl);
+            LAUNCH_KERNEL( GINTfill_int3c2e_kernel, blocks, threads, shm_size,
+                *envs, *eri, *offsets, stream);
         }
     }
 

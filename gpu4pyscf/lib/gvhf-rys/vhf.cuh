@@ -2,11 +2,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// CUDA headers for every C++ TU that includes vhf.cuh; the plain C files that
-// include it only need the structs.
+// CUDA and SYCL headers plus the backend-agnostic kernel macros (setup_context,
+// SHARED_ARRAY, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*), for every C++ TU that
+// includes vhf.cuh (kernels, drivers, and shared .cuh helpers like
+// rys_contract_k.cuh). The plain C files that include it only need the structs.
 #ifdef __cplusplus
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #endif
 
 #define PTR_RANGE_OMEGA 8
@@ -168,4 +169,84 @@ extern __constant__ GXYZOffset c_gxyz_offset[];
 
 extern __constant__ int c_nf[];
 extern __constant__ float c_div_nf[];
+
+#elif defined(USE_SYCL)
+
+static inline unsigned get_smid()
+{
+  auto max_cu = 448;
+  auto item = syclex::this_work_item::get_nd_item<3>();
+  auto g = item.get_group_linear_id();
+  return (g % max_cu);
+}
+
+// NOTE: On CUDA, adjust_threads doubles the launch's nsq_per_block only when
+// cudaFuncGetAttributes confirms the kernel's actual register usage supports
+// 2x occupancy per SM. Each unrolled *_ip1 kernel hardcodes its own internal
+// `constexpr int nsq_per_block` used to lay out shared/local memory, so the
+// host-side "threads" value driving the nd_range and local_accessor buflen
+// MUST stay equal to that constant. Unconditionally doubling it here (as a
+// stand-in for the missing SYCL equivalent of cudaFuncGetAttributes) makes
+// the launched work-group width diverge from the kernel's baked-in shared
+// memory layout, corrupting the block-level reduction (silently wrong
+// gradients/JK energies -- worst case is the simplest all-s-function case,
+// e.g. RHF/H2 in a minimal basis, since that's the first switch-case hit).
+// Until a real SYCL analogue of the CUDA register-occupancy query exists,
+// this must be a no-op.
+#define adjust_threads(kernel, threads) { }
+
+// Defined once, in rys_contract_j.cu / rys_contract_k.cu. Kernel bodies keep
+// CUDA's spelling (c_i_in_fold2idx, c_i_in_fold3idx, c_gxyz_offset), as in
+// gint/cint2e.cuh: device_global has no pointer arithmetic and get() is
+// device-only, so
+//  * device pass: the name is the device_global's storage;
+//  * host pass: kernel bodies are parsed but never run, so the name is a
+//    typed placeholder.
+// Both passes parse the host uploads, so one overload per table turns the
+// upstream call cudaMemcpyToSymbolAsync(c_xxx, ..., stream) into a copy to the
+// device_global.
+extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_rys_i_in_fold2idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_rys_i_in_fold3idx;
+extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[256]> s_rys_gxyz_offset;
+#ifdef __SYCL_DEVICE_ONLY__
+#define c_i_in_fold2idx (::s_rys_i_in_fold2idx.get())
+#define c_i_in_fold3idx (::s_rys_i_in_fold3idx.get())
+#define c_gxyz_offset   (::s_rys_gxyz_offset.get())
+#else
+inline Fold2Index (&rys_host_fold2idx())[165] {
+    static Fold2Index placeholder[165];
+    return placeholder;
+}
+inline Fold3Index (&rys_host_fold3idx())[495] {
+    static Fold3Index placeholder[495];
+    return placeholder;
+}
+inline GXYZOffset (&rys_host_gxyz_offset())[256] {
+    static GXYZOffset placeholder[256];
+    return placeholder;
+}
+#define c_i_in_fold2idx (rys_host_fold2idx())
+#define c_i_in_fold3idx (rys_host_fold3idx())
+#define c_gxyz_offset   (rys_host_gxyz_offset())
 #endif
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        Fold2Index (&)[165], const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_rys_i_in_fold2idx, src, count, offset, kind, stream);
+}
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        Fold3Index (&)[495], const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_rys_i_in_fold3idx, src, count, offset, kind, stream);
+}
+static inline cudaError_t cudaMemcpyToSymbolAsync(
+        GXYZOffset (&)[256], const void *src, size_t count, size_t offset,
+        cudaMemcpyKind kind, cudaStream_t stream) {
+    return cudaMemcpyToSymbolAsync(s_rys_gxyz_offset, src, count, offset, kind, stream);
+}
+
+// rys_constant.cu holds the constant tables (_c_cartesian_lexical_xyz, c_nf,
+// c_div_nf). Under SYCL they are constexpr, so every TU gets its own copy.
+#include "gvhf-rys/rys_constant.cu"
+
+#endif // __CUDACC__

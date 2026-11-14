@@ -20,7 +20,9 @@
 #include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
+#ifndef USE_SYCL
 #include "gvhf-rys/gxyz_offset.cuh"
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -39,8 +41,9 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                        float dm_penalty,
                        JKMatrix& jmat, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int threads = blockDim.x * blockDim.y;
+    setup_context();
+    int thread_id = threadIdx_x + blockDim_x * threadIdx_y;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
@@ -92,7 +95,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
-    extern __shared__ double shared_memory[];
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     int *swap = (int *)shared_memory;
 
     while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
@@ -166,7 +169,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
         bas_kl_idx[ntasks+thread_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -183,12 +186,23 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
                   float dm_penalty, int64_t *pool, int *head,
                   int gout_pattern, int reserved_shm_size)
 {
+    setup_context();
+    SHARED_ARRAY(int, cell_j);
+    SHARED_ARRAY(int, ish_cell0);
+    SHARED_ARRAY(int, jsh_cell0);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
+    SHARED_ARRAY(double, ri, [3]);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [2]);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     // sq is short for shl_quartet
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -198,7 +212,7 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
     int stride_l = bounds.stride_l;
     int g_size = bounds.g_size;
 
-    extern __shared__ double shared_memory[];
+    DYNAMIC_SHARED_PTR(double, shared_memory);
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
@@ -230,8 +244,10 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
 
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    __shared__ int ntasks, pair_ij, pair_kl0;
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
 while (1) {
     __syncthreads();
     __syncthreads();
@@ -256,12 +272,6 @@ while (1) {
         continue;
     }
 
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
@@ -460,6 +470,10 @@ while (1) {
 }
 }
 
+#ifdef USE_SYCL
+extern void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds);
+#endif
+
 extern void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                                  int shm_size, int gout_stride_max);
 
@@ -517,7 +531,12 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
     cudaMemsetAsync(head, 0, sizeof(int)*3, stream);
 
     if (1) {
+#ifdef USE_SYCL
+        GXYZOffset gxyz_offset[256*3];
+        RYS_make_gxyz_offset(gxyz_offset, bounds);
+#else
         const GXYZOffset *gxyz_offset = RYS_get_gxyz_offset(li, lj, lk, ll);
+#endif
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
@@ -541,14 +560,15 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            dim3 threads(scheme[0], scheme[1]);
+            auto blocks = make_grid(workers, 1);
+            auto threads = make_block(scheme[0], scheme[1]);
             int reserved_shm_size = scheme[3];
-            rys_j_kernel<<<workers, threads, buflen, stream>>>(
+            LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 dm_penalty, pool, head + offset/256,
-                gout_pattern, reserved_shm_size);
+                gout_pattern, reserved_shm_size, stream);
         };
 
         launch(0, 256);

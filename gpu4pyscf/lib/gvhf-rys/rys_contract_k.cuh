@@ -18,6 +18,16 @@
 
 #include "gvhf-rys/vhf.cuh"
 
+// Abstracts 2D-kernel gout thread-index setup. Used 4x in this header.
+// Indices resolve via gpu_compat.h in both backends. setup_context()
+// also provides `item` for the __syncthreads() calls below.
+#define SETUP_GOUT_KERNEL() \
+    setup_context(); \
+    int nsq_per_block = blockDim_x; \
+    int gout_id = threadIdx_y; \
+    int gout_stride = blockDim_y;
+
+
 __device__ __forceinline__
 int lex_xyz_offset(int l) {
     // the offsets for _c_cartesian_lexical_xyz = l*(l+1)*(l+2)/6 * 3
@@ -35,9 +45,7 @@ __device__ __forceinline__
 void vrr(double *g, double *ri, double *rj, double *Rpq, double aj_aij, double rt_aij,
          double b10, int g_size)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     for (int n = gout_id; n < 3; n += gout_stride) {
         double *_gx = g + n * g_size * nsq_per_block;
         double Rpa = (rj[n] - ri[n]) * aj_aij;
@@ -60,9 +68,7 @@ __device__ __forceinline__
 void trr(double *g, double *rlrk, double *Rpq, double al_akl, double rt_akl,
          double b00, double b01, int lij3, int stride_k, int g_size)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
         __syncthreads();
         int i = n / 3; //for i in range(lij+1):
@@ -100,9 +106,7 @@ template <int LI, int LJ>
 __device__ __forceinline__
 void hrr_ij(double *g, double *rjri, int count, int g_size)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     constexpr int lij = LI + LJ;
     constexpr int stride_j = LI + 1;
     constexpr int stride_k = stride_j * (LJ + 1);
@@ -129,9 +133,7 @@ template <int LK, int LL>
 __device__ __forceinline__
 void hrr_kl(double *g, double *rlrk, int stride_k)
 {
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    SETUP_GOUT_KERNEL();
     constexpr int lkl = LK + LL;
     for (int n = gout_id; n < stride_k*3; n += gout_stride) {
         int i = n / 3;
@@ -228,3 +230,5 @@ void dot_dm(double *vk, double *dm_cache, double *gout, int nao, int i0, int l0,
         atomicAdd(vk_local+i*nao+l, v);
     } }
 }
+
+#undef SETUP_GOUT_KERNEL

@@ -22,7 +22,8 @@ void type1_cart_ipipv(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x;
+    setup_context();
+    const int task_id = blockIdx_x;
     if (task_id >= ntasks){
         return;
     }
@@ -38,7 +39,7 @@ void type1_cart_ipipv(double *gctr,
 
     constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    __shared__ double buf1[nfi2_max*nfj_max];
+    SHARED_ARRAY(double, buf1, [nfi2_max*nfj_max]);
     type1_cart_kernel<2,0>(
         buf1, LI+2, LJ,
         ish, jsh, ksh,
@@ -47,8 +48,8 @@ void type1_cart_ipipv(double *gctr,
     __syncthreads();
 
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    __shared__ double buf[3*nfi1_max*nfj_max];
-    for (int i = threadIdx.x; i < 3*nfi1_max*nfj_max; i+=blockDim.x){
+    SHARED_ARRAY(double, buf, [3*nfi1_max*nfj_max]);
+    for (int i = threadIdx_x; i < 3*nfi1_max*nfj_max; i+=blockDim_x){
         buf[i] = 0.0;
     }
     __syncthreads();
@@ -66,7 +67,7 @@ void type1_cart_ipipv(double *gctr,
     _li_down_and_write(gctr, buf, LI, LJ, nao);
     __syncthreads();
     if (LI > 0){
-        for (int i = threadIdx.x; i < 3*nfi1_max*nfj_max; i+=blockDim.x){
+        for (int i = threadIdx_x; i < 3*nfi1_max*nfj_max; i+=blockDim_x){
             buf[i] = 0.0;
         }
         __syncthreads();
@@ -95,7 +96,8 @@ void type1_cart_ipvip(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x;
+    setup_context();
+    const int task_id = blockIdx_x;
     if (task_id >= ntasks){
         return;
     }
@@ -111,7 +113,7 @@ void type1_cart_ipvip(double *gctr,
 
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    __shared__ double buf1[nfi1_max*nfj1_max];
+    SHARED_ARRAY(double, buf1, [nfi1_max*nfj1_max]);
     type1_cart_kernel<1,1>(
         buf1, LI+1, LJ+1,
         ish, jsh, ksh,
@@ -120,8 +122,8 @@ void type1_cart_ipvip(double *gctr,
     __syncthreads();
 
     constexpr int nfi_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    __shared__ double buf[3*nfi_max*nfj1_max];
-    for (int i = threadIdx.x; i < 3*nfi_max*nfj1_max; i+=blockDim.x){
+    SHARED_ARRAY(double, buf, [3*nfi_max*nfj1_max]);
+    for (int i = threadIdx_x; i < 3*nfi_max*nfj1_max; i+=blockDim_x){
         buf[i] = 0.0;
     }
     __syncthreads();
@@ -141,7 +143,7 @@ void type1_cart_ipvip(double *gctr,
     __syncthreads();
 
     if (LJ > 0){
-        for (int i = threadIdx.x; i < 3*nfi_max*nfj1_max; i+=blockDim.x){
+        for (int i = threadIdx_x; i < 3*nfi_max*nfj1_max; i+=blockDim_x){
             buf[i] = 0.0;
         }
         __syncthreads();

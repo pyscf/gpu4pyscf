@@ -19,34 +19,41 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #include "contract_rho.cuh"
+// Tree reduction along iy dimension in shared memory buf.
+#define REDUCE_Y(buf, ixy, iy) \
+    for (int _s_ = BLKSIZEY >> 1; _s_ > 0; _s_ >>= 1) { \
+        if ((iy) < _s_) { \
+            (buf)[(ixy)] += (buf)[(ixy) + BLKSIZEX * _s_]; \
+        } \
+        __syncthreads(); \
+    }
+static_assert((BLKSIZEY & (BLKSIZEY - 1)) == 0, "BLKSIZEY must be a power of 2");
+
 // TODO: improve this?
 __global__
 void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, int ngrids, int nao)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int grid_id = global_x;
+    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    int ix = threadIdx_x;
+    int iy = threadIdx_y;
+
     const bool active = grid_id < ngrids;
     size_t Ngrids = ngrids;
     double v = 0;
     if (active){
-        for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
+        for (int ao_id = threadIdx_y; ao_id < nao; ao_id += BLKSIZEY) {
             int ket_idx = grid_id + ao_id * Ngrids;
-            v += bra[ket_idx] * ket[ket_idx];
+            v += (bra[ket_idx] * ket[ket_idx]);
         }
     }
 
-    __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
-    int ix = threadIdx.x;
-    int iy = threadIdx.y;
     int ixy = ix + BLKSIZEX * iy;
     buf[ixy] = v;   __syncthreads();
-
-    if (blockDim.y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-    if (blockDim.y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-    if (blockDim.y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-    if (blockDim.y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-    if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+    REDUCE_Y(buf, ixy, iy);
 
     if (iy == 0 && active) {
         rho[grid_id] = buf[ix];
@@ -57,17 +64,19 @@ void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, 
 __global__
 void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids, int nao, int count)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    int grid_id = global_x;
+    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    int ix = threadIdx_x;
+    int iy = threadIdx_y;
     const bool active = grid_id < ngrids;
     size_t ket_stride = nao * ngrids;
     size_t rho_stride = count * ngrids;
 
-    __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
-
     for (int ia = 0; ia < count; ia++){
         double v[4] = {0.0, 0.0, 0.0, 0.0};
         if (active){
-            for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
+            for (int ao_id = threadIdx_y; ao_id < nao; ao_id += BLKSIZEY) {
                 int ket_idx = grid_id + ao_id * ngrids;
                 double bra_tmp = bra[ket_idx + ia * ket_stride];
                 v[0] += bra_tmp * ket[0*ket_stride + ket_idx];
@@ -77,16 +86,10 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
             }
         }
 
-        int ix = threadIdx.x;
-        int iy = threadIdx.y;
         int ixy = ix + BLKSIZEX * iy;
         for (int i = 0; i < 4; i++){
             buf[ixy] = v[i];   __syncthreads();
-            if (blockDim.y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-            if (blockDim.y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-            if (blockDim.y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-            if (blockDim.y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-            if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+            REDUCE_Y(buf, ixy, iy);
 
             if (iy == 0 && active) {
                 rho[grid_id + ia * ngrids + rho_stride * i] = buf[ix];
@@ -98,7 +101,11 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
 __global__
 void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int grid_id = global_x;
+    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    const int ix = threadIdx_x;
+    const int iy = threadIdx_y;
     const bool active = grid_id < ngrids;
 
     size_t Ngrids = ngrids;
@@ -106,7 +113,7 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
 
     double v[4] = {0.0, 0.0, 0.0, 0.0};
     if (active){
-        for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
+        for (int ao_id = threadIdx_y; ao_id < nao; ao_id += BLKSIZEY) {
             size_t ket_idx = grid_id + ao_id * Ngrids;
             double bra_tmp = bra[ket_idx];
             double ket_tmp = ket[ket_idx];
@@ -127,18 +134,11 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
         }
     }
 
-    __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
-    int ix = threadIdx.x;
-    int iy = threadIdx.y;
     int ixy = ix + BLKSIZEX * iy;
 
     for (int i = 0; i < 4; i++){
         buf[ixy] = v[i];   __syncthreads();
-        if (blockDim.y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-        if (blockDim.y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-        if (blockDim.y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-        if (blockDim.y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-        if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+        REDUCE_Y(buf, ixy, iy);
 
         if (iy == 0 && active) {
             rho[grid_id + ngrids * i] = buf[ix];
@@ -150,7 +150,11 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
 __global__
 void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    setup_context();
+    const int grid_id = global_x;
+    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    const int ix = threadIdx_x;
+    const int iy = threadIdx_y;
     const bool active = grid_id < ngrids;
 
     size_t Ngrids = ngrids;
@@ -158,7 +162,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
 
     double v[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     if (active){
-        for (int ao_id = threadIdx.y; ao_id < nao; ao_id += BLKSIZEY) {
+        for (int ao_id = threadIdx_y; ao_id < nao; ao_id += BLKSIZEY) {
             size_t ket_idx = grid_id + ao_id * Ngrids;
             double bra_tmp0 = bra[ket_idx];
             double ket_tmp0 = ket[ket_idx];
@@ -191,18 +195,11 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
 
     v[4] *= 0.5;
 
-    __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
-    int ix = threadIdx.x;
-    int iy = threadIdx.y;
     int ixy = ix + BLKSIZEX * iy;
 
     for (int i = 0; i < 5; i++){
         buf[ixy] = v[i];   __syncthreads();
-        if (blockDim.y >= 32 && iy < 16) buf[ixy] += buf[ixy + BLKSIZEX * 16]; __syncthreads();
-        if (blockDim.y >= 16 && iy < 8)  buf[ixy] += buf[ixy + BLKSIZEX * 8];  __syncthreads();
-        if (blockDim.y >= 8  && iy < 4)  buf[ixy] += buf[ixy + BLKSIZEX * 4];  __syncthreads();
-        if (blockDim.y >= 4  && iy < 2)  buf[ixy] += buf[ixy + BLKSIZEX * 2];  __syncthreads();
-        if (blockDim.y >= 2  && iy < 1)  buf[ixy] += buf[ixy + BLKSIZEX * 1];  __syncthreads();
+        REDUCE_Y(buf, ixy, iy);
 
         if (iy == 0 && active) {
             rho[grid_id + ngrids * i] = buf[ix];
@@ -214,8 +211,9 @@ static __global__
 void dscale_ao_kernel(double *out, double *ket, double *wv,
                       int ngrids, int nao, int nvar)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int ao_id = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int grid_id = global_x;
+    int ao_id = global_y;
     if (grid_id >= ngrids || ao_id >= nao) {
         return;
     }
@@ -235,8 +233,9 @@ static __global__
 void zscale_ao_kernel(double *out, double *ket, double *wv,
                       int ngrids, int nao, int nvar)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int ao_id = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int grid_id = global_x;
+    int ao_id = global_y;
     if (grid_id >= ngrids || ao_id >= nao) {
         return;
     }
@@ -263,10 +262,11 @@ void zscale_ao_kernel(double *out, double *ket, double *wv,
 
 __global__
 void GDFT_make_dR_dao_w_kernel(double *out, double *ket, double *wv,
-                         int ngrids, int nao)
+                               int ngrids, int nao)
 {
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    int ao_id = blockIdx.y * blockDim.y + threadIdx.y;
+    setup_context();
+    int grid_id = global_x;
+    int ao_id = global_y;
     if (grid_id >= ngrids || ao_id >= nao) {
         return;
     }
@@ -308,9 +308,10 @@ extern "C"{
 __host__
 int GDFTcontract_rho(double *rho, const double *bra, const double *ket, int ngrids, int nao, cudaStream_t stream)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    GDFTcontract_rho_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao);
+    auto threads = make_block(BLKSIZEX, BLKSIZEY);
+    auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
+    LAUNCH_KERNEL(GDFTcontract_rho_kernel, blocks, threads, 0, stream,
+                  rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTcontract_rho: %s\n", cudaGetErrorString(err));
@@ -321,9 +322,10 @@ int GDFTcontract_rho(double *rho, const double *bra, const double *ket, int ngri
 
 int GDFTcontract_rho4(double *rho, double *bra, double *ket, int ngrids, int nao, int count, cudaStream_t stream)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    GDFTcontract_rho4_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao, count);
+    auto threads = make_block(BLKSIZEX, BLKSIZEY);
+    auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
+    LAUNCH_KERNEL(GDFTcontract_rho4_kernel, blocks, threads, 0, stream,
+                  rho, bra, ket, ngrids, nao, count);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTcontract_rho: %s\n", cudaGetErrorString(err));
@@ -334,9 +336,10 @@ int GDFTcontract_rho4(double *rho, double *bra, double *ket, int ngrids, int nao
 
 int GDFTcontract_rho_gga(double *rho, double *bra, double *ket, int ngrids, int nao, cudaStream_t stream)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    GDFTcontract_rho_gga_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao);
+    auto threads = make_block(BLKSIZEX, BLKSIZEY);
+    auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
+    LAUNCH_KERNEL(GDFTcontract_rho_gga_kernel, blocks, threads, 0, stream,
+                  rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTcontract_rho_gga: %s\n", cudaGetErrorString(err));
@@ -347,9 +350,10 @@ int GDFTcontract_rho_gga(double *rho, double *bra, double *ket, int ngrids, int 
 
 int GDFTcontract_rho_mgga(double *rho, double *bra, double *ket, int ngrids, int nao, cudaStream_t stream)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX);
-    GDFTcontract_rho_mgga_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao);
+    auto threads = make_block(BLKSIZEX, BLKSIZEY);
+    auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX);
+    LAUNCH_KERNEL(GDFTcontract_rho_mgga_kernel, blocks, threads, 0, stream,
+                  rho, bra, ket, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTcontract_rho_mgga: %s\n", cudaGetErrorString(err));
@@ -361,9 +365,10 @@ int GDFTcontract_rho_mgga(double *rho, double *bra, double *ket, int ngrids, int
 int GDFT_make_dR_dao_w(double *out, double *ket, double *wv,
                  int ngrids, int nao, cudaStream_t stream)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
-    GDFT_make_dR_dao_w_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao);
+    auto threads = make_block(BLKSIZEX, BLKSIZEY);
+    auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
+    LAUNCH_KERNEL(GDFT_make_dR_dao_w_kernel, blocks, threads, 0, stream,
+                  out, ket, wv, ngrids, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFT_make_dR_dao_w: %s\n", cudaGetErrorString(err));
@@ -375,12 +380,14 @@ int GDFT_make_dR_dao_w(double *out, double *ket, double *wv,
 int GDFTscale_ao(double *out, double *ket, double *wv,
                  int ngrids, int nao, int nvar, int is_real, cudaStream_t stream)
 {
-    dim3 threads(BLKSIZEX, BLKSIZEY);
-    dim3 blocks((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
+    auto threads = make_block(BLKSIZEX, BLKSIZEY);
+    auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
     if (is_real) {
-        dscale_ao_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao, nvar);
+        LAUNCH_KERNEL( dscale_ao_kernel, blocks, threads, 0,
+                        out, ket, wv, ngrids, nao, nvar, stream);
     } else {
-        zscale_ao_kernel<<<blocks, threads, 0, stream>>>(out, ket, wv, ngrids, nao, nvar);
+        LAUNCH_KERNEL( zscale_ao_kernel, blocks, threads, 0,
+                        out, ket, wv, ngrids, nao, nvar, stream);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

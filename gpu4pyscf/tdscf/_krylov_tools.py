@@ -14,6 +14,7 @@
 
 import cupy as cp
 import sys
+import numpy as np
 import scipy.linalg
 
 from gpu4pyscf.tdscf import math_helper
@@ -175,10 +176,30 @@ _shifted_linear_diagonal_initguess = shifted_linear_diagonal
 _shifted_linear_diagonal_precond   = shifted_linear_diagonal
 
 
-def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue', 
-                  initguess_fn=None, precond_fn=None, rhs=None, 
-                  omega_shift=None, n_states=20,conv_tol=1e-5, 
-                  max_iter=35, extra_init=8, gram_schmidt=True, 
+def _align_eigh_phase_SYCL(a, v):
+    '''Align eigenvector phases of cp.linalg.eigh to CPU LAPACK.
+
+    oneMKL (dpnp) and cuSolver may return eigenvectors with opposite sign for
+    the same matrix; the sign is arbitrary but NAC-type quantities are bilinear
+    in eigenvectors, so recorded references depend on it. LAPACK syevd and
+    cuSolver agree on the phase convention, so aligning to CPU LAPACK makes
+    SYCL results consistent with CUDA references. SYCL-only; CUDA path
+    untouched.
+    '''
+    if 'dpnp' not in sys.modules:
+        return v
+    v_ref = scipy.linalg.eigh(cp.asnumpy(a))[1]
+    m = min(v.shape[1], v_ref.shape[1])
+    s = np.sign(np.sum(cp.asnumpy(v[:, :m]).conj() * v_ref[:, :m], axis=0))
+    s[s == 0] = 1.0
+    out = v.copy()
+    out[:, :m] = v[:, :m] * cp.asarray(s)
+    return out
+
+def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
+                  initguess_fn=None, precond_fn=None, rhs=None,
+                  omega_shift=None, n_states=20,conv_tol=1e-5,
+                  max_iter=35, extra_init=8, gram_schmidt=True,
                   single=False, verbose=logger.NOTE):
     '''
         This solver is used to solve the following problems:
@@ -415,6 +436,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             if gram_schmidt:
                 ''' solve ax=xΩ '''
                 omega, x = cp.linalg.eigh(sub_A)
+                x = _align_eigh_phase_SYCL(sub_A, x)
             else:
                 ''' solve ax=sxΩ 
                 # TODO need precondition step: s/d first'''

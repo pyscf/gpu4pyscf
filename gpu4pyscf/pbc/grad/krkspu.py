@@ -48,7 +48,7 @@ def generate_first_order_local_orbitals(cell, minao_ref='MINAO', kpts=None):
         # Lowdin orthogonalization coefficients = S^{-1/2}
         S0 = sAB[k].conj().T.dot(C0_minao[k])
         w2, v = cp.linalg.eigh(S0)
-        w = np.sqrt(w2)
+        w = cp.sqrt(w2)
         wv_ks.append((w, v))
         S0_lowdin.append((v/w).dot(v.conj().T))
 

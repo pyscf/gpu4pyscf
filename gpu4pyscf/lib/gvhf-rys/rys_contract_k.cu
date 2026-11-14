@@ -20,11 +20,17 @@
 #include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
+#ifndef USE_SYCL
 #include "gvhf-rys/gxyz_offset.cuh"
+#endif
 #include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 #include "rys_contract_k.cuh"
+
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<GXYZOffset[256]> s_rys_gxyz_offset;
+#endif
 
 #define GOUT_WIDTH1     81
 
@@ -35,21 +41,27 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                   uint32_t *pool, int *head, int gout_pattern, int reserved_shm_size)
 {
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    SHARED_ARRAY(int, ntasks);
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, pair_kl0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, i0);
+    SHARED_ARRAY(int, j0);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(double, ri, [3]);
+    SHARED_ARRAY(double, rjri, [3]);
+    SHARED_ARRAY(double, aij_cache, [2]);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
     // sq is short for shl_quartet
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh;
-    __shared__ int i0, j0, nao;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -501,6 +513,49 @@ while (1) {
 }
 }
 
+// Requires room for 256*3 entries: the tile count prod((nf+2)/3) reaches 625
+// at (4,4,4,4), and the launcher copies it out in chunks of 256.
+#ifdef USE_SYCL
+void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds)
+{
+/*
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfk = (lk + 1) * (lk + 2) // 2
+    nfl = (ll + 1) * (ll + 2) // 2
+    ioff = np.arange(0, nfi, 3, dtype=np.int8)
+    joff = np.arange(0, nfj, 3, dtype=np.int8)
+    koff = np.arange(0, nfk, 3, dtype=np.int8)
+    loff = np.arange(0, nfl, 3, dtype=np.int8)
+    gxyz_offset = lib.cartesian_prod([ioff, joff, koff, loff])
+    copy = 256 // len(gxyz_offset) + 1
+    return cp.vstack([cp.asarray(gxyz_offset)]*copy, dtype=np.int8)
+*/
+    int nfi = bounds.nfi;
+    int nfj = bounds.nfj;
+    int nfk = bounds.nfk;
+    int nfl = bounds.nfl;
+    int nf = 0;
+    for (int i = 0; i < nfi; i += 3) {
+    for (int j = 0; j < nfj; j += 3) {
+    for (int k = 0; k < nfk; k += 3) {
+    for (int l = 0; l < nfl; l += 3) {
+        gxyz_offset[nf].ioff = i;
+        gxyz_offset[nf].joff = j;
+        gxyz_offset[nf].koff = k;
+        gxyz_offset[nf].loff = l;
+        ++nf;
+    } } } }
+    // n+m must be clamped too: nf need not divide 256, so the last round
+    // would otherwise write past entry 255.
+    for (int n = nf; n < 256; n += nf) {
+        for (int m = 0; m < nf && n+m < 256; ++m) {
+            gxyz_offset[n+m] = gxyz_offset[m];
+        }
+    }
+}
+#endif
+
 void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                           int shm_size, int gout_stride_max)
 {
@@ -619,7 +674,12 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
 
     if (!rys_k_unrolled(envs, &kmat, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                         s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers, stream)) {
+#ifdef USE_SYCL
+        GXYZOffset gxyz_offset[256*3];
+        RYS_make_gxyz_offset(gxyz_offset, bounds);
+#else
         const GXYZOffset *gxyz_offset = RYS_get_gxyz_offset(li, lj, lk, ll);
+#endif
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
                             ((lk == 0) << 1) |
@@ -634,6 +694,9 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
             int scheme[4];
             threads_scheme_for_k(scheme, bounds, shm_size, tile_chunk);
             int buflen = scheme[2];
+            int reserved_shm_size = scheme[3];
+            auto blocks = make_grid(workers, 1);
+            auto threads = make_block(scheme[0], scheme[1]);
             if (buflen > 48000) {
                 cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
                 cudaError_t err = cudaGetLastError();
@@ -643,12 +706,10 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            dim3 threads(scheme[0], scheme[1]);
-            int reserved_shm_size = scheme[3];
-            rys_k_kernel<<<workers, threads, buflen, stream>>>(
+            LAUNCH_KERNEL( rys_k_kernel, blocks, threads, buflen,
                 *envs, kmat, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
-                head + offset/256, gout_pattern, reserved_shm_size);
+                head + offset/256, gout_pattern, reserved_shm_size, stream);
         };
 
         launch(0, 256);

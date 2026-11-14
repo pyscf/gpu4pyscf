@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/build_rys_gxyz.cuh"
@@ -37,22 +35,34 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, double omega, PBCIntEnv
                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                                 int *head, int sp_blocks)
 {
-    int thread_id = threadIdx.x;
-    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    setup_context();
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, ksh_cell0);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, expk);
+    SHARED_ARRAY(int, ck);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    int thread_id = threadIdx_x;
+    img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
-    extern __shared__ double shared_memory[];
-    __shared__ int sp_block_id, ksh_cell0;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int expk, ck;
-    __shared__ int num_ijk_tasks;
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -295,22 +305,43 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, double omega, P
                                     float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                                     int *head, int npairs_ij, int ksh_blocks)
 {
-    int thread_id = threadIdx.x;
-    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    setup_context();
+    SHARED_ARRAY(int, pair_ij);
+    SHARED_ARRAY(int, ksh_block_id);
+    SHARED_ARRAY(int, ksh0_cell0);
+    SHARED_ARRAY(int, ksh1_cell0);
+    SHARED_ARRAY(int, ish);
+    SHARED_ARRAY(int, jsh);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, lk);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, kprim);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nst_per_block);
+    SHARED_ARRAY(int, expi);
+    SHARED_ARRAY(int, expj);
+    SHARED_ARRAY(int, ci);
+    SHARED_ARRAY(int, cj);
+    SHARED_ARRAY(double, xi);
+    SHARED_ARRAY(double, yi);
+    SHARED_ARRAY(double, zi);
+    SHARED_ARRAY(double, xjxi);
+    SHARED_ARRAY(double, yjyi);
+    SHARED_ARRAY(double, zjzi);
+    SHARED_ARRAY(int, num_ijk_tasks);
+    SHARED_ARRAY(int, num_sub_tasks);
+    SHARED_ARRAY(int, img_not_processed);
+    SHARED_ARRAY(int, img_tile_size);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    int thread_id = threadIdx_x;
+    img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
-    extern __shared__ double shared_memory[];
-    __shared__ int pair_ij, ksh_block_id;
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int ish, jsh, li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int expi, expj, ci, cj;
-    __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
-    __shared__ int num_ijk_tasks;
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -558,11 +589,13 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, double omega, PBCIntEnvVars 
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    contract_int3c2e_dm_kernel<<<workers, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
             out, dm, omega, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, nbatches_shl_pair);
+            head, nbatches_shl_pair, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
@@ -576,18 +609,20 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, double omega, PBCInt
                                int shm_size, int npairs, int nbatches_ksh, int nauxbas,
                                uint32_t *bas_ij_idx, int *ksh_offsets,
                                int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
-                               float *diffuse_exps, float *diffuse_coefs, float log_cutoff, cudaStream_t stream)
+                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff, cudaStream_t stream)
 {
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    contract_int3c2e_auxvec_kernel<<<workers, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, npairs, nbatches_ksh);
+            head, npairs, nbatches_ksh, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec: %s\n", cudaGetErrorString(err));

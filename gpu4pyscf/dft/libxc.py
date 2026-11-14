@@ -16,6 +16,7 @@ import numpy as np
 import ctypes
 import cupy
 import copy
+import sys
 from ctypes import POINTER
 # Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
@@ -131,6 +132,10 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
 class _xcfun(ctypes.Structure):
     pass
 
+# Set from the device library below when it advertises a limit; None means
+# "no limit reported", i.e. the device path handles every order it advertises.
+MAX_DERIV_ORDER = None
+
 if _libxc is not None:
     _xc_func_p = ctypes.POINTER(xc_func_type)
     _libxc.xc_func_alloc.restype = _xc_func_p
@@ -144,6 +149,16 @@ if _libxc is not None:
     _libxc.xc_func_info_get_ext_params_name.argtypes = (ctypes.c_void_p, ctypes.c_int)
     _libxc.xc_func_info_get_ext_params_name.restype = ctypes.c_char_p
     _libxc.xc_func_set_ext_params_name.argtypes = (_xc_func_p, ctypes.c_char_p, ctypes.c_double)
+
+    # Highest derivative order the device library implements. The CUDA libxc
+    # build handles every order it advertises, so it does not export this
+    # symbol; the SYCL ExchCXX shim stops at fxc and does. Anything beyond it
+    # is routed to PySCF's CPU libxc by XCfun.on_gpu below.
+    try:
+        _libxc.xc_device_max_deriv_order.restype = ctypes.c_int
+        MAX_DERIV_ORDER = _libxc.xc_device_max_deriv_order()
+    except AttributeError:
+        MAX_DERIV_ORDER = None
 
     nfunc = _libxc.xc_number_of_functionals()
     XC_IDS = np.zeros(nfunc, dtype=np.int32)
@@ -170,6 +185,15 @@ def _set_omega(func, omega):
         if _has_omega(func_aux[i]):
             _libxc.xc_func_set_ext_params_name(func_aux[i], b'_omega', omega)
 
+def _can_set_omega(func):
+    '''True if omega is a runtime ext param of func or one of its components.
+    Real libxc always exposes _omega for range-separated functionals; the SYCL
+    ExchCXX shim reports none because ExchCXX fixes omega at construction.'''
+    if _has_omega(func):
+        return True
+    func_aux = ctypes.cast(func.contents.xc_func_type, POINTER(_xc_func_p))
+    return any(_has_omega(func_aux[i]) for i in range(func.contents.n_func_aux))
+
 class XCfun:
     def __init__(self, xc, spin, omega=0):
         self.spin = spin
@@ -193,12 +217,29 @@ class XCfun:
             if ret != 0:
                 raise RuntimeError('failed to initialize xc fun')
             if omega != 0:
-                _set_omega(self.xc_func, omega)
+                default_omega = libxc_cpu.rsh_coeff(self.func_id)[0]
+                if ('dpnp' in sys.modules and default_omega != 0
+                        and abs(omega - default_omega) > 1e-14
+                        and not _can_set_omega(self.xc_func)):
+                    # SYCL only: the device library (ExchCXX) fixes omega at
+                    # construction and cannot change it at runtime. Fall back
+                    # to CPU libxc, which honours omega, instead of silently
+                    # evaluating with the default omega (numint routes
+                    # on_gpu=False functionals to pyscf's CPU libxc).
+                    _libxc.xc_func_end(self.xc_func)
+                    _libxc.xc_func_free(self.xc_func)
+                    self.xc_func = None
+                    self.on_gpu = False
+                else:
+                    _set_omega(self.xc_func, omega)
 
-            self.xc_func_sizes = {}
-            for attr in dir(self.xc_func.contents.dim):
-                if "_" not in attr:
-                    self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
+            if self.xc_func is not None:
+                self.xc_func_sizes = {}
+                for attr in dir(self.xc_func.contents.dim):
+                    if "_" not in attr:
+                        self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
+            else:
+                self.xc_func_sizes = {}
 
     def __del__(self):
         if self.xc_func is None:
@@ -216,7 +257,9 @@ class XCfun:
         assert not do_lxc
         assert self.on_gpu
         stream = cupy.cuda.get_current_stream().ptr
-        assert stream == 0, 'libxc CUDA evaluation requires the default stream'
+        if 'dpnp' not in sys.modules:
+            # SYCL: the shim's single in-order master queue is the default stream.
+            assert stream == 0, 'libxc CUDA evaluation requires the default stream'
 
         if isinstance(inp, cupy.ndarray):
             inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}

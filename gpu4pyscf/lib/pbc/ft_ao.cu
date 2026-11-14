@@ -22,17 +22,27 @@
 #include "ft_ao.cuh"
 
 #define THREADS         256
+// SYCL port: one shell per block (nsh_per_block == 1). Every thread in the
+// block then sees the same shell's iprim, so the primitive loop's
+// __syncthreads() trip count is uniform without a per-block max-iprim
+// workaround. Overrides ft_ao.cuh's NG_PER_BLOCK (32).
+#ifdef USE_SYCL
+#undef NG_PER_BLOCK
+#define NG_PER_BLOCK    FT_AO_THREADS
+#endif
 #define GOUT_WIDTH      30
 #define POOL_SIZE       65536
 
 __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
-    int sh_block_id = gridDim.y - blockIdx.y - 1;
-    int Gv_block_id = blockIdx.x;
+    setup_context();
+    SHARED_ARRAY(double, g, [(AUXL+1)*FT_AO_THREADS * 6]);
+    int sh_block_id = gridDim_y - blockIdx_y - 1;
+    int Gv_block_id = blockIdx_x;
     int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
-    int sh_id_in_block = threadIdx.y;
-    int Gv_id_in_block = threadIdx.x;
+    int sh_id_in_block = threadIdx_y;
+    int Gv_id_in_block = threadIdx_x;
     int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
     if (sh_id >= envs.nbas) {
         return;
@@ -56,7 +66,6 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     double kk = kx * kx + ky * ky + kz * kz;
 
     int gx_len = (AUXL+1) * FT_AO_THREADS;
-    __shared__ double g[(AUXL+1)*FT_AO_THREADS * 6];
     double *gxR = g + (AUXL+1) * NG_PER_BLOCK * sh_id_in_block + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -190,12 +199,27 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                       double *Gv, int nGv, int *ao_loc, int compressing, int to_sph,
                       int *head, int nbatches_shl_pair)
 {
+    setup_context();
+    SHARED_ARRAY(int, Gv_block_id);
+    SHARED_ARRAY(int, sp_block_id);
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, gout_stride);
+    SHARED_ARRAY(int, nsp_per_block);
+    SHARED_ARRAY(int, img_max);
+    SHARED_ARRAY(int, img_counts, [WARPS]);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
     constexpr int nGv_per_block = WARP_SIZE;
-    int thread_id = threadIdx.x;
+    int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int warp_id = thread_id / nGv_per_block;
-    __shared__ int Gv_block_id, sp_block_id;
-    double *c2s_pool = pool + blockIdx.x * POOL_SIZE;
+    double *c2s_pool = pool + blockIdx_x * POOL_SIZE;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -213,11 +237,6 @@ while (1) {
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj;
-    __shared__ int iprim, jprim;
-    __shared__ int nao;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -245,7 +264,6 @@ while (1) {
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nGsp_per_block;
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -285,12 +303,23 @@ while (1) {
         int jsh = bas_ij % bvk_nbas;
         int img0 = img_offsets[pair_ij];
         int img1 = img_offsets[pair_ij+1];
-        __shared__ int img_max;
-        __shared__ int img_counts[WARPS];
         if (Gv_id_in_block == 0) {
             img_counts[warp_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
+        // Serial scan (not a sub-group shuffle): only thread_id < WARPS lanes
+        // hold valid counts, so a shuffle would have partial sub-group
+        // participation, which is UB in SYCL. Integer max is bit-identical
+        // on both backends.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < WARPS; ++w) {
+                count = max(count, img_counts[w]);
+            }
+            img_max = count;
+        }
+#else
         if (thread_id < WARPS) {
             int count = img_counts[thread_id];
             unsigned mask = (1u << WARPS) - 1;
@@ -301,6 +330,7 @@ while (1) {
                 img_max = count;
             }
         }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -1140,11 +1170,13 @@ extern "C" {
 int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, cudaStream_t stream)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
-    dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
-    dim3 blocks(nbatches_grids, nbatches_shls);
-    ft_ao_bdiv_kernel<<<blocks, threads, 0, stream>>>(out, *envs, ngrids, grids);
+
+    auto threads = make_block(NG_PER_BLOCK, nsh_per_block);
+    auto blocks = make_grid(nbatches_grids, nbatches_shls);
+    LAUNCH_KERNEL( ft_ao_bdiv_kernel, blocks, threads, 0,
+            out, *envs, ngrids, grids, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_bdiv_kernel: %s\n", cudaGetErrorString(err));
@@ -1159,15 +1191,23 @@ int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
                     int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph, cudaStream_t stream)
 {
+#ifdef USE_SYCL
+    // No tasks: the persistent workers would compute batch_id / 0.
+    if (nbatches_shl_pair <= 0 || ngrids <= 0) {
+        return 0;
+    }
+#endif
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    ft_aopair_kernel<<<workers, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
         out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
-        ao_loc, compressing, to_sph, head, nbatches_shl_pair);
+        ao_loc, compressing, to_sph, head, nbatches_shl_pair, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));

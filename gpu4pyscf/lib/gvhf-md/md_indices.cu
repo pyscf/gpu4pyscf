@@ -15,8 +15,7 @@
  */
 
 #include <stdint.h>
-#include <cuda_runtime.h>
-#include <cuda.h>
+#include "gpu_compat.h"
 
 __device__ int Rt2_idx_offsets[] = {
 0,1,5,15,35,70,126,210,330,

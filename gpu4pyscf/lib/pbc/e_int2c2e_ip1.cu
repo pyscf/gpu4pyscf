@@ -34,15 +34,24 @@ void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars e
                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
                           int *gout_stride_lookup)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    setup_context();
+    SHARED_ARRAY(int, shl_pair0);
+    SHARED_ARRAY(int, shl_pair1);
+    SHARED_ARRAY(int, nbas);
+    SHARED_ARRAY(int, li);
+    SHARED_ARRAY(int, lj);
+    SHARED_ARRAY(int, nroots);
+    SHARED_ARRAY(int, nao);
+    SHARED_ARRAY(int, iprim);
+    SHARED_ARRAY(int, jprim);
+    SHARED_ARRAY(int, gout_stride);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    int sp_block_id = blockIdx_x;
+    int thread_id = threadIdx_x;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int nbas;
-    __shared__ int li, lj, nroots, nao, iprim, jprim;
-    __shared__ int gout_stride;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -73,7 +82,6 @@ void int2c2e_deriv_kernel(double *de, double *sigma, double *dm, PBCIntEnvVars e
     //int j_1 = stride_j*nsp_per_block;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double shared_memory[];
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
@@ -242,10 +250,12 @@ int int2c2e_deriv(double *grad, double *sigma, double *dm, PBCIntEnvVars *envs,
                   int nbatches_shl_pair, int *shl_pair_offsets,
                   uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
     cudaFuncSetAttribute(int2c2e_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int2c2e_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
+    LAUNCH_KERNEL( int2c2e_deriv_kernel, blocks, threads, shm_size,
             grad, sigma, dm, *envs, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_deriv kernel: %s\n", cudaGetErrorString(err));

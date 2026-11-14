@@ -21,6 +21,7 @@ void type2_cart_unrolled_kernel(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
+    setup_context();
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 
@@ -44,14 +45,14 @@ void type2_cart_unrolled_kernel(double *gctr,
     constexpr int BLKI = (LIC1+1)/2 * LCC1;
     constexpr int BLKJ = (LJC1+1)/2 * LCC1;
 
-    __shared__ double omegai[LI1*(LI1+1)*(LI1+2)/6 * BLKI];
-    __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
+    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
+    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
 
     type2_facs_omega<LI, LC>(omegai, rca);
     type2_facs_omega<LJ, LC>(omegaj, rcb);
     __syncthreads();
 
-    __shared__ double rad_all[(LI+LJ+1)*LIC1*LJC1];
+    SHARED_ARRAY(double, rad_all, [(LI+LJ+1)*LIC1*LJC1]);
     set_shared_memory(rad_all, (LI+LJ+1)*LIC1*LJC1);
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
@@ -80,7 +81,7 @@ void type2_cart_unrolled_kernel(double *gctr,
         for (int j = 0; j <= LJ+LC; j++){
             block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*(LJ+LC+1)+j);
         }}
-        const int ir = threadIdx.x;
+        const int ir = threadIdx_x;
         ur_tmp *= r128[ir];
     }
     __syncthreads();
@@ -88,12 +89,12 @@ void type2_cart_unrolled_kernel(double *gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
 
-    __shared__ double angi[LI1*nfi*LIC1];
-    __shared__ double angj[LJ1*nfj*LJC1];
+    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
+    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         gctr[ij] = 0.0;
     }
 
@@ -102,7 +103,7 @@ void type2_cart_unrolled_kernel(double *gctr,
         type2_ang<LI, LC>(angi, rca, omegai+m);
         type2_ang<LJ, LC>(angj, rcb, omegaj+m);
         __syncthreads();
-        for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
             const int i = ij%nfi;
             const int j = ij/nfi;
             double s = 0;
@@ -135,7 +136,8 @@ void type2_cart_kernel(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    extern __shared__ double smem[];
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, smem);
 
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
@@ -188,7 +190,7 @@ void type2_cart_kernel(double *gctr,
         for (int j = 0; j <= LJ+LC; j++){
             block_reduce(radi[i]*radj[j]*ur_tmp, prad+i*(LJ+LC+1)+j);
         }}
-        const int ir = threadIdx.x;
+        const int ir = threadIdx_x;
         ur_tmp *= r128[ir];
     }
     __syncthreads();
@@ -200,7 +202,7 @@ void type2_cart_kernel(double *gctr,
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         gctr[ij] = 0.0;
     }
     __syncthreads();
@@ -210,7 +212,7 @@ void type2_cart_kernel(double *gctr,
         type2_ang(angi, LI, LC, rca, omegai+m);
         type2_ang(angj, LJ, LC, rcb, omegaj+m);
         __syncthreads();
-        for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+        for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
             const int i = ij%nfi;
             const int j = ij/nfi;
             double s = 0;
@@ -246,7 +248,8 @@ void type2_cart_ip1(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x;
+    setup_context();
+    const int task_id = blockIdx_x;
     if (task_id >= ntasks){
         return;
     }
@@ -261,14 +264,14 @@ void type2_cart_ip1(double *gctr,
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    __shared__ double gctr_smem[nfi*nfj*3];
-    for (int ij = threadIdx.x; ij < nfi*nfj*3; ij+=blockDim.x){
+    SHARED_ARRAY(double, gctr_smem, [nfi*nfj*3]);
+    for (int ij = threadIdx_x; ij < nfi*nfj*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
     constexpr int nfi1 = (LI+2) * (LI+3)/2;
-    __shared__ double buf[nfi1*nfj];
+    SHARED_ARRAY(double, buf, [nfi1*nfj]);
     type2_cart_unrolled_kernel<1,0,LI+1,LJ,LC>(
         buf, ish, jsh, ksh, 
         ecpbas, ecploc, 
@@ -284,7 +287,7 @@ void type2_cart_ip1(double *gctr,
         __syncthreads();
     }
 
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double *gx = gctr;
@@ -306,7 +309,8 @@ void type2_cart_ip1_general(double *gctr,
                 const int *ecpbas, const int *ecploc,
                 const int *atm, const int *bas, const double *env)
 {
-    const int task_id = blockIdx.x;
+    setup_context();
+    const int task_id = blockIdx_x;
     if (task_id >= ntasks){
         return;
     }
@@ -319,15 +323,15 @@ void type2_cart_ip1_general(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
-    __shared__ double gctr_smem[NF_MAX*NF_MAX*3];
-    for (int ij = threadIdx.x; ij < NF_MAX*NF_MAX*3; ij+=blockDim.x){
+    SHARED_ARRAY(double, gctr_smem, [NF_MAX*NF_MAX*3]);
+    for (int ij = threadIdx_x; ij < NF_MAX*NF_MAX*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
     constexpr int NFI_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    __shared__ double buf[NFI_MAX*NFJ_MAX];
+    SHARED_ARRAY(double, buf, [NFI_MAX*NFJ_MAX]);
     type2_cart_kernel<1,0>(
         buf, LI+1, LJ, LC, 
         ish, jsh, ksh, 
@@ -347,7 +351,7 @@ void type2_cart_ip1_general(double *gctr,
 
     const int nfi = (LI+1) * (LI+2) / 2;
     const int nfj = (LJ+1) * (LJ+2) / 2;
-    for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
+    for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij%nfi;
         const int j = ij/nfi;
         double *gx = gctr;

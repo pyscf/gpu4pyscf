@@ -26,20 +26,53 @@
 #define GOUT_WIDTH      36
 #define GOUT_WIDTH_IP1  18
 
+// Backend-agnostic prologue for the 1D overlap kernels in this file.
+// setup_context() is the first statement; DYNAMIC_SHARED_PTR declares the
+// dynamic shared allocation in place (extern __shared__ in CUDA, work-group
+// scratch memory in SYCL).
+#define KERNEL_SETUP() \
+    setup_context(); \
+    SHARED_ARRAY(int, shl_pair0); \
+    SHARED_ARRAY(int, shl_pair1); \
+    SHARED_ARRAY(int, li); \
+    SHARED_ARRAY(int, lj); \
+    SHARED_ARRAY(int, iprim); \
+    SHARED_ARRAY(int, jprim); \
+    SHARED_ARRAY(int, gout_stride); \
+    SHARED_ARRAY(int, nsp_per_block); \
+    DYNAMIC_SHARED_PTR(double, g); \
+    int sp_block_id = blockIdx_x; \
+    int thread_id = threadIdx_x;
+
+// Abstracts 1D kernel launch for overlap integrals. Used 4x in this file.
+// cudaFuncSetAttribute (where needed) must be placed outside this macro.
+//
+// The PBCIntEnvVars struct is owned by these macros, not passed by the caller:
+// `*envs` is copied into a host-local `*envs` before launch, so the SYCL
+// [=] capture holds it by value (the raw host pointer `envs` must not be
+// dereferenced on the device). CUDA copies the value into kernel params.
+//   LAUNCH_OVERLAP_KERNEL -> KERNEL(out, envs, <rest>)
+#define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, out_, ...) { \
+    auto blocks = make_grid(nbatches_); \
+    auto threads = make_block(THREADS); \
+    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, *envs, __VA_ARGS__, stream); \
+    cudaError_t err = cudaGetLastError(); \
+    if (err != cudaSuccess) { \
+        fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
+        return 1; \
+    } \
+}
+
 __global__ static
 void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                        int *shl_pair_offsets, int *gout_stride_lookup,
-                       int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -58,7 +91,6 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     int gout_id = thread_id / nsp_per_block;
     int g_size = (li + 1) * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double g[];
     double *gx = g + sp_id;
     double *gy = g + gx_len + sp_id;
     double *gz = g + gx_len * 2 + sp_id;
@@ -169,17 +201,13 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                       int *shl_pair_offsets, int *gout_stride_lookup,
-                      int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -198,7 +226,6 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     int gout_id = thread_id / nsp_per_block;
     int g_size = (li + 3) * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double g[];
     double *gx = g + sp_id;
     double *gy = g + gx_len + sp_id;
     double *gz = g + gx_len * 2 + sp_id;
@@ -322,17 +349,13 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                          int *shl_pair_offsets, int *gout_stride_lookup,
-                         int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -351,7 +374,6 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     int gout_id = thread_id / nsp_per_block;
     int g_size = (li + 2) * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double g[];
     double *gx = g + sp_id;
     double *gy = g + gx_len + sp_id;
     double *gz = g + gx_len * 2 + sp_id;
@@ -485,17 +507,13 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
 static __global__
 void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
                         int *shl_pair_offsets, int *gout_stride_lookup,
-                        int naoi, int naoj, size_t ij_offset)
+                  int naoi, int naoj, size_t ij_offset)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    KERNEL_SETUP();
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -514,7 +532,6 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, int *bas_ij_idx,
     int gout_id = thread_id / nsp_per_block;
     int g_size = (li + 4) * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double g[];
     double *gx = g + sp_id;
     double *gy = g + gx_len + sp_id;
     double *gz = g + gx_len * 2 + sp_id;
@@ -678,8 +695,7 @@ void ovlp_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvV
                              int *shl_pair_offsets, int *bas_ij_idx,
                              int *gout_stride_lookup)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    KERNEL_SETUP();
     int *bas = envs.bas;
     int cell0_nbas = envs.cell0_nbas;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -687,9 +703,6 @@ void ovlp_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvV
     int nao = ao_loc[cell0_nbas];
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -709,7 +722,6 @@ void ovlp_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvV
 
     int g_size = (li + 2) * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double g[];
     double *gx = g + sp_id;
     double *gy = g + gx_len + sp_id;
     double *gz = g + gx_len * 2 + sp_id;
@@ -875,8 +887,7 @@ void kin_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVa
                             int *shl_pair_offsets, int *bas_ij_idx,
                             int *gout_stride_lookup)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
+    KERNEL_SETUP();
     int *bas = envs.bas;
     int cell0_nbas = envs.cell0_nbas;
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -884,9 +895,6 @@ void kin_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVa
     int nao = ao_loc[cell0_nbas];
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, iprim, jprim;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -906,7 +914,6 @@ void kin_derivatives_kernel(double *grad, double *sigma, double *dm, PBCIntEnvVa
 
     int g_size = (li + 4) * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double g[];
     double *gx = g + sp_id;
     double *gy = g + gx_len + sp_id;
     double *gz = g + gx_len * 2 + sp_id;
@@ -1095,7 +1102,8 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
                                  PBCIntEnvVars envs, int hermi, float log_cutoff,
                                  double *bvkmesh_Ls, int ish0, int ish1, int jsh0, int jsh1)
 {
-    size_t pair_ij = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    setup_context();
+    size_t pair_ij = global_x;
     int nish = ish1 - ish0;
     int njsh = jsh1 - jsh0;
     if (pair_ij >= (size_t)nish * njsh * envs.bvk_ncells) {
@@ -1170,65 +1178,45 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                   int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_ovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+    LAUNCH_OVERLAP_KERNEL(int1e_ovlp_kernel, nbatches_shl_pair, out,
+            bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     return 0;
 }
 
 int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *bas_ij_idx,
                  int *shl_pair_offsets, int *gout_stride_lookup,
-                 int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_kin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_kin_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+    LAUNCH_OVERLAP_KERNEL(int1e_kin_kernel, nbatches_shl_pair, out,
+            bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     return 0;
 }
 
 int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
                     int nbatches_shl_pair, int *bas_ij_idx,
                     int *shl_pair_offsets, int *gout_stride_lookup,
-                    int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ipovlp_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_ipovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+    LAUNCH_OVERLAP_KERNEL(int1e_ipovlp_kernel, nbatches_shl_pair, out,
+            bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ipovlp kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     return 0;
 }
 
 int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
                    int nbatches_shl_pair, int *bas_ij_idx,
                    int *shl_pair_offsets, int *gout_stride_lookup,
-                   int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
+                  int naoi, int naoj, size_t ij_offset, cudaStream_t stream)
 {
     cudaFuncSetAttribute(int1e_ipkin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    int1e_ipkin_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+    LAUNCH_OVERLAP_KERNEL(int1e_ipkin_kernel, nbatches_shl_pair, out,
+            bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
             naoi, naoj, ij_offset);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ipkin kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     return 0;
 }
 
@@ -1237,8 +1225,10 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
                         int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(ovlp_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    ovlp_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( ovlp_derivatives_kernel, blocks, threads, shm_size,
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ovlp_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1249,11 +1239,13 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
 
 int PBCkin_derivatives(double *grad, double *sigma, double *dm,
                        PBCIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
-                       int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
+                        int *shl_pair_offsets, int *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(kin_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    kin_derivatives_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
-            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( kin_derivatives_kernel, blocks, threads, shm_size,
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in kin_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1275,8 +1267,10 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
     size_t njsh = jsh1 - jsh0;
     size_t npairs = nish * ncells * njsh;
     int nbatches = (npairs + 255) / 256;
-    ovlp_mask_estimation_kernel<<<nbatches, 256, 0, stream>>>(
+    auto blocks = make_grid(nbatches);
+    auto threads = make_block(256);
+    LAUNCH_KERNEL( ovlp_mask_estimation_kernel, blocks, threads, 0,
             ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff, bvkmesh_Ls,
-            ish0, ish1, jsh0, jsh1);
+            ish0, ish1, jsh0, jsh1, stream);
 }
 }
