@@ -77,7 +77,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
     pair_address, _ = mydf._cderi_idx
     pair_address = cp.asarray(pair_address, dtype=np.int32)
-    kmesh, with_gamma_point = _get_kmesh(kpts, mydf.bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts, mydf.bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     expLk = fft_matrix(kmesh, with_gamma_point)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
@@ -201,7 +202,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     for p0, p1 in lib.prange(0, naux, blksize)
                     for kp in mydf._cderi])
     k_adapt_dic = {}
-    kmesh, with_gamma_point = _get_kmesh(kpts, mydf.bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts, mydf.bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(kmesh, with_gamma_point):
         # ki_idx is already sorted
         k_adapt_dic[kp] = kp_conj, kj_idx

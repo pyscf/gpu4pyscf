@@ -73,8 +73,12 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([2, 2, 1], with_gamma_point=False)
         for mf_cls in (scf.KRHF, dft.KRKS):
             with self.subTest(mf_cls=mf_cls.__name__):
-                with self.assertRaisesRegex(NotImplementedError, 'include the Gamma point'):
-                    mf_cls(cell, kpts=kpts).kernel()
+                mf = mf_cls(cell, kpts=kpts)
+                ref = mf.to_cpu()
+                ref.kernel()
+                mf.kernel()
+                self.assertTrue(ref.converged and mf.converged)
+                self.assertAlmostEqual(mf.e_tot, ref.e_tot, delta=1e-7)
 
     def test_rhf_exx_None(self):
         cell = self.cell
@@ -395,6 +399,8 @@ class KnownValues(unittest.TestCase):
         ref = cell.KRHF(kpts=kpts, exxdiv='ewald').density_fit(auxbasis=auxbasis)
         ref.conv_tol = 1e-10
         mf = ref.to_gpu()
+        # PySCF 2.8 does not preserve auxbasis when converting periodic GDF.
+        mf.with_df.auxbasis = auxbasis
         ref.kernel()
         mf.kernel()
         assert ref.converged and mf.converged

@@ -483,7 +483,8 @@ class PBCJKMatrixOpt:
              (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
             raise NotImplementedError
 
-        kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
         # The common k-shift in kj - ki cancels, so transfer_mesh includes Gamma.
         transfer_mesh = kmesh
         qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
@@ -1125,7 +1126,8 @@ class PBCJKMatrixOpt:
         dms = dms.reshape(n_dm,nkpts,nao,nao)
 
         ft_opt = FTOpt(cell, bvkmesh)
-        kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
         transfer_mesh = kmesh
         qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
         assert ft_opt.permutation_symmetry

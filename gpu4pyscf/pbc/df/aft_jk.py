@@ -137,7 +137,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
          (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
         raise NotImplementedError
 
-    kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     # transfer_mesh (for q = kj - ki) must include gamma point.
     # For off-gamma MP mesh, the common k-shift in ki and kj cancels.
     # This mesh can be made the same to the MP mesh.
@@ -529,7 +530,8 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     omega = abs(omega)
 
     ft_opt = FTOpt(cell, bvkmesh)
-    kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     # transfer_mesh for q = kj - ki
     transfer_mesh = kmesh
     qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
@@ -791,12 +793,9 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
         vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh, omega)
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
-    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
-    # in ft_kern.
-    if is_zero(kpt):
-        bvkmesh = np.ones(3, dtype=int)
-    else:
-        bvkmesh = kpts_to_bvkmesh(cell, kpt.reshape(1, 3))
+    assert kpt.ndim == 1
+    bvkmesh = kpts_to_bvkmesh(cell, kpt.reshape(1, 3), rcut=cell.rcut+10,
+                              bound_by_supmol=True)
     ft_opt = FTOpt(cell, bvkmesh)
     ft_kern = ft_opt.gen_ft_kernel(verbose=log)
 

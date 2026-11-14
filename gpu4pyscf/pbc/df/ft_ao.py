@@ -32,7 +32,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, fft_matrix
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -85,7 +85,7 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
     if q is None:
         q = np.zeros(3)
     ft_kernel = gen_ft_kernel(cell, kptjs)
-    bvkmesh = kpts_to_bvkmesh(cell, kptjs)
+    bvkmesh = kpts_to_bvkmesh(cell, kptjs, bound_by_supmol=True)
     bvk_ncells = int(np.prod(bvkmesh))
     nao = cell.nao_nr()
     nkpts = len(kptjs)
@@ -149,10 +149,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     The output tensor is saved in the shape [nGv, nao, nao] for single k-point
     case and [nkpts, nGv, nao, nao] for multiple k-points
     '''
-    if kpts is None:
-        bvkmesh = None
-    else:
-        bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1, 3))
+    bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1, 3), bound_by_supmol=True)
     opt = FTOpt(cell, bvkmesh)
     opt.permutation_symmetry = False
     return opt.gen_ft_kernel(verbose)
@@ -507,14 +504,14 @@ class FTOpt:
             image_conj_mapping = conj_images_in_bvk_cell(self.bvkmesh)
             image_conj_mapping = cp.asarray(image_conj_mapping, dtype=np.int32)
 
+        cell = self.cell
         # kmesh inference may need to be deferred until the actual kpts are
         # supplied to ft_kernel.
         kmesh_cached = with_gamma_point_cached = None
         if kpts is not None and self.permutation_symmetry:
             kmesh_cached, with_gamma_point_cached = _get_kmesh(
-                kpts_cached, self.bvkmesh)
+                cell, kpts_cached, self.bvkmesh)
 
-        cell = self.cell
         if transform_ao:
             # Current ft_aopair_kernel does not support general contraction
             # transforming the decontracted basis set to original set can cause
@@ -597,7 +594,10 @@ class FTOpt:
             else:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
                 kpts = asarray(kpts, order='C')
-                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
+                if kmesh is not None and with_gamma_point:
+                    expLk = fft_matrix(kmesh)
+                else:
+                    expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
                 nkpts = expLk.shape[1]
                 tmp = ndarray((nkpts,nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
                 out = contract('Lk,pLqG->kpqG', expLk, out, out=tmp)
@@ -615,7 +615,8 @@ class FTOpt:
                     # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
                     # which is stored in `conj_mapping_ki`.
                     if kmesh is None:
-                        kmesh, with_gamma_point = _get_kmesh(kpts, self.bvkmesh)
+                        kmesh, with_gamma_point = _get_kmesh(cell, kpts.get(), self.bvkmesh)
+                    assert kmesh is not None, "Permutation symmetry requires a complete canonical MP mesh"
                     conj_mapping = cp.asarray(
                         conj_kpts(kmesh, with_gamma_point), dtype=np.int32)
                     conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)

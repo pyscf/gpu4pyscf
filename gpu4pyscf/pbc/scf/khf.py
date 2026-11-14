@@ -529,9 +529,9 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
-        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
-        kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
-        if nkpts == np.prod(kmesh):
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        if kmesh is not None:
             return conj_kpts(kmesh, with_gamma_point, return_pair=True)
         else:
             return group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)

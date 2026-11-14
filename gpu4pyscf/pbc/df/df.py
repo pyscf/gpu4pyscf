@@ -188,7 +188,8 @@ class GDF(lib.StreamObject):
             aux_iter = lib.prange(0, naux, blksize)
         pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
-            kmesh, with_gamma_point = _get_kmesh(kpts, self.bvkmesh)
+            kmesh, with_gamma_point = _get_kmesh(cell, kpts, self.bvkmesh)
+            assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
             expLk = fft_matrix(kmesh, with_gamma_point)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(kmesh)

@@ -104,7 +104,7 @@ class KnownValues(unittest.TestCase):
         kpti, kptj = kpti_kptj = np.random.random((2,3))
         Gv = cell.get_Gv([3]*3)
         kpts = kptj.reshape(1,3)
-        kmesh = kpts_to_bvkmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         ft_opt = ft_ao_gpu.FTOpt(cell, kmesh)
         ft_opt.permutation_symmetry = False
         ft_kern = ft_opt.gen_ft_kernel()

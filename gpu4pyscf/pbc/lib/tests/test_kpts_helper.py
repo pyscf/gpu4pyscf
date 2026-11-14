@@ -109,8 +109,6 @@ def test_fft_matrix_off_gamma():
                                atol=1e-14, rtol=0)
 
 def test_conj_kpts():
-    cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
-                   a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]])
     kmesh = [2, 3, 1]
     mapping = kpts_helper.conj_kpts(kmesh, with_gamma_point=True)
     np.testing.assert_array_equal(mapping, [0, 2, 1, 3, 5, 4])
@@ -125,30 +123,39 @@ def test_conj_kpts():
 def test_get_kmesh():
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]], a=np.eye(3)*5)
     kpts = cell.make_kpts([2, 3, 1])
-    mesh, fft_order = kpts_helper._get_kmesh(kpts, [2, 3, 1])
+    mesh, fft_order = kpts_helper._get_kmesh(cell, kpts, [2, 3, 1])
     np.testing.assert_array_equal(mesh, [2, 3, 1])
     assert fft_order
 
     # One even dimension doubles the bvkmesh size
     kpts = cell.make_kpts([3, 2, 1], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_kmesh(kpts, [3, 4, 1])
+    mesh, fft_order = kpts_helper._get_kmesh(cell, kpts, [3, 4, 1])
     np.testing.assert_array_equal(mesh, [3, 2, 1])
     assert not fft_order
 
     # Two even dimensions enlarge the bvkmesh by a factor of four.
     kpts = cell.make_kpts([2, 3, 4], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_kmesh(kpts, [4, 3, 8])
+    mesh, fft_order = kpts_helper._get_kmesh(cell, kpts, [4, 3, 8])
     np.testing.assert_array_equal(mesh, [2, 3, 4])
     assert not fft_order
 
     # Three even dimensions enlarge the bvkmesh by a factor of eight.
     kpts = cell.make_kpts([2, 2, 2], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_kmesh(kpts, [4, 4, 4])
+    mesh, fft_order = kpts_helper._get_kmesh(cell, kpts, [4, 4, 4])
     np.testing.assert_array_equal(mesh, [2, 2, 2])
     assert not fft_order
 
     # Shifted all-odd meshes retain the BvK dimensions but use off-Gamma ordering.
     kpts = cell.make_kpts([3, 1, 1], with_gamma_point=False)
-    mesh, fft_order = kpts_helper._get_kmesh(kpts, [3, 1, 1])
+    mesh, fft_order = kpts_helper._get_kmesh(cell, kpts, [3, 1, 1])
     np.testing.assert_array_equal(mesh, [3, 1, 1])
     assert not fft_order
+
+    # Matching point counts alone do not establish canonical MP ordering.
+    kpts = cell.make_kpts([2, 3, 1])
+    assert kpts_helper._get_kmesh(cell, kpts[::-1], [2, 3, 1]) == (None, None)
+    assert kpts_helper._get_kmesh(cell, kpts + .01, [2, 3, 1]) == (None, None)
+    assert kpts_helper._get_kmesh(cell, kpts[:2], [2, 3, 1]) == (None, None)
+
+    # A cutoff fallback must not be mistaken for the sampling mesh.
+    assert kpts_helper._get_kmesh(cell, kpts, [5, 3, 1]) == (None, None)

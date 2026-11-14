@@ -51,8 +51,8 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.tools import get_coulG, ke_to_mesh, mesh_to_ke
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts, _get_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, fft_matrix, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
@@ -1597,9 +1597,9 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
     if bvk_ncells == 1:
         dm_sc = dms
     else:
-        kmesh, with_gamma_point = _get_kmesh(kpts, ni.bvkmesh)
-        assert len(kpts) == np.prod(kmesh)
-        expLk = fft_matrix(kmesh, with_gamma_point=with_gamma_point)
+        kmesh, with_gamma_point = _get_kmesh(ni.cell, kpts, ni.bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+        expLk = fft_matrix(kmesh, with_gamma_point)
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
@@ -1620,9 +1620,13 @@ def _inverse_wannier_transform_fock(ni, veff, kpts):
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
-        kmesh, with_gamma_point = _get_kmesh(kpts, ni.bvkmesh)
-        expLk = fft_matrix(kmesh, with_gamma_point=with_gamma_point)
-        nkpts = expLk.shape[1]
+        kmesh, with_gamma_point = _get_kmesh(ni.cell, kpts, ni.bvkmesh)
+        if kmesh is not None:
+            expLk = fft_matrix(kmesh, with_gamma_point)
+        else:
+            # veff might be evaluated at arbitrary band points
+            expLk = cp.exp(1j * cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        nkpts = len(kpts)
         expLkz = expLk.view(np.float64).reshape(bvk_ncells, nkpts, 2)
         veff = contract('Lpq,Lkz->kpqz', veff, expLkz)
         veff = veff.view(np.complex128)[:,:,:,0]
@@ -1845,7 +1849,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        bvkmesh = kpts_to_bvkmesh(cell, kpts_band)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
         ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
@@ -1981,7 +1985,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        bvkmesh = kpts_to_bvkmesh(cell, kpts_band)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
         ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
@@ -2157,7 +2161,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         return self
 
     def _ensure_initialized(self, kpts, xctype):
-        bvkmesh = kpts_to_bvkmesh(self.cell, kpts)
+        bvkmesh = kpts_to_bvkmesh(self.cell, kpts, bound_by_supmol=True)
         if (self.bvkcell is None or
             any(self.bvkmesh != bvkmesh) or
             # LDA and GGA share the same initialization parameters.

@@ -155,7 +155,7 @@ class _GTOvalOpt:
             if kpts is None:
                 bvkmesh = np.ones(3, dtype=np.int32)
             else:
-                bvkmesh = kpts_to_bvkmesh(cell, kpts)
+                bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
             self.bvkmesh = bvkmesh
         bvk_ncells = np.prod(bvkmesh)
         if bvk_ncells == 1:

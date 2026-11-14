@@ -41,7 +41,7 @@ def _int_vnl(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
     hl_dims = np.asarray([len(hl) for hl in hl_blocks])
 
     cell = SortedGTO.from_cell(cell, decontract=True)
-    bvkmesh = kpts_to_bvkmesh(cell, kpts)
+    bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
     pcell = fakecell.copy(deep=False)
 
     def int_ket(_bas_fake, intor_name):

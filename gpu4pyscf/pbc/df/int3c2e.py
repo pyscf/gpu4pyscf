@@ -79,7 +79,8 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut*10)
 
     if not is_gamma_point:
-        kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
 
     nao = cell.nao
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvkmesh).build()

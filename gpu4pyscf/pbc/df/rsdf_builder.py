@@ -77,7 +77,8 @@ def build_cderi(cell, auxcell, kpts=None, bvkmesh=None, j_only=False,
     kpts, _ = _normalize_kpts(kpts)
     if bvkmesh is None:
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
-    kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     assert np.prod(kmesh) == len(kpts)
 
     is_gamma_point = is_zero(kpts)
@@ -583,7 +584,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
     kpts = kpts.reshape(-1, 3)
     bvk_ncells = int(np.prod(bvkmesh))
-    kmesh, with_gamma_point = _get_kmesh(kpts, bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+    assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     kpt_iters = list(kk_adapted_iter(kmesh, with_gamma_point))
     # transfer mesh (q = kj - ki) must include gamma point.
     qmesh = kmesh

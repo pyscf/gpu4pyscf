@@ -66,7 +66,7 @@ def ppnl_derivatives(cell, dm, kpts=None):
         ('PBCint1e_r4_origi_derivatives', (4, 1)),
     )
 
-    bvkmesh = kpts_to_bvkmesh(cell, kpts)
+    bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
     bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, True)
     expLk = cp.exp(-1j*asarray(bvkmesh_Ls).dot(asarray(kpts).T))
     dtype = np.float64 if is_gamma_point else np.complex128
