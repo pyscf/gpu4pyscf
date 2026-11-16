@@ -2734,7 +2734,7 @@ def cuest_compute_df_mo_integrals(mol, cleft_device, cright_device, cuest_handle
     cright_device_handle.value = cright_device.data.ptr
 
     auxbasis_num_ao = ce.data_uint64_t()
-    cuest_check(f'Query Aux Basis Num AO',
+    cuest_check('Query Aux Basis Num AO',
         ce.cuestQuery(
             handle=cuest_handle,
             type=ce.CuestType.CUEST_AOBASIS,
