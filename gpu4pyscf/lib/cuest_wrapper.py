@@ -1396,7 +1396,7 @@ def cuest_build_xcintplan(mol, cuest_handle, aobasis_handle, moleculargrid_handl
 
     return xcintplan_handle, xcintplan_persistent_workspace
 
-def cuest_compute_xcpotential(mol, Cocc_list, cuest_handle, xcintplan_handle, maximum_workspace_bytes):
+def cuest_compute_xcpotential(mol, Cocc_list, cuest_handle, xcintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The input mocc is assumed to be in cuest shape and order, and the returned vxc matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -1423,6 +1423,70 @@ def cuest_compute_xcpotential(mol, Cocc_list, cuest_handle, xcintplan_handle, ma
                 outParameters=compute_xc_potential_parameters,
                 )
             )
+
+        if "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCPotentialRKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialRKSComputeParametersAttributes.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCPotentialRKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialRKSComputeParametersAttributes.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
+
+        if "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCPotentialRKS Params detail potential assembly fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialRKSComputeParametersAttributes.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCPotentialRKS Params detail potential assembly fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialRKSComputeParametersAttributes.CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
 
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -1497,6 +1561,70 @@ def cuest_compute_xcpotential(mol, Cocc_list, cuest_handle, xcintplan_handle, ma
                 )
             )
 
+        if "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCPotentialUKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialUKSComputeParametersAttributes.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCPotentialUKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialUKSComputeParametersAttributes.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
+        if "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCPotentialUKS Params detail potential assembly fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialUKSComputeParametersAttributes.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCPotentialUKS Params detail potential assembly fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=compute_xc_potential_parameters,
+                    attribute=ce.CuestXCPotentialUKSComputeParametersAttributes.CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
         Vxca_device_handle = ce.Pointer()
@@ -1557,7 +1685,7 @@ def cuest_compute_xcpotential(mol, Cocc_list, cuest_handle, xcintplan_handle, ma
 
     return Exc.value, Vxc_device
 
-def cuest_compute_nlcpotential(mol, Cocc_list, cuest_handle, nlc_xcintplan_handle, maximum_workspace_bytes):
+def cuest_compute_nlcpotential(mol, Cocc_list, cuest_handle, nlc_xcintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The input mocc is assumed to be in cuest shape and order, and the returned vnlc matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -1642,6 +1770,86 @@ def cuest_compute_nlcpotential(mol, Cocc_list, cuest_handle, nlc_xcintplan_handl
                 attributeValue=vv10_scale,
                 )
             )
+
+        if "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_ffloat_mode = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+            assert isinstance(nlc_ffloat_mode, ce.CuestFfloatUsageMode)
+            nlc_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+            nlc_ffloat_mode_handle.value = int(nlc_ffloat_mode.value)
+            cuest_check('Configure NonlocalXCPotentialRKS Params ffloat usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialRKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                    attributeValue=nlc_ffloat_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCPotentialRKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialRKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCPotentialRKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialRKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCPotentialRKS Params detail potential assembly fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialRKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCPotentialRKS Params detail potential assembly fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialRKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
 
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -1740,6 +1948,86 @@ def cuest_compute_nlcpotential(mol, Cocc_list, cuest_handle, nlc_xcintplan_handl
                 attributeValue=vv10_scale,
                 )
             )
+
+        if "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_ffloat_mode = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+            assert isinstance(nlc_ffloat_mode, ce.CuestFfloatUsageMode)
+            nlc_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+            nlc_ffloat_mode_handle.value = int(nlc_ffloat_mode.value)
+            cuest_check('Configure NonlocalXCPotentialUKS Params ffloat usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialUKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                    attributeValue=nlc_ffloat_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCPotentialUKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialUKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCPotentialUKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialUKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCPotentialUKS Params detail potential assembly fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialUKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCPotentialUKS Params detail potential assembly fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCPotentialUKSComputeParametersAttributes.CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
 
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -1920,7 +2208,7 @@ def cuest_get_n_pcm_grid(cuest_handle, pcmintplan_handle):
         )
     return n_pcm_grid_point_handle.value
 
-def cuest_compute_pcmpotential(mol, densitymatrix_device, q_guess, cuest_handle, pcmintplan_handle):
+def cuest_compute_pcmpotential(mol, densitymatrix_device, q_guess, cuest_handle, pcmintplan_handle, additional_precision_control_parameters):
     # The input D is assumed to be in cuest order, and the returned V_pcm matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -1965,6 +2253,34 @@ def cuest_compute_pcmpotential(mol, densitymatrix_device, q_guess, cuest_handle,
             attributeValue=pcm_charge_max_iteration_handle,
             )
         )
+
+    if "CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+        pcm_ffloat_mode = additional_precision_control_parameters["CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+        assert isinstance(pcm_ffloat_mode, ce.CuestFfloatUsageMode)
+        pcm_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+        pcm_ffloat_mode_handle.value = int(pcm_ffloat_mode.value)
+        cuest_check('Configure PCM Potential Compute Params ffloat usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS,
+                parameters=pcm_compute_parameters,
+                attribute=ce.CuestPCMPotentialComputeParametersAttributes.CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                attributeValue=pcm_ffloat_mode_handle,
+                )
+            )
+
+    if "CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" in additional_precision_control_parameters:
+        pcm_jit_mode = additional_precision_control_parameters["CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE"]
+        assert isinstance(pcm_jit_mode, ce.CuestJITUsageMode)
+        pcm_jit_mode_handle = ce.data_cuestJITUsageMode_t()
+        pcm_jit_mode_handle.value = int(pcm_jit_mode.value)
+        cuest_check('Configure PCM Potential Compute Params jit usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS,
+                parameters=pcm_compute_parameters,
+                attribute=ce.CuestPCMPotentialComputeParametersAttributes.CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE,
+                attributeValue=pcm_jit_mode_handle,
+                )
+            )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -2991,7 +3307,7 @@ def cuest_compute_coulomb_exchange_gradient(mol, densitymatrix_device, occorbita
 
     return JKgrad_device
 
-def cuest_compute_xc_gradient(mol, Cocc_list, cuest_handle, xcintplan_handle, maximum_workspace_bytes):
+def cuest_compute_xc_gradient(mol, Cocc_list, cuest_handle, xcintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The input mocc is assumed to be in cuest shape and order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -3018,6 +3334,70 @@ def cuest_compute_xc_gradient(mol, Cocc_list, cuest_handle, xcintplan_handle, ma
                 outParameters=xc_derivative_rks_compute_parameters,
                 )
             )
+
+        if "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCDerivativeRKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_rks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeRKSComputeParametersAttributes.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCDerivativeRKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_rks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeRKSComputeParametersAttributes.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
+
+        if "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCDerivativeRKS Params detail gradient collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_rks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeRKSComputeParametersAttributes.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCDerivativeRKS Params detail gradient collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_rks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeRKSComputeParametersAttributes.CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
 
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -3089,6 +3469,70 @@ def cuest_compute_xc_gradient(mol, Cocc_list, cuest_handle, xcintplan_handle, ma
                 )
             )
 
+        if "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCDerivativeUKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_uks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeUKSComputeParametersAttributes.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCDerivativeUKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_uks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeUKSComputeParametersAttributes.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
+        if "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            xc_emulation_mode = additional_precision_control_parameters["CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(xc_emulation_mode, ce.CuestEmulationUsageMode)
+            xc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            xc_emulation_mode_handle.value = int(xc_emulation_mode.value)
+            cuest_check('Configure XCDerivativeUKS Params detail gradient collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_uks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeUKSComputeParametersAttributes.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=xc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            xc_mantissa_bit = additional_precision_control_parameters["CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(xc_mantissa_bit, int)
+            xc_mantissa_bit_handle = ce.data_int32_t()
+            xc_mantissa_bit_handle.value = xc_mantissa_bit
+            cuest_check('Configure XCDerivativeUKS Params detail gradient collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=xc_derivative_uks_compute_parameters,
+                    attribute=ce.CuestXCDerivativeUKSComputeParametersAttributes.CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=xc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
         Vxcgrad_device_handle = ce.Pointer()
@@ -3142,7 +3586,7 @@ def cuest_compute_xc_gradient(mol, Cocc_list, cuest_handle, xcintplan_handle, ma
 
     return Vxcgrad_device
 
-def cuest_compute_nlc_gradient(mol, Cocc_list, cuest_handle, nlc_xcintplan_handle, maximum_workspace_bytes):
+def cuest_compute_nlc_gradient(mol, Cocc_list, cuest_handle, nlc_xcintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The input mocc is assumed to be in cuest shape and order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -3227,6 +3671,86 @@ def cuest_compute_nlc_gradient(mol, Cocc_list, cuest_handle, nlc_xcintplan_handl
                 attributeValue=vv10_scale,
                 )
             )
+
+        if "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_ffloat_mode = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+            assert isinstance(nlc_ffloat_mode, ce.CuestFfloatUsageMode)
+            nlc_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+            nlc_ffloat_mode_handle.value = int(nlc_ffloat_mode.value)
+            cuest_check('Configure NonlocalXCDerivativeRKS Params ffloat usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeRKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                    attributeValue=nlc_ffloat_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCDerivativeRKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeRKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCDerivativeRKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeRKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCDerivativeRKS Params detail gradient collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeRKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for RKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCDerivativeRKS Params detail gradient collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeRKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for RKS calculation")
 
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -3323,6 +3847,86 @@ def cuest_compute_nlc_gradient(mol, Cocc_list, cuest_handle, nlc_xcintplan_handl
                 )
             )
 
+        if "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_ffloat_mode = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+            assert isinstance(nlc_ffloat_mode, ce.CuestFfloatUsageMode)
+            nlc_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+            nlc_ffloat_mode_handle.value = int(nlc_ffloat_mode.value)
+            cuest_check('Configure NonlocalXCDerivativeUKS Params ffloat usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeUKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                    attributeValue=nlc_ffloat_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCDerivativeUKS Params detail density collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeUKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCDerivativeUKS Params detail density collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeUKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            nlc_emulation_mode = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+            assert isinstance(nlc_emulation_mode, ce.CuestEmulationUsageMode)
+            nlc_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+            nlc_emulation_mode_handle.value = int(nlc_emulation_mode.value)
+            cuest_check('Configure NonlocalXCDerivativeUKS Params detail gradient collocation fixedpoint emulation usage mode',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeUKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                    attributeValue=nlc_emulation_mode_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE used for UKS calculation")
+
+        if "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            nlc_mantissa_bit = additional_precision_control_parameters["CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+            assert isinstance(nlc_mantissa_bit, int)
+            nlc_mantissa_bit_handle = ce.data_int32_t()
+            nlc_mantissa_bit_handle.value = nlc_mantissa_bit
+            cuest_check('Configure NonlocalXCDerivativeUKS Params detail gradient collocation fixedpoint emulation mantissa bit count',
+                ce.cuestParametersConfigure(
+                    parametersType=ce.CuestParametersType.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS,
+                    parameters=nonlocal_xc_compute_parameters,
+                    attribute=ce.CuestNonlocalXCDerivativeUKSComputeParametersAttributes.CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                    attributeValue=nlc_mantissa_bit_handle,
+                    )
+                )
+        elif "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+            raise ValueError("CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT used for UKS calculation")
+
         temporary_workspace_descriptor = WorkspaceDescriptor()
 
         Vxcgrad_device_handle = ce.Pointer()
@@ -3376,7 +3980,7 @@ def cuest_compute_nlc_gradient(mol, Cocc_list, cuest_handle, nlc_xcintplan_handl
 
     return Vxcgrad_device
 
-def cuest_compute_pcm_gradient(mol, densitymatrix_device, q_guess, cuest_handle, pcmintplan_handle):
+def cuest_compute_pcm_gradient(mol, densitymatrix_device, q_guess, cuest_handle, pcmintplan_handle, additional_precision_control_parameters):
     # The input D is assumed to be in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -3421,6 +4025,34 @@ def cuest_compute_pcm_gradient(mol, densitymatrix_device, q_guess, cuest_handle,
             attributeValue=pcm_charge_max_iteration_handle,
             )
         )
+
+    if "CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+        pcm_ffloat_mode = additional_precision_control_parameters["CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+        assert isinstance(pcm_ffloat_mode, ce.CuestFfloatUsageMode)
+        pcm_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+        pcm_ffloat_mode_handle.value = int(pcm_ffloat_mode.value)
+        cuest_check('Configure PCM Derivative Compute Params ffloat usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=pcm_derivative_compute_parameters,
+                attribute=ce.CuestPCMDerivativeComputeParametersAttributes.CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                attributeValue=pcm_ffloat_mode_handle,
+                )
+            )
+
+    if "CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" in additional_precision_control_parameters:
+        pcm_jit_mode = additional_precision_control_parameters["CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE"]
+        assert isinstance(pcm_jit_mode, ce.CuestJITUsageMode)
+        pcm_jit_mode_handle = ce.data_cuestJITUsageMode_t()
+        pcm_jit_mode_handle.value = int(pcm_jit_mode.value)
+        cuest_check('Configure PCM Derivative Compute Params jit usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=pcm_derivative_compute_parameters,
+                attribute=ce.CuestPCMDerivativeComputeParametersAttributes.CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE,
+                attributeValue=pcm_jit_mode_handle,
+                )
+            )
 
     pcm_results_handle = ce.cuestPCMResultsHandle()
     cuest_check('Create PCM Result Handle',
@@ -4369,7 +5001,7 @@ class CuESTExtractedGrids(Grids):
 class CuESTExtractedNumint(NumInt):
     _locked_keys = []
 
-    def __init__(self, numint, mol, grids, nlcgrids, xc, handles, maximum_workspace_bytes, threshold_pq, turn_on_cuest_xc, turn_on_cuest_nlc):
+    def __init__(self, numint, mol, grids, nlcgrids, xc, handles, maximum_workspace_bytes, threshold_pq, additional_precision_control_parameters, turn_on_cuest_xc, turn_on_cuest_nlc):
         assert numint is not None
 
         self.mol = mol
@@ -4379,6 +5011,7 @@ class CuESTExtractedNumint(NumInt):
         self.handles = handles
         self.maximum_workspace_bytes = maximum_workspace_bytes
         self.threshold_pq = threshold_pq
+        self.additional_precision_control_parameters = additional_precision_control_parameters
         self.turn_on_cuest_xc = turn_on_cuest_xc
         self.turn_on_cuest_nlc = turn_on_cuest_nlc
 
@@ -4389,7 +5022,7 @@ class CuESTExtractedNumint(NumInt):
 
         self._locked_keys = [
             "_backup_numint",
-            "mol", "grids", "xc", "handles", "maximum_workspace_bytes", "threshold_pq", "turn_on_cuest_xc", "turn_on_cuest_nlc",
+            "mol", "grids", "xc", "handles", "maximum_workspace_bytes", "threshold_pq", "additional_precision_control_parameters", "turn_on_cuest_xc", "turn_on_cuest_nlc",
         ]
 
         self.libxc = numint.libxc
@@ -4440,7 +5073,8 @@ class CuESTExtractedNumint(NumInt):
             time_pre_post += time1 - time0
             time0 = time1
 
-        exc, vxc_cuest_order = cuest_compute_xcpotential(mol, mocc_list, cuest_handle, xcintplan_handle, self.maximum_workspace_bytes)
+        exc, vxc_cuest_order = cuest_compute_xcpotential(mol, mocc_list, cuest_handle, xcintplan_handle,
+                                                         self.maximum_workspace_bytes, self.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -4503,7 +5137,8 @@ class CuESTExtractedNumint(NumInt):
             time_pre_post += time1 - time0
             time0 = time1
 
-        exc, vxc_cuest_order = cuest_compute_xcpotential(mol, mocc_list, cuest_handle, xcintplan_handle, self.maximum_workspace_bytes)
+        exc, vxc_cuest_order = cuest_compute_xcpotential(mol, mocc_list, cuest_handle, xcintplan_handle,
+                                                         self.maximum_workspace_bytes, self.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -4564,7 +5199,8 @@ class CuESTExtractedNumint(NumInt):
             time_pre_post += time1 - time0
             time0 = time1
 
-        enlc, vnlc_cuest_order = cuest_compute_nlcpotential(mol, mocc_list, cuest_handle, nlc_xcintplan_handle, self.maximum_workspace_bytes)
+        enlc, vnlc_cuest_order = cuest_compute_nlcpotential(mol, mocc_list, cuest_handle, nlc_xcintplan_handle,
+                                                            self.maximum_workspace_bytes, self.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -4620,12 +5256,13 @@ class CuESTExtractedNumint(NumInt):
 class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/gpu4pyscf some code will check isinstance(mf, PCM) to determine if the mf is PCM or SMD.
     _locked_keys = []
 
-    def __init__(self, with_solvent, mol, handles, threshold_pq, turn_on_cuest_pcm):
+    def __init__(self, with_solvent, mol, handles, threshold_pq, additional_precision_control_parameters, turn_on_cuest_pcm):
         assert with_solvent is not None
 
         self.mol = mol
         self.handles = handles
         self.threshold_pq = threshold_pq
+        self.additional_precision_control_parameters = additional_precision_control_parameters
         self.turn_on_cuest_pcm = turn_on_cuest_pcm
 
         if getattr(with_solvent, "surface_discretization_method", "").upper() != "ISWIG":
@@ -4650,7 +5287,7 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
 
         self._locked_keys = [
             "_backup_with_solvent",
-            "mol", "handles", "threshold_pq", "turn_on_cuest_pcm",
+            "mol", "handles", "threshold_pq", "additional_precision_control_parameters", "turn_on_cuest_pcm",
             "method", "lebedev_order", "radii_table", "eps", "surface_discretization_method",
         ]
 
@@ -4717,7 +5354,7 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
             time_pre_post += time1 - time0
             time0 = time1
 
-        epcm, vpcm_cuest_order, updated_q = cuest_compute_pcmpotential(mol, dm_cuest_order, q, cuest_handle, pcmintplan_handle)
+        epcm, vpcm_cuest_order, updated_q = cuest_compute_pcmpotential(mol, dm_cuest_order, q, cuest_handle, pcmintplan_handle, self.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -4781,7 +5418,7 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
         else:
             q = cp.zeros(n_pcm_grid, dtype = cp.float64)
 
-        dpcm = cuest_compute_pcm_gradient(mol, dm_cuest_order, q, cuest_handle, pcmintplan_handle)
+        dpcm = cuest_compute_pcm_gradient(mol, dm_cuest_order, q, cuest_handle, pcmintplan_handle, self.additional_precision_control_parameters)
 
         return dpcm.get()
 
@@ -4819,6 +5456,8 @@ class CuESTWrapper(lib.StreamObject):
         self.density_fitting_cutoff = 1e-12
         self.maximum_workspace_bytes = 10 * 1000**3 # 10 GB
 
+        self._additional_precision_control_parameters = {}
+
         self.turn_on_cuest_hcore = True
         self.turn_on_cuest_jk = True
         self.turn_on_cuest_xc = True
@@ -4838,7 +5477,8 @@ class CuESTWrapper(lib.StreamObject):
 
             assert getattr(self, "_numint", None) is not None
 
-            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
+            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq,
+                                                self.additional_precision_control_parameters, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
 
             omega, alpha, hyb = self._numint.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
 
@@ -4853,52 +5493,13 @@ class CuESTWrapper(lib.StreamObject):
                     self.range_separated_mode = 'mix_inside_kernel'
 
         if getattr(self, "with_solvent", None) is not None:
-            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.turn_on_cuest_pcm)
+            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.additional_precision_control_parameters, self.turn_on_cuest_pcm)
 
         self._math_mode = "native_fp64"
         ce.cuestSetMathMode(
             handle = self.handles.cuest_handle,
             mode = ce.CuestMathMode.CUEST_NATIVE_FP64_MATH_MODE,
         )
-
-        _additional_precision_control_parameters_template = {
-            # 1e
-            "CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
-            "CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
-            "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_OFF,
-            "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
-
-            "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
-            "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
-
-            # DF J/K Fock
-            "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
-            "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
-            "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 5,
-            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 8,
-
-            # DF J/K gradient
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY" : ce.CuestDFSymmetricDerivativeComputeMemoryPolicy.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_MEMORY_POLICY_DEVICECACHE,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
-            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
-        }
-        ### Warning: you're at your own risk if you put the parameters above to the dict below, which will overwrite the default setting.
-        self.additional_precision_control_parameters = {
-        }
 
         self._unsafe_for_change_keys = [
             "auxbasis", "threshold_pq", "density_fitting_cutoff",
@@ -4934,6 +5535,106 @@ class CuESTWrapper(lib.StreamObject):
             self._math_mode = new_mode
             print(f"Switching math_mode to {new_mode}")
 
+    _additional_precision_control_parameters_template = {
+        # 1e
+        "CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+        "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_OFF,
+        "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+
+        "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        # DF J/K Fock
+        "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+        "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+        "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 5,
+        "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 8,
+
+        # DF J/K gradient
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY" : ce.CuestDFSymmetricDerivativeComputeMemoryPolicy.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_MEMORY_POLICY_DEVICECACHE,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+
+        # XC
+        "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        # Nonlocal correlation
+        "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+        "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+        "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+        # PCM
+        "CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+        "CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+        "CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+    }
+
+    @property
+    def additional_precision_control_parameters(self):
+        return self._additional_precision_control_parameters
+    @additional_precision_control_parameters.setter
+    def additional_precision_control_parameters(self, new_parameters):
+        if self.additional_precision_control_parameters != new_parameters:
+            for key in new_parameters:
+                assert key in self._additional_precision_control_parameters_template
+            self._additional_precision_control_parameters = new_parameters
+            self.reset()
+            print(f"Set additional_precision_control_parameters to {new_parameters}.")
+
     def build_auxmol(self):
         assert self.auxbasis is not None, f"auxbasis field not set for {__class__} object"
 
@@ -4961,9 +5662,10 @@ class CuESTWrapper(lib.StreamObject):
         self.free_auxmol()
 
         if getattr(self, "xc", None) is not None:
-            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
+            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq,
+                                                self.additional_precision_control_parameters, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
         if getattr(self, "with_solvent", None) is not None:
-            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.turn_on_cuest_pcm)
+            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.additional_precision_control_parameters, self.turn_on_cuest_pcm)
 
         # super().reset(mol)
 
@@ -5546,7 +6248,8 @@ class CuESTGradientWrapper(lib.StreamObject):
             time_pre_post += time1 - time0
             time0 = time1
 
-        dxc = cuest_compute_xc_gradient(mol, mocc_list, cuest_handle, xcintplan_handle, self.base.maximum_workspace_bytes)
+        dxc = cuest_compute_xc_gradient(mol, mocc_list, cuest_handle, xcintplan_handle,
+                                        self.base.maximum_workspace_bytes, self.base.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
@@ -5599,7 +6302,8 @@ class CuESTGradientWrapper(lib.StreamObject):
             time_pre_post += time1 - time0
             time0 = time1
 
-        dxc = cuest_compute_nlc_gradient(mol, mocc_list, cuest_handle, nlc_xcintplan_handle, self.base.maximum_workspace_bytes)
+        dxc = cuest_compute_nlc_gradient(mol, mocc_list, cuest_handle, nlc_xcintplan_handle,
+                                         self.base.maximum_workspace_bytes, self.base.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
