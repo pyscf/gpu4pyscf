@@ -668,7 +668,7 @@ def cuest_compute_potentialint(mol, xyzs_device, Zs_device, cuest_handle, oeintp
 
     return potentialint_device
 
-def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle, exchange_omega, long_range_exchange_fraction, short_range_exchange_fraction, fitting_cutoff = 1e-12):
+def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle, exchange_omega, long_range_exchange_fraction, short_range_exchange_fraction, additional_precision_control_parameters, fitting_cutoff = 1e-12):
     # The returned dfintplan handle and persistent workspace need to be freed outside this function
     log = logger.new_logger(mol, mol.verbose)
 
@@ -761,6 +761,34 @@ def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, ao
             )
         )
 
+    if "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        df_emulation_mode = additional_precision_control_parameters["CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(df_emulation_mode, ce.CuestEmulationUsageMode)
+        df_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        df_emulation_mode_handle.value = int(df_emulation_mode.value)
+        cuest_check('Configure DFIntPlan Params detail three index fitting fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFINTPLAN_PARAMETERS,
+                parameters=dfintplan_parameters,
+                attribute=ce.CuestDFIntPlanParametersAttributes.CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=df_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        df_emulation_mantissa_bit = additional_precision_control_parameters["CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(df_emulation_mantissa_bit, int)
+        df_emulation_mantissa_bit_handle = ce.data_int32_t()
+        df_emulation_mantissa_bit_handle.value = df_emulation_mantissa_bit
+        cuest_check('Configure DFIntPlan Params detail three index fitting fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFINTPLAN_PARAMETERS,
+                parameters=dfintplan_parameters,
+                attribute=ce.CuestDFIntPlanParametersAttributes.CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=df_emulation_mantissa_bit_handle,
+                )
+            )
+
     persistent_workspace_descriptor = WorkspaceDescriptor()
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -808,7 +836,7 @@ def cuest_build_dfintplan(mol, cuest_handle, aobasis_handle, auxbasis_handle, ao
 
     return dfintplan_handle, dfintplan_persistent_workspace
 
-def cuest_compute_coulombmatrix(mol, densitymatrix_device, cuest_handle, dfintplan_handle):
+def cuest_compute_coulombmatrix(mol, densitymatrix_device, cuest_handle, dfintplan_handle, additional_precision_control_parameters):
     # The input D is assumed to be in cuest order, and the returned J matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -825,6 +853,34 @@ def cuest_compute_coulombmatrix(mol, densitymatrix_device, cuest_handle, dfintpl
             outParameters=compute_coulomb_matrix_parameters,
             )
         )
+
+    if "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE" in additional_precision_control_parameters:
+        coulomb_jit = additional_precision_control_parameters["CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE"]
+        assert isinstance(coulomb_jit, ce.CuestJITUsageMode)
+        coulomb_jit_handle = ce.data_cuestJITUsageMode_t()
+        coulomb_jit_handle.value = int(coulomb_jit.value)
+        cuest_check('Configure Coulomb Compute Params jit usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFCOULOMBCOMPUTE_PARAMETERS,
+                parameters=compute_coulomb_matrix_parameters,
+                attribute=ce.CuestDFCoulombComputeParametersAttributes.CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE,
+                attributeValue=coulomb_jit_handle,
+                )
+            )
+
+    if "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+        coulomb_ffloat = additional_precision_control_parameters["CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+        assert isinstance(coulomb_ffloat, ce.CuestFfloatUsageMode)
+        coulomb_ffloat_handle = ce.data_cuestFfloatUsageMode_t()
+        coulomb_ffloat_handle.value = int(coulomb_ffloat.value)
+        cuest_check('Configure Coulomb Compute Params ffloat usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFCOULOMBCOMPUTE_PARAMETERS,
+                parameters=compute_coulomb_matrix_parameters,
+                attribute=ce.CuestDFCoulombComputeParametersAttributes.CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                attributeValue=coulomb_ffloat_handle,
+                )
+            )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -2579,7 +2635,7 @@ def cuest_compute_potential_gradeint(mol, densitymatrix_device, xyzs_device, Zs_
 
     return potential_orbital_gradient_device, potential_pointcharge_gradient_device
 
-def cuest_compute_coulomb_exchange_gradient(mol, densitymatrix_device, occorbitals_device, nocc, cuest_handle, dfintplan_handle, maximum_workspace_bytes):
+def cuest_compute_coulomb_exchange_gradient(mol, densitymatrix_device, occorbitals_device, nocc, cuest_handle, dfintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The input D and mocc is assumed to be in cuest order and format
     log = logger.new_logger(mol, mol.verbose)
 
@@ -2613,6 +2669,188 @@ def cuest_compute_coulomb_exchange_gradient(mol, densitymatrix_device, occorbita
             outParameters=compute_JK_gradient_parameters,
             )
         )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY" in additional_precision_control_parameters:
+        df_derivative_memory_policy = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY"]
+        assert isinstance(df_derivative_memory_policy, ce.CuestDFSymmetricDerivativeComputeMemoryPolicy)
+        df_derivative_memory_policy_handle = ce.data_cuestDFSymmetricDerivativeComputeMemoryPolicy_t()
+        df_derivative_memory_policy_handle.value = int(df_derivative_memory_policy.value)
+        cuest_check('Configure JK Grad Params memory policy',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY,
+                attributeValue=df_derivative_memory_policy_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_ffloat_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+        assert isinstance(df_derivative_ffloat_mode, ce.CuestFfloatUsageMode)
+        df_derivative_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+        df_derivative_ffloat_mode_handle.value = int(df_derivative_ffloat_mode.value)
+        cuest_check('Configure JK Grad Params ffloat usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                attributeValue=df_derivative_ffloat_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_jit_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE"]
+        assert isinstance(df_derivative_jit_mode, ce.CuestJITUsageMode)
+        df_derivative_jit_mode_handle = ce.data_cuestJITUsageMode_t()
+        df_derivative_jit_mode_handle.value = int(df_derivative_jit_mode.value)
+        cuest_check('Configure JK Grad Params jit usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE,
+                attributeValue=df_derivative_jit_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_emulation_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(df_derivative_emulation_mode, ce.CuestEmulationUsageMode)
+        df_derivative_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        df_derivative_emulation_mode_handle.value = int(df_derivative_emulation_mode.value)
+        cuest_check('Configure JK Grad Params three index fitting fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=df_derivative_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        df_derivative_mantissa_bit = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(df_derivative_mantissa_bit, int)
+        df_derivative_mantissa_bit_handle = ce.data_int32_t()
+        df_derivative_mantissa_bit_handle.value = df_derivative_mantissa_bit
+        cuest_check('Configure JK Grad Params three index fitting fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=df_derivative_mantissa_bit_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_emulation_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(df_derivative_emulation_mode, ce.CuestEmulationUsageMode)
+        df_derivative_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        df_derivative_emulation_mode_handle.value = int(df_derivative_emulation_mode.value)
+        cuest_check('Configure JK Grad Params MO transformation fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=df_derivative_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        df_derivative_mantissa_bit = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(df_derivative_mantissa_bit, int)
+        df_derivative_mantissa_bit_handle = ce.data_int32_t()
+        df_derivative_mantissa_bit_handle.value = df_derivative_mantissa_bit
+        cuest_check('Configure JK Grad Params MO transformation fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=df_derivative_mantissa_bit_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_emulation_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(df_derivative_emulation_mode, ce.CuestEmulationUsageMode)
+        df_derivative_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        df_derivative_emulation_mode_handle.value = int(df_derivative_emulation_mode.value)
+        cuest_check('Configure JK Grad Params exchange density fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=df_derivative_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        df_derivative_mantissa_bit = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(df_derivative_mantissa_bit, int)
+        df_derivative_mantissa_bit_handle = ce.data_int32_t()
+        df_derivative_mantissa_bit_handle.value = df_derivative_mantissa_bit
+        cuest_check('Configure JK Grad Params exchange density fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=df_derivative_mantissa_bit_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_emulation_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(df_derivative_emulation_mode, ce.CuestEmulationUsageMode)
+        df_derivative_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        df_derivative_emulation_mode_handle.value = int(df_derivative_emulation_mode.value)
+        cuest_check('Configure JK Grad Params metric contraction fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=df_derivative_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        df_derivative_mantissa_bit = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(df_derivative_mantissa_bit, int)
+        df_derivative_mantissa_bit_handle = ce.data_int32_t()
+        df_derivative_mantissa_bit_handle.value = df_derivative_mantissa_bit
+        cuest_check('Configure JK Grad Params metric contraction fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=df_derivative_mantissa_bit_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        df_derivative_emulation_mode = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(df_derivative_emulation_mode, ce.CuestEmulationUsageMode)
+        df_derivative_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        df_derivative_emulation_mode_handle.value = int(df_derivative_emulation_mode.value)
+        cuest_check('Configure JK Grad Params pseudodensity fitting fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=df_derivative_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        df_derivative_mantissa_bit = additional_precision_control_parameters["CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(df_derivative_mantissa_bit, int)
+        df_derivative_mantissa_bit_handle = ce.data_int32_t()
+        df_derivative_mantissa_bit_handle.value = df_derivative_mantissa_bit
+        cuest_check('Configure JK Grad Params pseudodensity fitting fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_JK_gradient_parameters,
+                attribute=ce.CuestDFSymmetricDerivativeComputeParametersAttributes.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=df_derivative_mantissa_bit_handle,
+                )
+            )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -3735,6 +3973,7 @@ class HandleBundle:
 
         self.dfintplan_handle, self.dfintplan_persistent_workspace = cuest_build_dfintplan(
             mol, cuest_handle, aobasis_handle, auxbasis_handle, aopairlist_handle, omega, lr_factor, sr_factor,
+            mf.additional_precision_control_parameters,
             fitting_cutoff = mf.density_fitting_cutoff
         )
 
@@ -4510,10 +4749,32 @@ class CuESTWrapper(lib.StreamObject):
             mode = ce.CuestMathMode.CUEST_NATIVE_FP64_MATH_MODE,
         )
 
-        ### Warning: you're at your own risk if you modify the following parameters.
+        _additional_precision_control_parameters_template = {
+            # DF J/K Fock
+            "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 5,
+            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 8,
+
+            # DF J/K gradient
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY" : ce.CuestDFSymmetricDerivativeComputeMemoryPolicy.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_MEMORY_POLICY_DEVICECACHE,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+        }
+        ### Warning: you're at your own risk if you put the parameters above to the dict below, which will overwrite the default setting.
         self.additional_precision_control_parameters = {
-            # "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 10,
-            # "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 10,
         }
 
         self._unsafe_for_change_keys = [
@@ -4700,7 +4961,7 @@ class CuESTWrapper(lib.StreamObject):
                     time_pre_post += time1 - time0
                     time0 = time1
 
-                J_cuest_order = cuest_compute_coulombmatrix(mol, dm_cuest_order, cuest_handle, dfintplan_handle)
+                J_cuest_order = cuest_compute_coulombmatrix(mol, dm_cuest_order, cuest_handle, dfintplan_handle, self.additional_precision_control_parameters)
 
                 if mol.verbose >= logger.DEBUG:
                     cp.cuda.runtime.deviceSynchronize()
@@ -5104,7 +5365,8 @@ class CuESTGradientWrapper(lib.StreamObject):
             time_pre_post += time1 - time0
             time0 = time1
 
-        djk = cuest_compute_coulomb_exchange_gradient(mol, dm_cuest_order, mocc, nocc, cuest_handle, dfintplan_handle, self.base.maximum_workspace_bytes)
+        djk = cuest_compute_coulomb_exchange_gradient(mol, dm_cuest_order, mocc, nocc, cuest_handle, dfintplan_handle,
+                                                      self.base.maximum_workspace_bytes, self.base.additional_precision_control_parameters)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()
