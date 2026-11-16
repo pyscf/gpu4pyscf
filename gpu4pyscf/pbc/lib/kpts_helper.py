@@ -330,10 +330,13 @@ def _get_kmesh(cell, kpts, bvkmesh=None):
     # Under these assumptions, its size is 1, 2, 4 or 8 times len(kpts).
     if np.prod(kmesh) != len(kpts):
         kmesh[kmesh % 2 == 0] //= 2
+
     if np.prod(kmesh) == len(kpts):
-        # Test if the inferenced kmesh could produce the input kpts
         reference = cell.make_kpts(kmesh, with_gamma_point=with_gamma_point)
-        if abs(reference - kpts).max() < 1e-7:
+        diff = cell.get_scaled_kpts(reference - kpts)
+        # Handle wrap_around=True. Equivalent k-points can differ by integer
+        diff -= np.rint(diff)
+        if abs(diff).max() < 1e-7:
             return kmesh, with_gamma_point
 
     return None, None

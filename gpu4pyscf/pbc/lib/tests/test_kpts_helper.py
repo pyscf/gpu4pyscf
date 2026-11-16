@@ -127,6 +127,14 @@ def test_get_kmesh():
     np.testing.assert_array_equal(mesh, [2, 3, 1])
     assert fft_order
 
+    # Wrapping preserves the indices and lattice-translation phases.
+    for with_gamma_point in (True, False):
+        kpts = cell.make_kpts([4, 3, 1], with_gamma_point=with_gamma_point,
+                              wrap_around=True)
+        mesh, gamma = kpts_helper._get_kmesh(cell, kpts)
+        np.testing.assert_array_equal(mesh, [4, 3, 1])
+        assert gamma == with_gamma_point
+
     # One even dimension doubles the bvkmesh size
     kpts = cell.make_kpts([3, 2, 1], with_gamma_point=False)
     mesh, fft_order = kpts_helper._get_kmesh(cell, kpts, [3, 4, 1])
