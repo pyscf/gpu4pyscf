@@ -34,8 +34,6 @@ import cupy as cp
 import time
 import types
 
-# flake8: noqa
-
 def cuest_check(
     title,
     return_code
@@ -6041,7 +6039,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                 # TODO: slice ecp_atoms
                 ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
                 h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
-                h1 -= h1_ecp.sum(axis=0)
+                dh1e -= contract_h1e_dm(mol, h1_ecp.sum(axis=0), dm, hermi=1)
                 dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm)
 
             return dh1e
