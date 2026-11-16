@@ -795,6 +795,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     bvkmesh = kpts_to_bvkmesh(cell, kpt.reshape(1, 3), rcut=cell.rcut+10,
                               bound_by_supmol=True)
     ft_opt = FTOpt(cell, bvkmesh)
+    ft_opt.permutation_symmetry = is_zero(kpt)
     ft_kern = ft_opt.gen_ft_kernel(verbose=log, kpts=kpt.reshape(1, 3))
 
     Gv, Gvbase, kws = get_Gv_weights(cell, mesh)

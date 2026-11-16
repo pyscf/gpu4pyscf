@@ -545,8 +545,8 @@ class FTOpt:
             kpt_j - kpt_i == q. If permutation_symmetry is enabled, it must be
             provided to fill the upper triangular blocks.
             '''
-            at_gamma_point = q is None or is_zero(q)
-            if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
+            ki_kj_identical = q is None or is_zero(q)
+            if kj_idx is None and not ki_kj_identical and self.permutation_symmetry:
                 raise RuntimeError('kj_idx must be specified when permutation_symmetry is enabled')
 
             if q is not None:
@@ -560,14 +560,14 @@ class FTOpt:
             with_gamma_point = with_gamma_point_cached
 
             if kpts_is_gamma_point and bvk_ncells == 1:
-                assert at_gamma_point
+                assert ki_kj_identical
                 out_buf = out, buf
             else:
                 out_buf = buf, out
             out = eval_ft(Gv, out=out_buf[0])
 
             nGv = len(Gv)
-            symmetric_for_bvk_orbitals = self.permutation_symmetry and at_gamma_point
+            symmetric_for_bvk_orbitals = self.permutation_symmetry and ki_kj_identical
             if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
                 fill_triu_bvk(out.view(np.float64), nao, self.bvkmesh,
@@ -577,7 +577,7 @@ class FTOpt:
                 if bvk_ncells != 1:
                     tmp = ndarray((nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
                     out = out.sum(axis=1, out=tmp)[:,None]
-                if self.permutation_symmetry and not symmetric_for_bvk_orbitals:
+                if self.permutation_symmetry and not ki_kj_identical:
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
@@ -600,7 +600,7 @@ class FTOpt:
                 tmp = ndarray((nkpts,nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
                 out = contract('Lk,pLqG->kpqG', expLk, out, out=tmp)
                 if (kj_idx is not None and
-                    self.permutation_symmetry and not symmetric_for_bvk_orbitals):
+                    self.permutation_symmetry and not ki_kj_identical):
                     # Using the identity FW(i[ki], j[kj], G+q) == FW(j[-kj], i[-ki], G+q),
                     # The upper-triangular block at (ki, kj) can be constructed
                     # from the lower-triangular block at (-kj, -ki).

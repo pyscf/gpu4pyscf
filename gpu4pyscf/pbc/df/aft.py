@@ -34,7 +34,7 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts, _get_kmesh
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
@@ -249,7 +249,12 @@ class AFTDF(lib.StreamObject):
         if bvkmesh is None:
             bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
-        ft_opt = FTOpt(cell, bvkmesh).build()
+        ft_opt = FTOpt(cell, bvkmesh)
+        # General k sampling does not contain k/-k partners required by the
+        # permutation_symmetry.
+        kmesh, _ = _get_kmesh(cell, kpts, bvkmesh)
+        ki_kj_identical = q is None or is_zero(q)
+        ft_opt.permutation_symmetry = kmesh is not None and ki_kj_identical
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao, kpts=kpts)
 
         bvk_ncells = len(ft_opt.bvkmesh_Ls)
