@@ -600,9 +600,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
             nGv = p1 - p0
             pqG = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx).transpose(0,2,3,1)
             pqG_conj = pqG.conj()
-            # pqG.conj() can be computed equivalently as
-            #pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts)
-            #pqG_conj = pqG_conj.transpose(0,2,3,1)
+            # This is also the FT at (-Gv, -kpt) with sampling -kpts.
 
             if is_gamma_point:
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
@@ -797,7 +795,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     bvkmesh = kpts_to_bvkmesh(cell, kpt.reshape(1, 3), rcut=cell.rcut+10,
                               bound_by_supmol=True)
     ft_opt = FTOpt(cell, bvkmesh)
-    ft_kern = ft_opt.gen_ft_kernel(verbose=log)
+    ft_kern = ft_opt.gen_ft_kernel(verbose=log, kpts=kpt.reshape(1, 3))
 
     Gv, Gvbase, kws = get_Gv_weights(cell, mesh)
     ngrids = len(Gv)
@@ -813,7 +811,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     log.debug1('Gblksize = %d', Gblksize)
 
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
-        Gpq = ft_kern(Gv[p0:p1], None, kpt.reshape(1, 3))[0]
+        Gpq = ft_kern(Gv[p0:p1])[0]
         if with_j:
             rho = contract('npq,Gpq->nG', dms.conj(), Gpq).conj()
             rho *= vjcoulG[p0:p1]

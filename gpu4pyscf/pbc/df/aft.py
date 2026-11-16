@@ -250,7 +250,7 @@ class AFTDF(lib.StreamObject):
             bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
         ft_opt = FTOpt(cell, bvkmesh).build()
-        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
+        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao, kpts=kpts)
 
         bvk_ncells = len(ft_opt.bvkmesh_Ls)
         nao = ft_opt.cell.nao
@@ -267,7 +267,7 @@ class AFTDF(lib.StreamObject):
         blksize = min(blksize, ngrids)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            dat = ft_kern(Gv[p0:p1], q, kpts)
+            dat = ft_kern(Gv[p0:p1], q)
             yield dat, p0, p1
 
     @contextlib.contextmanager

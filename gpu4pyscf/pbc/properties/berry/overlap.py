@@ -312,11 +312,11 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh=None, topology=None):
     bvkmesh = _commensurate_bvkmesh(cell, kpts, kmesh)
     ft_opt = ft_ao.FTOpt(cell, bvkmesh)
     ft_opt.permutation_symmetry = False
-    ft_kernel = ft_opt.gen_ft_kernel()
+    ft_kernel = ft_opt.gen_ft_kernel(kpts=kpts)
 
     # With k_j = k and Gv = -b, raw[k,d] is <f_mu,k+b | f_nu,k>.
     # Its adjoint gives the forward link while sharing kpts for all directions.
-    raw = ft_kernel(-reciprocal_steps, q=np.zeros(3), kpts=kpts)
+    raw = ft_kernel(-reciprocal_steps, q=np.zeros(3))
     s_ao = raw.conj().transpose(1, 0, 3, 2)
     return cp.matmul(
         mo_coeff_kpts.conj().transpose(0, 2, 1)[None],

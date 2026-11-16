@@ -834,7 +834,7 @@ class PBCJKMatrixOpt:
             wcoulG += wcoulG_SR
 
         ft_opt = FTOpt(cell, bvkmesh).build()
-        ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+        ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
         avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .8)
         # Reserve space for ft_kern
@@ -844,7 +844,7 @@ class PBCJKMatrixOpt:
         blksize = min(blksize, ngrids)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpts)
+            Gpq = ft_kern(Gv[p0:p1], kpt_allow)
             aft_jk._update_vj_(vj, Gpq, dms, wcoulG[p0:p1])
             if exclude_dd_block:
                 Gpq[:,:,diffuse_i,diffuse_j] = 0.
