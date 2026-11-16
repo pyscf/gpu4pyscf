@@ -26,10 +26,12 @@ if hasattr(multigrid_cpu, 'MultiGridNumInt'):
 else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v3 as multigrid
+from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc.df import aft, fft as fft_df
 from gpu4pyscf.pbc.df.df import GDF
-from gpu4pyscf.pbc.tools import ifft, fft
+from gpu4pyscf.pbc.tools import ifft, fft, get_coulG
 from gpu4pyscf.pbc.dft import numint, UniformGrids
+from gpu4pyscf.pbc.dft import RKS as RKS_gpu
 from gpu4pyscf.pbc.dft import KRKS as KRKS_gpu
 from gpu4pyscf.pbc.dft import KUKS as KUKS_gpu
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
@@ -37,7 +39,7 @@ from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
 import pytest
 
 def setUpModule():
-    global cell_orth, cell_nonorth, cell_he
+    global cell_orth, cell_nonorth, cell_he, cell_2d
     global kpts, dm, dm1
     np.random.seed(2)
     cell_orth = gto.M(
@@ -78,11 +80,17 @@ def setUpModule():
                       unit='B',
                       precision = 1e-10,
                       a=np.eye(3)*5)
+    
+    cell_2d = gto.M(
+        a=np.diag([7., 8., 60.]), unit='Bohr', dimension=2,
+        atom='H 1.1 1.2 0.; H 1.5 1.3 1.7',
+        basis='gth-szv', pseudo='gth-pade', mesh=[31, 33, 249],
+        precision=1e-10, verbose=0)
 
 def tearDownModule():
-    global cell_orth, cell_nonorth, cell_he
+    global cell_orth, cell_nonorth, cell_he, cell_2d
     cell_orth.stdout.close()
-    del cell_orth, cell_nonorth, cell_he
+    del cell_orth, cell_nonorth, cell_he, cell_2d
 
 def _get_vpplocG_derivatives(cell, mesh, rhoG):
     assert cell.dimension == 3
@@ -197,6 +205,89 @@ def eval_nucG_SI_gradient(cell, mesh, rho_g):
     return de, sigma
 
 class KnownValues(unittest.TestCase):
+    def test_coulomb_kernel_2d(self):
+        cell = cell_2d
+        mesh = (5, 5, 9)
+        rng = np.random.default_rng(81)
+        rhoG = cp.asarray(rng.normal(size=mesh) + 1j*rng.normal(size=mesh))
+        Gv_bases = multigrid._get_Gv_bases(mesh, cell.reciprocal_vectors())
+        coulG = get_coulG(cell, mesh=mesh).reshape(mesh)
+        length = cell.lattice_vectors()[2, 2]
+        self.assertAlmostEqual(float(coulG[0, 0, 0]), -np.pi*length**2/2,
+                               delta=1e-10) # correct kernel for G=0, -pi*L**2/2
+        reference = rhoG*coulG
+        reference_energy = cp.vdot(rhoG, reference).real
+        energy, potential = multigrid._get_coulomb_in_place(
+            rhoG.copy(), Gv_bases, cell=cell)
+        cp.testing.assert_allclose(potential, reference, atol=1e-11, rtol=0)
+        self.assertAlmostEqual(float(energy), float(reference_energy), delta=1e-10)
+
+    def test_operators_2d_against_fft(self):
+        cell = cell_2d
+        mf = RKS_gpu(cell, xc='lda,vwn')
+        mg_mf = mf.multigrid_numint(mesh=cell.mesh)
+        ni = mg_mf._numint
+        ni.allow_mesh_reduction = False
+        dm = cp.eye(cell.nao) * .4
+
+        reference = fft_df.FFTDF(cell)
+        reference_nuc = reference.get_nuc(kpts=np.zeros(3))
+        cp.testing.assert_allclose(ni.get_nuc(), reference_nuc,
+                                   atol=2e-9, rtol=0)
+        cp.testing.assert_allclose(mg_mf.get_hcore(), mf.get_hcore(),
+                                   atol=2e-9, rtol=0)
+        reference_j = reference.get_jk(dm, with_k=False)[0]
+        cp.testing.assert_allclose(ni.get_j(dm), reference_j, atol=2e-9, rtol=0)
+
+    def test_scf_2d_against_fft(self):
+        for name, xc in (('RKS', 'lda,vwn'), ('KRKS', 'pbe'),
+                         ('KUKS', 'r2scan')):
+            with self.subTest(name=name, xc=xc):
+                cell = cell_2d
+                if name == 'KRKS':
+                    cell.mesh = [61, 65, 489]
+                if name == 'KUKS':
+                    cell = cell.copy()
+                    cell.mesh = [71, 75, 569]
+                    cell.charge = cell.spin = 1
+                    cell.build()
+                kwargs = {'xc': xc}
+                if name.startswith('K'):
+                    kwargs['kpts'] = cell.make_kpts([2, 1, 1])
+                reference = getattr(dft, name)(cell, **kwargs)
+                mf = reference.multigrid_numint()
+                dm0 = reference.get_init_guess()
+                for ks in (reference, mf):
+                    ks.chkfile = None
+                    ks.conv_tol = 1e-11
+                    ks.conv_tol_grad = 1e-7
+                reference.kernel(dm0=dm0.copy())
+                mf.kernel(dm0=dm0.copy())
+                self.assertTrue(reference.converged)
+                self.assertTrue(mf.converged)
+                self.assertAlmostEqual(mf.e_tot, reference.e_tot, delta=2e-8)
+                cp.testing.assert_allclose(mf.make_rdm1(),
+                                           reference.make_rdm1(), atol=2e-7, rtol=0)
+
+    def test_response_2d_against_fft(self):
+        cell = cell_2d
+        cell.mesh = [61, 65, 489]
+        grids = UniformGrids(cell)
+        dm = cp.eye(cell.nao) * .4
+        dm1 = cp.asarray([[.2, .1], [.1, .3]])
+        ni = multigrid.MultiGridNumInt(cell)
+        reference = numint.NumInt()
+        j = fft_df.FFTDF(cell).get_jk(dm1, with_k=False)[0]
+        dm1 = dm1[None, None]
+        vref = reference.nr_rks_fxc(cell, grids, 'pbe', dm, dm1, hermi=1)
+        v = ni.nr_rks_fxc(cell, grids, 'pbe', dm, dm1, hermi=1, with_j=True)
+        cp.testing.assert_allclose(v, vref+j, atol=2e-8, rtol=0)
+        dm = cp.stack([dm, dm*.7])
+        dm1 = cp.stack([dm1, dm1*.6])
+        vref = reference.nr_uks_fxc(cell, grids, 'pbe', dm, dm1, hermi=1)
+        v = ni.nr_uks_fxc(cell, grids, 'pbe', dm, dm1, hermi=1, with_j=True)
+        cp.testing.assert_allclose(v, vref+j*1.6, atol=2e-8, rtol=0)
+
     def test_aft_disabled_for_nonorthogonal_bvk_cell(self):
         kmesh = np.array([2, 2, 2])
         control = multigrid.MultiGridNumInt(cell_orth)

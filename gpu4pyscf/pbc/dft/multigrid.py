@@ -23,6 +23,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.gto import pseudo
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -696,7 +697,9 @@ def get_rho(ni, dm, kpts=None):
 
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
-    assert cell.dimension == 3
+    assert cell.dimension in (2, 3)
+    if cell.dimension == 2:
+        assert cell.low_dim_ft_type != 'inf_vacuum'
     Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
@@ -741,6 +744,19 @@ _kernel_registery = {}
 def eval_vpplocG(cell, mesh, out=None):
     '''PRB, 58, 3641 Eq (5)
     '''
+    if cell.dimension == 2:
+        assert cell.low_dim_ft_type != 'inf_vacuum'
+        # Use the same truncated GTH kernel, including its finite G=0 term,
+        # as FFTDF. The 3D alpha correction below must not be added again.
+        Gv = cell.get_Gv(mesh)
+        vloc = cp.asarray(pseudo.get_vlocG(cell, Gv))
+        Gv = cp.asarray(Gv)
+        coords = cp.asarray(cell.atom_coords())
+        vlocG = ndarray(np.prod(mesh), dtype=np.complex128, buffer=out)
+        vlocG.fill(0)
+        for ia in range(cell.natm):
+            vlocG -= cp.exp(-1j * Gv.dot(coords[ia])) * vloc[ia]
+        return vlocG
     assert cell.dimension == 3
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
     coords = cp.asarray(cell.atom_coords())

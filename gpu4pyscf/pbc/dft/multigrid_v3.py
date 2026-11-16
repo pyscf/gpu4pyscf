@@ -1090,7 +1090,7 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vx
     kernel((workers*2,), (1024,), (out, xc, Gx, Gy, Gz, len(Gx), len(Gy), len(Gz)))
     return out
 
-def _get_coulomb_in_place(rhoG, Gv_bases, omega=0):
+def _get_coulomb_in_place(rhoG, Gv_bases, omega=0, cell=None):
     '''
     Computes
         Ecoul = rhoG.conj().dot(rhoG * coulG)
@@ -1098,7 +1098,16 @@ def _get_coulomb_in_place(rhoG, Gv_bases, omega=0):
     where
         coulG = 4pi/G^2 for full-range Coulomb potential or
         coulG = 4pi/G^2*exp(-G^2/(4*omega^2)) for long-range potential
+    Passing a 2D cell uses its truncated kernel, including the finite G=0
+    term. The default retains the optimized 3D implementation.
     '''
+    if cell is not None and cell.dimension == 2:
+        assert cell.low_dim_ft_type != 'inf_vacuum'
+        mesh = tuple(x.shape[1] for x in Gv_bases)
+        coulG = get_coulG(cell, mesh=mesh, omega=omega).reshape(rhoG.shape)
+        ecoul = cp.vdot(rhoG, rhoG * coulG).real
+        rhoG *= coulG
+        return ecoul, rhoG
     fn_name = 'get_coulG'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
@@ -1670,9 +1679,12 @@ def get_nuc(ni, kpts=None):
     ni._ensure_initialized(kpts, 'LDA')
 
     mesh = ni.mesh
-    ZSI = _get_ZSI(cell, mesh)
-    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-    vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+    if cell.dimension == 2:
+        vneG = multigrid_v1.eval_nucG(cell, mesh).reshape(mesh)
+    else:
+        ZSI = _get_ZSI(cell, mesh)
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+        vneG = _get_coulomb_in_place(ZSI, Gv_bases, cell=cell)[1]
 
     vne = _eval_xc_mat(ni, vneG)
     vne = _inverse_wannier_transform_fock(ni, vne, kpts)
@@ -1786,7 +1798,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     if xctype == 'HF':
         assert with_j
-        ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
+        ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases, cell=cell)
         ecoul = (.5 / vol) * float(ecoul.get())
         xc_for_fock = coulomb_on_g_mesh
         log.debug('Multigrid Coulomb energy %s', ecoul)
@@ -1824,7 +1836,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         t0 = log.timer_debug1("eval_xc_eff", *t0)
 
         if with_j:
-            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
+            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases, cell=cell)
             ecoul = (.5 / vol) * float(ecoul.get())
             log.debug('Multigrid Coulomb energy %s', ecoul)
         else:
@@ -1953,7 +1965,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     xc_for_fock *= weight
     coulomb_a, coulomb_b = rhoG, rhoGb
     if with_j:
-        ecoul, coulomb_a = _get_coulomb_in_place(rhoG, Gv_bases)
+        ecoul, coulomb_a = _get_coulomb_in_place(rhoG, Gv_bases, cell=cell)
         ecoul = (.5 / vol) * float(ecoul.get())
         log.debug('Multigrid Coulomb energy %s', ecoul)
         coulomb_b[:] = coulomb_a
@@ -2221,7 +2233,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             rho1 = None
 
             if with_j:
-                coulomb = _get_coulomb_in_place(rhoG, Gv_bases)[1]
+                coulomb = _get_coulomb_in_place(rhoG, Gv_bases, cell=cell)[1]
             else:
                 coulomb = rhoG
                 coulomb.fill(0.)
@@ -2290,7 +2302,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
             coulomb_a, coulomb_b = rhoG, rhoGb
             if with_j:
-                coulomb_a = _get_coulomb_in_place(rhoG, Gv_bases)[1]
+                coulomb_a = _get_coulomb_in_place(rhoG, Gv_bases, cell=cell)[1]
                 coulomb_b[:] = coulomb_a
             else:
                 coulomb_a.fill(0)
