@@ -603,7 +603,7 @@ def cuest_compute_kineticint(mol, cuest_handle, oeintplan_handle):
 
     return kineticint_device
 
-def cuest_compute_potentialint(mol, xyzs_device, Zs_device, cuest_handle, oeintplan_handle):
+def cuest_compute_potentialint(mol, xyzs_device, Zs_device, cuest_handle, oeintplan_handle, additional_precision_control_parameters):
     # The input xyzs is assumed to be in x1,y1,z1,x2,y2,z2,... order, Zs is assumed to be scaled with -1 already,
     # and the returned V1e matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
@@ -621,6 +621,34 @@ def cuest_compute_potentialint(mol, xyzs_device, Zs_device, cuest_handle, oeintp
             outParameters=potential_compute_parameters,
             )
         )
+
+    if "CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+        v1e_ffloat_mode = additional_precision_control_parameters["CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+        assert isinstance(v1e_ffloat_mode, ce.CuestFfloatUsageMode)
+        v1e_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+        v1e_ffloat_mode_handle.value = int(v1e_ffloat_mode.value)
+        cuest_check('Configure Potential Compute Params ffloat usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_POTENTIALCOMPUTE_PARAMETERS,
+                parameters=potential_compute_parameters,
+                attribute=ce.CuestPotentialComputeParametersAttributes.CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                attributeValue=v1e_ffloat_mode_handle,
+                )
+            )
+
+    if "CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" in additional_precision_control_parameters:
+        v1e_jit_mode = additional_precision_control_parameters["CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE"]
+        assert isinstance(v1e_jit_mode, ce.CuestJITUsageMode)
+        v1e_jit_mode_handle = ce.data_cuestJITUsageMode_t()
+        v1e_jit_mode_handle.value = int(v1e_jit_mode.value)
+        cuest_check('Configure Potential Compute Params jit usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_POTENTIALCOMPUTE_PARAMETERS,
+                parameters=potential_compute_parameters,
+                attribute=ce.CuestPotentialComputeParametersAttributes.CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE,
+                attributeValue=v1e_jit_mode_handle,
+                )
+            )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -2287,7 +2315,7 @@ def cuest_build_ecpintplan(mol, cuest_handle, aobasis_handle):
 
     return ecpintplan_handle, ecpintplan_persistent_workspace
 
-def cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, maximum_workspace_bytes):
+def cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The returned V_ecp matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -2298,6 +2326,34 @@ def cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, maximum_workspace
             outParameters=ecpcompute_parameters,
             )
         )
+
+    if "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        ecp_emulation_mode = additional_precision_control_parameters["CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(ecp_emulation_mode, ce.CuestEmulationUsageMode)
+        ecp_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        ecp_emulation_mode_handle.value = int(ecp_emulation_mode.value)
+        cuest_check('Configure ECP Compute Params potential assembly fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_ECPCOMPUTE_PARAMETERS,
+                parameters=ecpcompute_parameters,
+                attribute=ce.CuestECPComputeParametersAttributes.CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=ecp_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        ecp_mantissa_bit = additional_precision_control_parameters["CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(ecp_mantissa_bit, int)
+        ecp_mantissa_bit_handle = ce.data_int32_t()
+        ecp_mantissa_bit_handle.value = ecp_mantissa_bit
+        cuest_check('Configure ECP Compute Params potential assembly fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_ECPCOMPUTE_PARAMETERS,
+                parameters=ecpcompute_parameters,
+                attribute=ce.CuestECPComputeParametersAttributes.CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=ecp_mantissa_bit_handle,
+                )
+            )
 
     maximum_workspace_bytes = min(maximum_workspace_bytes, get_cupy_maximum_free_bytes())
     maximum_workspace_descriptor = WorkspaceDescriptor(
@@ -2560,7 +2616,7 @@ def cuest_compute_kinetic_gradient(mol, densitymatrix_device, cuest_handle, oein
 
     return kineticgrad_device
 
-def cuest_compute_potential_gradeint(mol, densitymatrix_device, xyzs_device, Zs_device, cuest_handle, oeintplan_handle):
+def cuest_compute_potential_gradeint(mol, densitymatrix_device, xyzs_device, Zs_device, cuest_handle, oeintplan_handle, additional_precision_control_parameters):
     # The input xyzs is assumed to be in x1,y1,z1,x2,y2,z2,... order, Zs is assumed to be scaled with -1 already
     log = logger.new_logger(mol, mol.verbose)
 
@@ -2581,6 +2637,34 @@ def cuest_compute_potential_gradeint(mol, densitymatrix_device, xyzs_device, Zs_
             outParameters=compute_potential_gradient_parameters,
             )
         )
+
+    if "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" in additional_precision_control_parameters:
+        v1e_gradient_ffloat_mode = additional_precision_control_parameters["CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE"]
+        assert isinstance(v1e_gradient_ffloat_mode, ce.CuestFfloatUsageMode)
+        v1e_gradient_ffloat_mode_handle = ce.data_cuestFfloatUsageMode_t()
+        v1e_gradient_ffloat_mode_handle.value = int(v1e_gradient_ffloat_mode.value)
+        cuest_check('Configure Potential Grad Params ffloat usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_potential_gradient_parameters,
+                attribute=ce.CuestPotentialDerivativeComputeParametersAttributes.CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE,
+                attributeValue=v1e_gradient_ffloat_mode_handle,
+                )
+            )
+
+    if "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" in additional_precision_control_parameters:
+        v1e_gradient_jit_mode = additional_precision_control_parameters["CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE"]
+        assert isinstance(v1e_gradient_jit_mode, ce.CuestJITUsageMode)
+        v1e_gradient_jit_mode_handle = ce.data_cuestJITUsageMode_t()
+        v1e_gradient_jit_mode_handle.value = int(v1e_gradient_jit_mode.value)
+        cuest_check('Configure Potential Grad Params jit usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=compute_potential_gradient_parameters,
+                attribute=ce.CuestPotentialDerivativeComputeParametersAttributes.CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE,
+                attributeValue=v1e_gradient_jit_mode_handle,
+                )
+            )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -3427,7 +3511,7 @@ def cuest_compute_pcm_gradient(mol, densitymatrix_device, q_guess, cuest_handle,
 
     return pcmgrad_device
 
-def cuest_compute_ecp_gradient(mol, densitymatrix_device, cuest_handle, ecpintplan_handle, maximum_workspace_bytes):
+def cuest_compute_ecp_gradient(mol, densitymatrix_device, cuest_handle, ecpintplan_handle, maximum_workspace_bytes, additional_precision_control_parameters):
     # The input D is assumed to be in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
@@ -3450,6 +3534,34 @@ def cuest_compute_ecp_gradient(mol, densitymatrix_device, cuest_handle, ecpintpl
             outParameters=ecpderivcompute_parameters,
             )
         )
+
+    if "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" in additional_precision_control_parameters:
+        ecp_derivative_emulation_mode = additional_precision_control_parameters["CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE"]
+        assert isinstance(ecp_derivative_emulation_mode, ce.CuestEmulationUsageMode)
+        ecp_derivative_emulation_mode_handle = ce.data_cuestEmulationUsageMode_t()
+        ecp_derivative_emulation_mode_handle.value = int(ecp_derivative_emulation_mode.value)
+        cuest_check('Configure ECP Derivative Params gradient collocation fixedpoint emulation usage mode',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=ecpderivcompute_parameters,
+                attribute=ce.CuestECPDerivativeComputeParametersAttributes.CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE,
+                attributeValue=ecp_derivative_emulation_mode_handle,
+                )
+            )
+
+    if "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" in additional_precision_control_parameters:
+        ecp_derivative_mantissa_bit = additional_precision_control_parameters["CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"]
+        assert isinstance(ecp_derivative_mantissa_bit, int)
+        ecp_derivative_mantissa_bit_handle = ce.data_int32_t()
+        ecp_derivative_mantissa_bit_handle.value = ecp_derivative_mantissa_bit
+        cuest_check('Configure ECP Derivative Params gradient collocation fixedpoint emulation mantissa bit count',
+            ce.cuestParametersConfigure(
+                parametersType=ce.CuestParametersType.CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS,
+                parameters=ecpderivcompute_parameters,
+                attribute=ce.CuestECPDerivativeComputeParametersAttributes.CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT,
+                attributeValue=ecp_derivative_mantissa_bit_handle,
+                )
+            )
 
     temporary_workspace_descriptor = WorkspaceDescriptor()
 
@@ -4750,6 +4862,17 @@ class CuESTWrapper(lib.StreamObject):
         )
 
         _additional_precision_control_parameters_template = {
+            # 1e
+            "CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_OFF,
+            "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+
+            "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
             # DF J/K Fock
             "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
             "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
@@ -4883,7 +5006,7 @@ class CuESTWrapper(lib.StreamObject):
         xyzs = cp.asarray(xyzs, order = "C", dtype = cp.float64)
         charges = -mol.atom_charges()
         charges = cp.asarray(charges, order = "C", dtype = cp.float64)
-        V1e_cuest_order = cuest_compute_potentialint(mol, xyzs, charges, cuest_handle, oeintplan_handle)
+        V1e_cuest_order = cuest_compute_potentialint(mol, xyzs, charges, cuest_handle, oeintplan_handle, self.additional_precision_control_parameters)
 
         Hcore_cuest_order = K1e_cuest_order + V1e_cuest_order
 
@@ -4892,7 +5015,7 @@ class CuESTWrapper(lib.StreamObject):
                 self.handles.build_ecpintplan(self)
             ecpintplan_handle = self.handles.ecpintplan_handle
 
-            ECP_cuest_order = cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, self.maximum_workspace_bytes)
+            ECP_cuest_order = cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, self.maximum_workspace_bytes, self.additional_precision_control_parameters)
             Hcore_cuest_order += ECP_cuest_order
 
         if mol.cart:
@@ -5238,7 +5361,7 @@ class CuESTGradientWrapper(lib.StreamObject):
         xyzs = cp.asarray(xyzs, order = "C", dtype = cp.float64)
         charges = -mol.atom_charges()
         charges = cp.asarray(charges, order = "C", dtype = cp.float64)
-        dv1e_orbital, dv1e_pointcharge = cuest_compute_potential_gradeint(mol, dm_cuest_order, xyzs, charges, cuest_handle, oeintplan_handle)
+        dv1e_orbital, dv1e_pointcharge = cuest_compute_potential_gradeint(mol, dm_cuest_order, xyzs, charges, cuest_handle, oeintplan_handle, self.base.additional_precision_control_parameters)
 
         dh += dv1e_orbital + dv1e_pointcharge
 
@@ -5247,7 +5370,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                 self.base.handles.build_ecpintplan(self.base)
             ecpintplan_handle = self.base.handles.ecpintplan_handle
 
-            decp = cuest_compute_ecp_gradient(mol, dm_cuest_order, cuest_handle, ecpintplan_handle, self.base.maximum_workspace_bytes)
+            decp = cuest_compute_ecp_gradient(mol, dm_cuest_order, cuest_handle, ecpintplan_handle, self.base.maximum_workspace_bytes, self.base.additional_precision_control_parameters)
             dh += decp
 
         return dh.get()
