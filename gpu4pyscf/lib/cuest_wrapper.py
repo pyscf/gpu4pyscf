@@ -4944,12 +4944,10 @@ class CuESTGradientWrapper(lib.StreamObject):
         assert dm.shape == (mol.nao, mol.nao)
 
         if not self.base.turn_on_cuest_hcore:
-            from gpu4pyscf.grad.rhf import int3c2e, get_ecp_ip, contract, contract_h1e_dm
+            from gpu4pyscf.grad.rhf import _grad_nuc_without_ecp, get_ecp_ip, contract, contract_h1e_dm
 
-            # (\nabla i | hcore | j) - (\nabla i | j)
-            h1 = cp.asarray(super().get_hcore(mol, exclude_ecp=True))
-            # (i | \nabla hcore | j)
-            dh1e = int3c2e.get_dh1e(mol, dm)
+            # dh = (\nabla i | hcore | j) + (i | \nabla Vnuc | j)
+            dh1e = _grad_nuc_without_ecp(mol, dm)
 
             # Calculate ECP contributions in (i | \nabla hcore | j) and
             # (\nabla i | hcore | j) simultaneously
@@ -4960,10 +4958,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                 h1 -= h1_ecp.sum(axis=0)
                 dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm)
 
-            dh = contract_h1e_dm(mol, h1, dm, hermi=1)
-            dh += cp.asnumpy(dh1e)
-
-            return dh
+            return dh1e
 
         cuest_handle = self.base.handles.cuest_handle
         if self.base.handles.oeintplan_handle is None:

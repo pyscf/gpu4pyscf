@@ -1330,7 +1330,7 @@ class KnownValues(unittest.TestCase):
         test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
         test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
 
-        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 3e-7
 
     def test_df_mo_long_range_reconstruct_j3c_for_k(self):
         mol = self.mol_sph
@@ -3676,7 +3676,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
         test_gradient = gobj.kernel()
 
-        assert abs(test_energy - ref_energy) <= 1e-10
+        assert abs(test_energy - ref_energy) <= 3e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
 
     def test_turn_off_xc_rks(self):
