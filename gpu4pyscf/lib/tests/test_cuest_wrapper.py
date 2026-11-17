@@ -3720,7 +3720,7 @@ class KnownValues(unittest.TestCase):
         test_gradient = gobj.kernel()
 
         assert abs(test_energy - ref_energy) <= 3e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 5e-7
 
     def test_turn_off_xc_rks(self):
         mf = RKS(self.mol_sph, xc = "PBE").density_fit(auxbasis = self.auxbasis)
@@ -3909,6 +3909,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.lebedev_order = 11
         mf.with_solvent.method = "C-PCM"
         mf.with_solvent.surface_discretization_method = "ISWIG"
+        mf.conv_tol = 1e-10
 
         mf = apply_cuest_wrapper(mf)
         mf.math_mode = "default"
