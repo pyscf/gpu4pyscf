@@ -74,8 +74,8 @@ def calc_c8(td_a, td_b, n_grid=20):
     denom_a = e_exc_a[:, None]**2 + freqs_im[None, :]**2
     alpha1_a = np.sum(f_osc_a[:, None] / denom_a, axis=0)
     alpha2_a = np.sum(g_osc_a[:, None] / denom_a, axis=0)
-    print(f"System A static alpha1: {alpha1_a[0]:.4f}")
-    print(f"System A static alpha2: {alpha2_a[0]:.4f}")
+    log.debug('System A alpha1(iw), w=%.6g a.u.: %.4f', freqs_im[0], alpha1_a[0])
+    log.debug('System A alpha2(iw), w=%.6g a.u.: %.4f', freqs_im[0], alpha2_a[0])
     
     denom_b = e_exc_b[:, None]**2 + freqs_im[None, :]**2
     alpha1_b = np.sum(f_osc_b[:, None] / denom_b, axis=0)
