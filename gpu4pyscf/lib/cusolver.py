@@ -267,13 +267,16 @@ def syevd(a, overwrite=False):
     (divide-and-conquer). Eigenvectors are returned; UPLO is 'L'. Mirrors the
     layout/return of cupy.linalg.eigh (ascending eigenvalues, columns are vectors).
     '''
+    assert a.ndim == 2 and a.shape[0] == a.shape[1]
     assert a.dtype in (np.float64, np.complex128)
     n = a.shape[0]
-    if a.dtype == np.complex128 and a.flags.c_contiguous:
-        # heevd expects F-order. For a hermitian matrix stored C-contiguous,
-        # .conj() yields the F-ordered representation (same as the sygvd path).
-        A = a.conj()
-    elif overwrite:
+    if a.dtype == np.complex128:
+        # heevd expects F-order. For a hermitian matrix, the C-ordered conjugate
+        # is the F-ordered representation (same as the sygvd path). Writing it
+        # into a new C-contiguous array also handles views such as a[:3,:3].
+        A = cupy.empty((n, n), dtype=a.dtype)
+        cupy.conj(a, out=A)
+    elif overwrite and a.flags.c_contiguous:
         A = a
     else:
         A = a.copy()

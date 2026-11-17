@@ -98,6 +98,16 @@ When working against an editable install, recompile the libraries in place with
 > binary is a few hundred MB. Build one family (`rdna`/`cdna`) or a specific
 > `GPU_TARGET` to keep it small.
 
+> [!NOTE]
+> cuTENSOR and the CUDA build of libXC are not available on ROCm. Tensor
+> contractions fall back to `cupy.einsum`, and exchange-correlation functionals
+> are evaluated with PySCF's libXC on the CPU. These fallbacks are automatic but
+> can reduce performance.
+
+When combining gpu4pyscf with PyTorch (for example the Skala functional), import
+gpu4pyscf before torch. If torch is imported first, CuPy may be unable to compile
+GPU kernels; gpu4pyscf then raises an `ImportError` explaining how to fix it.
+
 The [HIP build CI](.github/workflows/hip_build.yml) compiles and links the native
 libraries on GitHub-hosted CPU runners using `USE_HIP=1 GPU_TARGET=all` in a
 pinned ROCm development container. This compiles all supported CDNA and RDNA
