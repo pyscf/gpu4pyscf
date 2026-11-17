@@ -6040,7 +6040,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                 ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
                 h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
                 dh1e -= contract_h1e_dm(mol, h1_ecp.sum(axis=0), dm, hermi=1)
-                dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm)
+                dh1e[ecp_atoms] += 2.0 * cp.asnumpy(contract('nxij,ij->nx', h1_ecp, dm))
 
             return dh1e
 

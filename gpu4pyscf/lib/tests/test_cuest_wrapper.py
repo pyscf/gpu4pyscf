@@ -3679,6 +3679,49 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 3e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
 
+        ### ECP below
+
+        mf = RKS(self.mol_ecp, xc = "hse06").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-10
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 11
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.surface_discretization_method = "ISWIG"
+
+        # mf.range_separated_mode = "mix_inside_kernel"
+        # ref_energy = mf.kernel()
+        ref_energy = -931.8239524067826
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0006743912298126, -0.0000000000025612,  0.0101582445702521],
+            [-0.0000739064035659, -0.0000000000000168,  0.004070421597122 ],
+            [-0.0028409121786576, -0.0000000000000118, -0.0046258513139239],
+            [ 0.0011202136753514, -0.0020554867369655, -0.0048014074272661],
+            [ 0.0011202136772325,  0.0020554867398083, -0.0048014074261418],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 3e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
     def test_turn_off_xc_rks(self):
         mf = RKS(self.mol_sph, xc = "PBE").density_fit(auxbasis = self.auxbasis)
         mf.grids.atom_grid = (50,194)
