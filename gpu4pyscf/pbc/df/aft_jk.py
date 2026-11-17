@@ -742,7 +742,7 @@ def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
         Gv_bases = multigrid_v3._get_Gv_bases(mesh, ecell.reciprocal_vectors())
         ne_deriv = multigrid_v3._ne_derivatives(ecell, ZSI, Gv_bases, omega).get()
         ewald_G0_response = -ne_deriv[-3:]
-        energy = multigrid_v3._get_coulomb_in_place(ZSI, Gv_bases, omega)[0].get()
+        energy = multigrid_v3._get_coulomb_in_place(ecell, ZSI, Gv_bases, omega)[0].get()
         energy *= 1. / ecell.vol
         ewald_G0_response += np.eye(3) * energy
         if omega < 0:

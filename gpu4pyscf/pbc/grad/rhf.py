@@ -450,7 +450,7 @@ def ewald_derivatives(cell, ew_eta=None, ew_cut=None):
     ne_deriv = multigrid_v3._ne_derivatives(cell, ZSI, Gv_bases, ew_eta).get()
     grad_sigma[:-3] += ne_deriv[:-3]
     grad_sigma[-3:] += .5 * ne_deriv[-3:]
-    energy = multigrid_v3._get_coulomb_in_place(ZSI, Gv_bases, ew_eta)[0].get()
+    energy = multigrid_v3._get_coulomb_in_place(cell, ZSI, Gv_bases, ew_eta)[0].get()
     energy *= .5 / vol
     grad_sigma[-3:] -= np.eye(3) * energy
     # Self and background terms have no atomic derivatives. At fixed eta,

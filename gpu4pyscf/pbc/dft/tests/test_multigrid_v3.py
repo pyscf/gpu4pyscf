@@ -218,7 +218,7 @@ class KnownValues(unittest.TestCase):
         reference = rhoG*coulG
         reference_energy = cp.vdot(rhoG, reference).real
         energy, potential = multigrid._get_coulomb_in_place(
-            rhoG.copy(), Gv_bases, cell=cell)
+            cell, rhoG.copy(), Gv_bases)
         cp.testing.assert_allclose(potential, reference, atol=1e-11, rtol=0)
         self.assertAlmostEqual(float(energy), float(reference_energy), delta=1e-10)
 
@@ -243,11 +243,10 @@ class KnownValues(unittest.TestCase):
         for name, xc in (('RKS', 'lda,vwn'), ('KRKS', 'pbe'),
                          ('KUKS', 'r2scan')):
             with self.subTest(name=name, xc=xc):
-                cell = cell_2d
+                cell = cell_2d.copy()
                 if name == 'KRKS':
                     cell.mesh = [61, 65, 489]
                 if name == 'KUKS':
-                    cell = cell.copy()
                     cell.mesh = [71, 75, 569]
                     cell.charge = cell.spin = 1
                     cell.build()
@@ -270,7 +269,7 @@ class KnownValues(unittest.TestCase):
                                            reference.make_rdm1(), atol=2e-7, rtol=0)
 
     def test_response_2d_against_fft(self):
-        cell = cell_2d
+        cell = cell_2d.copy()
         cell.mesh = [61, 65, 489]
         grids = UniformGrids(cell)
         dm = cp.eye(cell.nao) * .4
