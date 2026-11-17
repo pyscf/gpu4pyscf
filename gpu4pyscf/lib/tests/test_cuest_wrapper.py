@@ -26,6 +26,7 @@ from gpu4pyscf.dft.gen_grid import stratmann
 from gpu4pyscf.grad.rks import get_exc_full_response, get_nlc_exc_full_response
 from gpu4pyscf.grad.uks import get_exc_full_response as get_exc_full_response_uks
 from gpu4pyscf.solvent import pcm
+from gpu4pyscf.scf.gdm import gdm
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 import pytest
@@ -3933,6 +3934,77 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_energy - ref_energy) <= 1e-8
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-6
+
+    def test_cuest_with_gdm(self):
+        mol = pyscf.M(
+            atom = """
+                C        0.94054455      -0.01152091      -0.00390959
+                C       -0.27309667      -0.13851223      -0.00409319
+                C       -1.67604997      -0.25458966      -0.00381518
+                C       -2.44189679      -1.40807448      -0.01287824
+                C       -3.84081477      -1.14512030      -0.00878136
+                C       -4.13038620       0.19818729       0.00308203
+                S       -2.69869599       1.16992462       0.01007284
+                C        2.33820378       0.12319870      -0.00415143
+                C        3.19315017       1.19082272      -0.02078984
+                C        4.53911846       0.74097922      -0.01114025
+                C        4.42898145      -0.62636054       0.01175974
+                O        3.12366760      -1.02802943       0.01662357
+                H       -1.99946927      -2.39813430      -0.02214605
+                H       -4.60251584      -1.91767715      -0.01465898
+                H       -5.10413454       0.67146955       0.00782707
+                H        5.45048689       1.32281605      -0.01954215
+                H        5.16145794      -1.42168823       0.02623033
+            """,
+            basis = "def2-SVP",
+            charge = 0,
+            spin = 1,
+            verbose = 0,
+        )
+
+        mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.max_cycle = 100
+        mf.conv_tol_grad = 1e-6
+
+        dm0 = mf.get_init_guess(key='qchem_sad') # Yes, we start with a spin-averaged guess
+        mf.conv_tol = 1e-10
+
+        mf = apply_cuest_wrapper(mf)
+        mf.math_mode = "default"
+
+        mf = gdm(mf)
+        test_energy = mf.kernel(dm0 = dm0)
+        mf = mf.undo_gdm()
+        assert mf.converged
+        test_n_cycle = mf.cycles
+        test_s2, _ = mf.spin_square()
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        ref_energy = -856.7060020335
+        ref_s2 = 0.772751683
+        ref_gradient = np.array([
+            [ 0.0234882, -0.0236192,  0.0226606, -0.0024212, -0.0019048, -0.0153281,
+              0.0016676, -0.0261750,  0.0027655,  0.0061326,  0.0201931, -0.0059912,
+             -0.0019052,  0.0032071,  0.0049403, -0.0041785, -0.0035318],
+            [ 0.0043018, -0.0036710, -0.0002197, -0.0114842, -0.0104154,  0.0040103,
+              0.0142593,  0.0062651,  0.0068086,  0.0099299, -0.0072166, -0.0190018,
+              0.0042783,  0.0032299, -0.0021699, -0.0025508,  0.0036465],
+            [-0.0000067, -0.0000125, -0.0000385, -0.0000942, -0.0000827,  0.0000480,
+              0.0001347, -0.0001561, -0.0000994, -0.0001705,  0.0001532,  0.0003176,
+              0.0000387,  0.0000253, -0.0000289,  0.0000371, -0.0000653],
+        ]).T
+        ref_n_cycle = 35
+
+        assert np.abs(test_energy - ref_energy) < 1e-4
+        assert np.abs(test_s2 - ref_s2) < 1e-6
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-5
+        assert test_n_cycle <= ref_n_cycle + 5
 
 if __name__ == '__main__':
     print("Full Tests for CuEST Wrapper")
