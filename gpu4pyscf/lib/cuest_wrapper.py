@@ -2500,7 +2500,7 @@ def pyscf_ecpbas_to_cuest_ecpatoms(mol, cuest_handle):
 
     ### Shell above, atom below
 
-    ecpatom_parameters = ce.cuestECPShellParameters()
+    ecpatom_parameters = ce.cuestECPAtomParameters()
     cuest_check('Create ECP Atom Params',
         ce.cuestParametersCreate(
             parametersType=ce.CuestParametersType.CUEST_ECPATOM_PARAMETERS,
@@ -2563,7 +2563,7 @@ def cuest_build_ecpintplan(mol, cuest_handle, aobasis_handle):
     ecpAtoms, ecpIndices = pyscf_ecpbas_to_cuest_ecpatoms(mol, cuest_handle)
     xyzs = mol.atom_coords(unit = "B").flatten()
 
-    ecpintplan_parameters = ce.cuestOEIntPlanParameters()
+    ecpintplan_parameters = ce.cuestECPIntPlanParameters()
     cuest_check('Create ECP Integral Plan Params',
         ce.cuestParametersCreate(
             parametersType=ce.CuestParametersType.CUEST_ECPINTPLAN_PARAMETERS,
@@ -2633,7 +2633,7 @@ def cuest_compute_ecpint(mol, cuest_handle, ecpintplan_handle, maximum_workspace
     # The returned V_ecp matrix is in cuest order
     log = logger.new_logger(mol, mol.verbose)
 
-    ecpcompute_parameters = ce.cuestDFCoulombComputeParameters()
+    ecpcompute_parameters = ce.cuestECPComputeParameters()
     cuest_check('Create ECP Compute Params',
         ce.cuestParametersCreate(
             parametersType=ce.CuestParametersType.CUEST_ECPCOMPUTE_PARAMETERS,

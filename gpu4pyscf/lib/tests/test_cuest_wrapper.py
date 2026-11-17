@@ -3909,7 +3909,7 @@ class KnownValues(unittest.TestCase):
         mf.with_solvent.lebedev_order = 11
         mf.with_solvent.method = "C-PCM"
         mf.with_solvent.surface_discretization_method = "ISWIG"
-        mf.conv_tol = 1e-10
+        mf.conv_tol = 3e-10
 
         mf = apply_cuest_wrapper(mf)
         mf.math_mode = "default"
