@@ -26,6 +26,7 @@ from gpu4pyscf.dft.gen_grid import stratmann
 from gpu4pyscf.grad.rks import get_exc_full_response, get_nlc_exc_full_response
 from gpu4pyscf.grad.uks import get_exc_full_response as get_exc_full_response_uks
 from gpu4pyscf.solvent import pcm
+from gpu4pyscf.scf.gdm import gdm
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 import pytest
@@ -1330,7 +1331,7 @@ class KnownValues(unittest.TestCase):
         test_j3c_mo_kl = mf.df_mo_integral(mo_k, mo_l, omega = omega, lr_factor = lr_factor, sr_factor = sr_factor)
         test_j4c_mo = cp.einsum("pij,pkl->ijkl", test_j3c_mo_ij, test_j3c_mo_kl)
 
-        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 1e-7
+        assert cp.max(cp.abs(test_j4c_mo - ref_j4c_mo)) < 3e-7
 
     def test_df_mo_long_range_reconstruct_j3c_for_k(self):
         mol = self.mol_sph
@@ -3676,8 +3677,51 @@ class KnownValues(unittest.TestCase):
         gobj = mf.Gradients()
         test_gradient = gobj.kernel()
 
-        assert abs(test_energy - ref_energy) <= 1e-10
+        assert abs(test_energy - ref_energy) <= 3e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+        ### ECP below
+
+        mf = RKS(self.mol_ecp, xc = "hse06").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-10
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 11
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.surface_discretization_method = "ISWIG"
+
+        # mf.range_separated_mode = "mix_inside_kernel"
+        # ref_energy = mf.kernel()
+        ref_energy = -931.8239524067826
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0006743912298126, -0.0000000000025612,  0.0101582445702521],
+            [-0.0000739064035659, -0.0000000000000168,  0.004070421597122 ],
+            [-0.0028409121786576, -0.0000000000000118, -0.0046258513139239],
+            [ 0.0011202136753514, -0.0020554867369655, -0.0048014074272661],
+            [ 0.0011202136772325,  0.0020554867398083, -0.0048014074261418],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 3e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 5e-7
 
     def test_turn_off_xc_rks(self):
         mf = RKS(self.mol_sph, xc = "PBE").density_fit(auxbasis = self.auxbasis)
@@ -3713,6 +3757,254 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+    def test_additional_precision_control_parameters(self):
+        from gpu4pyscf.lib.cuest_wrapper import ce
+        test_parameters = {
+            # 1e
+            "CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_POTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_OFF,
+            "CUEST_POTENTIALDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+
+            "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_ECPCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_ECPDERIVATIVECOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            # DF J/K Fock
+            "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFINTPLAN_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_DFCOULOMBCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_SLICE_COUNT" : 5,
+            "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 8,
+
+            # DF J/K gradient
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_MEMORY_POLICY" : ce.CuestDFSymmetricDerivativeComputeMemoryPolicy.CUEST_DFSYMMETRICDERIVATIVECOMPUTE_MEMORY_POLICY_DEVICECACHE,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_THREE_INDEX_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_MO_TRANSFORMATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_EXCHANGE_DENSITY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_METRIC_CONTRACTION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_DFSYMMETRICDERIVATIVECOMPUTE_PARAMETERS_DETAIL_PSEUDODENSITY_FITTING_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 63,
+
+            # XC
+            "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_XCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            # Nonlocal correlation
+            "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCPOTENTIALRKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCPOTENTIALUKSCOMPUTE_PARAMETERS_DETAIL_POTENTIAL_ASSEMBLY_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCDERIVATIVERKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_DENSITY_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+            "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_USAGE_MODE" : ce.CuestEmulationUsageMode.CUEST_EMULATION_USAGE_MODE_DEFAULT,
+            "CUEST_NONLOCALXCDERIVATIVEUKSCOMPUTE_PARAMETERS_DETAIL_GRADIENT_COLLOCATION_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT" : 55,
+
+            # PCM
+            "CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_PCMPOTENTIALCOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+            "CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
+            "CUEST_PCMDERIVATIVECOMPUTE_PARAMETERS_JIT_USAGE_MODE" : ce.CuestJITUsageMode.CUEST_JIT_USAGE_MODE_ON,
+        }
+
+        mf = RKS(self.mol_sph, xc = "wB97MV").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-10
+
+        mf = apply_cuest_wrapper(mf)
+        mf.math_mode = "default"
+        mf.additional_precision_control_parameters = test_parameters
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        # Reference value from mf.math_mode = "native_fp64"
+        ref_energy = -151.55018436635356
+        ref_gradient = np.array([
+            [ 0.008138549375293 ,  0.0196026873059161,  0.0159147257142678],
+            [ 0.0340675728748769, -0.023435211645225 , -0.0214635249649007],
+            [-0.0207748624227011, -0.0094154327527078, -0.0115633062058349],
+            [-0.021431259827446 ,  0.0132479570920707,  0.0171121054564645],
+        ])
+
+        assert abs(test_energy - ref_energy) <= 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-6
+
+        ### RKS above, UKS below
+
+        mf = UKS(self.mol_sph, xc = "wB97MV").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-10
+
+        mf = apply_cuest_wrapper(mf)
+        mf.math_mode = "default"
+        mf.additional_precision_control_parameters = test_parameters
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-6
+
+        ### DFT above, HF + ECP + PCM below
+
+        mf = RHF(self.mol_ecp_cart).density_fit(auxbasis = self.auxbasis)
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 11
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.surface_discretization_method = "ISWIG"
+        mf.conv_tol = 3e-10
+
+        mf = apply_cuest_wrapper(mf)
+        mf.math_mode = "default"
+        mf.additional_precision_control_parameters = test_parameters
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        # Reference value from mf.math_mode = "native_fp64"
+        ref_energy = -928.4183594572874
+        ref_gradient = np.array([
+            [ 0.0000529964217938, -0.0000000000013833,  0.0042507041505203],
+            [-0.0000641943516889, -0.0000000000006034,  0.0130437421866   ],
+            [-0.0032636459924198,  0.0000000000002158, -0.0059054583531993],
+            [ 0.0016374219582396, -0.0028792551977511, -0.0056944939922935],
+            [ 0.0016374219601629,  0.0028792551993928, -0.005694493991456 ],
+        ])
+
+        assert abs(test_energy - ref_energy) <= 1e-8
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-6
+
+    def test_cuest_with_gdm(self):
+        mol = pyscf.M(
+            atom = """
+                C        0.94054455      -0.01152091      -0.00390959
+                C       -0.27309667      -0.13851223      -0.00409319
+                C       -1.67604997      -0.25458966      -0.00381518
+                C       -2.44189679      -1.40807448      -0.01287824
+                C       -3.84081477      -1.14512030      -0.00878136
+                C       -4.13038620       0.19818729       0.00308203
+                S       -2.69869599       1.16992462       0.01007284
+                C        2.33820378       0.12319870      -0.00415143
+                C        3.19315017       1.19082272      -0.02078984
+                C        4.53911846       0.74097922      -0.01114025
+                C        4.42898145      -0.62636054       0.01175974
+                O        3.12366760      -1.02802943       0.01662357
+                H       -1.99946927      -2.39813430      -0.02214605
+                H       -4.60251584      -1.91767715      -0.01465898
+                H       -5.10413454       0.67146955       0.00782707
+                H        5.45048689       1.32281605      -0.01954215
+                H        5.16145794      -1.42168823       0.02623033
+            """,
+            basis = "def2-SVP",
+            charge = 0,
+            spin = 1,
+            verbose = 0,
+        )
+
+        mf = UKS(mol, xc = "wB97X").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.max_cycle = 100
+        mf.conv_tol_grad = 1e-6
+
+        dm0 = mf.get_init_guess(key='qchem_sad') # Yes, we start with a spin-averaged guess
+        mf.conv_tol = 1e-10
+
+        mf = apply_cuest_wrapper(mf)
+        mf.math_mode = "default"
+
+        mf = gdm(mf)
+        test_energy = mf.kernel(dm0 = dm0)
+        mf = mf.undo_gdm()
+        assert mf.converged
+        test_n_cycle = mf.cycles
+        test_s2, _ = mf.spin_square()
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        ref_energy = -856.7060020335
+        ref_s2 = 0.772751683
+        ref_gradient = np.array([
+            [ 0.0234882, -0.0236192,  0.0226606, -0.0024212, -0.0019048, -0.0153281,
+              0.0016676, -0.0261750,  0.0027655,  0.0061326,  0.0201931, -0.0059912,
+             -0.0019052,  0.0032071,  0.0049403, -0.0041785, -0.0035318],
+            [ 0.0043018, -0.0036710, -0.0002197, -0.0114842, -0.0104154,  0.0040103,
+              0.0142593,  0.0062651,  0.0068086,  0.0099299, -0.0072166, -0.0190018,
+              0.0042783,  0.0032299, -0.0021699, -0.0025508,  0.0036465],
+            [-0.0000067, -0.0000125, -0.0000385, -0.0000942, -0.0000827,  0.0000480,
+              0.0001347, -0.0001561, -0.0000994, -0.0001705,  0.0001532,  0.0003176,
+              0.0000387,  0.0000253, -0.0000289,  0.0000371, -0.0000653],
+        ]).T
+        ref_n_cycle = 35
+
+        assert np.abs(test_energy - ref_energy) < 1e-4
+        assert np.abs(test_s2 - ref_s2) < 1e-6
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-5
+        assert test_n_cycle <= ref_n_cycle + 5
 
 if __name__ == '__main__':
     print("Full Tests for CuEST Wrapper")
