@@ -23,7 +23,7 @@ from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, hermi_triu
 from gpu4pyscf.gto.mole import (
@@ -40,15 +40,15 @@ __all__ = [
 libpbc.fill_int2c2e.restype = ctypes.c_int
 libpbc.int2c2e_deriv.restype = ctypes.c_int
 
-def int2c2e(auxcell, kpts=None, bvk_kmesh=None,
+def int2c2e(auxcell, kpts=None, bvkmesh=None,
             omega=None, lr_factor=None, sr_factor=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
-    if bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
-    opt = Int2c2eOpt(auxcell, bvk_kmesh)
+    if bvkmesh is None:
+        bvkmesh = kpts_to_bvkmesh(auxcell, kpts, bound_by_supmol=True)
+    opt = Int2c2eOpt(auxcell, bvkmesh)
     return opt.int2c2e(kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
-def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
+def sr_int2c2e(auxcell, omega, kpts=None, bvkmesh=None):
     if omega > 0:
         omega = -omega
     # Adjust the rcut because the default cell.rcut is estimated based on
@@ -57,7 +57,7 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     try:
         auxcell.rcut, rcut_backup = rcut, auxcell.rcut
         auxcell.omega, omega_backup = omega, auxcell.omega
-        return int2c2e(auxcell, kpts, bvk_kmesh, omega)
+        return int2c2e(auxcell, kpts, bvkmesh, omega)
     finally:
         auxcell.rcut = rcut_backup
         auxcell.omega = omega_backup
@@ -75,23 +75,23 @@ def int2c2e_energy_derivatives(auxcell, dm, kpts=None, omega=None):
     the short-range (SR) Coulomb interaction
     1/2 * erfc(omega * r12) / r12.
     '''
-    kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
+    bvkmesh = kpts_to_bvkmesh(auxcell, kpts, bound_by_supmol=True)
     omega = _check_rsh_factors(auxcell, omega, None, None)[0]
     rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision)
     try:
         auxcell.rcut, rcut_backup = rcut, auxcell.rcut
-        opt = Int2c2eOpt(auxcell, kmesh)
+        opt = Int2c2eOpt(auxcell, bvkmesh)
         return opt.energy_derivatives(dm, kpts, omega)
     finally:
         auxcell.rcut = rcut_backup
 
-def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True,
+def int2c2e_ip1(auxcell, kpts=None, bvkmesh=None, sort_output=True,
                 omega=None, lr_factor=None, sr_factor=None):
     '''Derivatives of SR 2c2e Coulomb integrals for the first electronic
     coordinates'''
-    if bvk_kmesh is None:
-        bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
-    opt = Int2c2eOpt(auxcell, bvk_kmesh)
+    if bvkmesh is None:
+        bvkmesh = kpts_to_bvkmesh(auxcell, kpts, bound_by_supmol=True)
+    opt = Int2c2eOpt(auxcell, bvkmesh)
     return opt.int2c2e_ip1(kpts, sort_output=sort_output,
                            omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
@@ -149,14 +149,14 @@ def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE, deriv=None,
     return nsp_per_block, gout_stride, shm_size
 
 class Int2c2eOpt:
-    def __init__(self, cell, bvk_kmesh=None):
+    def __init__(self, cell, bvkmesh=None):
         cell = self.cell = SortedGTO.from_cell(cell)
         assert cell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
 
-        if bvk_kmesh is None:
-            bvk_kmesh = np.ones(3, dtype=int)
-        self.bvk_kmesh = bvk_kmesh
-        bvk_ncells = np.prod(bvk_kmesh)
+        if bvkmesh is None:
+            bvkmesh = np.ones(3, dtype=int)
+        self.bvkmesh = bvkmesh
+        bvk_ncells = np.prod(bvkmesh)
 
         if isinstance(cell, Mole):
             bvkcell = cell
@@ -167,10 +167,10 @@ class Int2c2eOpt:
                 bvkcell = cell
                 bvkmesh_Ls = np.zeros((1, 3))
             else:
-                bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+                bvkcell = pbctools.super_cell(cell, bvkmesh, wrap_around=True)
                 # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, True)
             Ls = asarray(_bvkcell_lattice_sum_Ls(bvkcell, cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
@@ -208,7 +208,7 @@ class Int2c2eOpt:
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cell = self.cell
-        bvk_kmesh = self.bvk_kmesh
+        bvkmesh = self.bvkmesh
         bvk_ncells = len(self.bvkmesh_Ls)
         omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
 
@@ -238,7 +238,7 @@ class Int2c2eOpt:
             raise RuntimeError('fill_int2c2e failed')
 
         # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
-        out = fill_triu_bvk(out, nao, bvk_kmesh, bvk_axis=0)
+        out = fill_triu_bvk(out, nao, bvkmesh, bvk_axis=0)
 
         if sort_output:
             out = cell.apply_CT_mat_C(out)

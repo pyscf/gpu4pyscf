@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, asarray
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.gto.mole import SortedCell
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.aft import _get_ZSI
@@ -268,10 +268,10 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
         auxcell = make_auxcell(cell, with_df.auxbasis, with_df.exp_to_discard)
 
     if kpts is None:
-        kmesh = None
+        bvkmesh = None
         is_rhf = dm.ndim == 2
     else:
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
         is_rhf = dm.ndim == 3
 
     def get_jk(j_factor, k_factor, omega, exxdiv):
@@ -281,7 +281,7 @@ def _gdf_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
             fn = kuhf._get_ejk_derivatives
         rsdf_omega = max(abs(omega), _guess_omega(cell))
         # DD responses are implemented for Gamma RHF and Gamma J-only.
-        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh)
+        opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, bvkmesh)
         opt.cell = SortedCell.from_cell(cell, decontract=True, diffuse_cutoff=0.25)
         opt.build(separate_dd=True)
         return fn(opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega,
@@ -335,11 +335,11 @@ def _get_ejk_derivatives(mf, dm, kpts=None, j_factor=1, omega=0, lr_factor=1, sr
         if j_factor != 0 and not mf.j_engine and isinstance(with_df, GDF):
             j_factor = 0
             if kpts is None:
-                kmesh = None
+                bvkmesh = None
             else:
-                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
+                bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut)
             rsdf_omega = 0.3
-            opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh)
+            opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, bvkmesh)
             opt.cell = SortedCell.from_cell(cell, decontract=True, diffuse_cutoff=0.25)
             opt.build(separate_dd=True)
             if is_rhf:

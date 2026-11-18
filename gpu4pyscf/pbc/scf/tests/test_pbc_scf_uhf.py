@@ -355,8 +355,12 @@ class UnrestrictedSCFProperties(unittest.TestCase):
         kpts = cell.make_kpts([2, 2, 1], with_gamma_point=False)
         for mf_cls in (pscf.KUHF, dft.KUKS):
             with self.subTest(mf_cls=mf_cls.__name__):
-                with self.assertRaisesRegex(NotImplementedError, 'include the Gamma point'):
-                    mf_cls(cell, kpts=kpts).kernel()
+                mf = mf_cls(cell, kpts=kpts)
+                ref = mf.to_cpu()
+                ref.kernel()
+                mf.kernel()
+                self.assertTrue(ref.converged and mf.converged)
+                self.assertAlmostEqual(mf.e_tot, ref.e_tot, delta=1e-7)
 
 
 if __name__ == '__main__':

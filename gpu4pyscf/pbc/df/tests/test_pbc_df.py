@@ -299,6 +299,32 @@ class KnownValues(unittest.TestCase):
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
 
+    def test_jk_off_gamma(self):
+        cell = pgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8', unit='Bohr',
+            a=np.diag([5., 5.5, 6.]),
+            basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+            precision=1e-10, verbose=0)
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        auxbasis = {'He': [[0, [1.1, 1.]], [1, [.7, 1.]]]}
+        rng = np.random.default_rng(12)
+        coeff = rng.random((len(kpts), cell.nao, cell.nao))
+        coeff = coeff + 1j*rng.random(coeff.shape)
+        dm = coeff @ coeff.conj().transpose(0, 2, 1)
+        reference = df_cpu.GDF(cell, kpts)
+        reference.auxbasis = auxbasis
+        jref, kref = reference.get_jk(dm, kpts=kpts, exxdiv='ewald')
+        mydf = GDF(cell, kpts)
+        mydf.auxbasis = auxbasis
+
+        # Exercise the J-only cache before exchange rebuilds all transfer blocks.
+        vj, _ = mydf.get_jk(dm, kpts=kpts, with_k=False)
+        np.testing.assert_allclose(vj.get(), jref, atol=1e-8, rtol=0)
+        np.testing.assert_array_equal(mydf.bvkmesh, [4, 3, 1])
+        vj, vk = mydf.get_jk(dm, kpts=kpts, exxdiv='ewald')
+        np.testing.assert_allclose(vj.get(), jref, atol=1e-8, rtol=0)
+        np.testing.assert_allclose(vk.get(), kref, atol=1e-8, rtol=0)
+
     def test_range_separated_j_only_then_k(self):
         cell = pgto.M(atom='He 0 0 0', basis='sto3g', a=np.eye(3)*4)
         kpts = cell.make_kpts([2, 1, 1])

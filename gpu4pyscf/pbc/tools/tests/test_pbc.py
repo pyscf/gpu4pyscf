@@ -52,3 +52,23 @@ def test_slab_coulomb_kernel(shifted):
     if not shifted:
         assert actual[0] == pytest.approx(-2*np.pi*6**2, abs=1e-12)
     assert np.isfinite(actual).all()
+
+
+def test_madelung_off_gamma():
+    cell = gto.M(atom='H 0 0 0', spin=1, basis='sto-3g',
+                 a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]],
+                 unit='Bohr', precision=1e-12, verbose=0)
+    sampling_mesh = np.array([2, 3, 1])
+    kpts = cell.make_kpts(sampling_mesh, with_gamma_point=False,
+                         wrap_around=True)
+    probe_cell = cell.copy()
+    probe_cell.a = sampling_mesh[:, None] * cell.lattice_vectors()
+    probe_cell.build(0, 0)
+    # For off-Gamma kpts, the sampling supercell size is [2, 3, 1], not [4, 3,
+    # 1] mesh returned by kpts_to_bvkmesh.
+    reference = -2 * probe_cell.ewald()
+    actual = pbc.madelung(cell, kpts)
+    np.testing.assert_allclose(actual, reference, atol=1e-10, rtol=0)
+    gamma_kpts = cell.make_kpts(sampling_mesh)
+    np.testing.assert_allclose(actual, pbc.madelung(cell, gamma_kpts),
+                               atol=1e-10, rtol=0)

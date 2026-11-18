@@ -80,6 +80,28 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ao.get()-ref).max(), 0, 9)
         self.assertAlmostEqual(lib.fp(ao.get()), -1.6507836971790972, 8)
 
+    def test_eval_ao_off_gamma(self):
+        cell = pbcgto.M(
+            atom='He .3 .2 .1; He 1.7 1.1 2.3',
+            a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]],
+            unit='Bohr', precision=1e-12, verbose=0,
+            basis=[[0, [.8, 1.]], [1, [.6, 1.]]],
+        )
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False,
+                             wrap_around=True)
+        coords = cell.get_uniform_grids([5, 5, 5])
+        ref = np.asarray(cell.pbc_eval_gto('GTOval_sph', coords, kpts=kpts))
+
+        ao = numint.eval_ao_kpts(cell, coords, kpts).get()
+        self.assertAlmostEqual(
+            lib.fp(ao), -0.39483428489582195+0.06165214411233688j, 9)
+        self.assertEqual(ao.shape, ref.shape)
+        np.testing.assert_allclose(ao, ref, atol=1e-9, rtol=0)
+
+        single = numint.eval_ao(cell, coords, kpt=kpts[0]).get()
+        self.assertEqual(single.shape, ref[0].shape)
+        np.testing.assert_allclose(single, ref[0], atol=1e-9, rtol=0)
+
     def test_eval_ao_deriv2_sph_fg(self):
         cell = pbcgto.M(
             atom='He .3 .4 .5',
