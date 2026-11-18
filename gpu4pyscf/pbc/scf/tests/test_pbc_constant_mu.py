@@ -63,7 +63,6 @@ class KnownValues(unittest.TestCase):
         plain = dft.RKS(cell, xc='lda,vwn')
         mf = constant_mu(dft.RKS(cell, xc='lda,vwn'))
         dm = .85 * mf.get_init_guess()
-        # Do not remove the electron-number change: it drives the gate charge.
         ddm = .1 * dm
         step = 1e-4
         potential = mf._gcscf_veff(dm)
@@ -97,4 +96,5 @@ class KnownValues(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    print("Full Tests for Constant Mu...")
     unittest.main()

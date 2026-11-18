@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Fixed-mu SCF with a compensating gate and no barrier.
+'''
+Fixed-mu SCF with a compensating gate and no barrier.
 
 This small H2 layer demonstrates the API, not a converged material calculation.
 Lengths are Bohr; mu, sigma and energies are Hartree. The chemical potential
@@ -35,7 +36,6 @@ mf = gate_charge(dft.RKS(cell, xc='lda,vwn'), zgate=12.,
                  gate_side=1, barrier=False)
 mf = gcscf.constant_mu(mf, mu=-.5, sigma=.2)
 # Use only ordinary Fock damping throughout this demonstration.
-# The addon itself retains the ordinary SCF default DIIS settings.
 mf.diis = False
 mf.damp = .8
 mf.max_cycle = 150
