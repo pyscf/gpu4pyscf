@@ -17,7 +17,7 @@ Fixed-charge gate for a dimension=2 slab, without a periodic dipole correction.
 Lengths are Bohr; barrier_height is Hartree.
 This small CH+ layer illustrates the API, not a converged material calculation.
 
-It should be noted that multigrid and density-fit cannot work with dimension=2.
+MultiGrid supports 2D SCF with the uniform-grid, truncated Coulomb kernel.
 '''
 
 import numpy as np
@@ -38,8 +38,8 @@ cell = gto.M(
 # grid spans [-L/2, L/2) along z, so center the slab near z=0. Gate/barrier
 # coordinates are used without wrapping; choose sufficient vacuum yourself.
 # For Nk k-points, cell.charge must be Nk times the charge per primitive cell.
-# Use only in-plane k-points. The default FFTDF and UniformGrids are retained.
-mf = dft.RKS(cell, xc='lda,vwn')
+# Use only in-plane k-points. Enable MultiGrid for the 2D SCF calculation.
+mf = dft.RKS(cell, xc='lda,vwn').multigrid_numint()
 mf = gate_charge(mf, zgate=-5., barrier=True,
                  barrier_start=-7., barrier_end=-3.,
                  barrier_width=.5, barrier_height=.05)

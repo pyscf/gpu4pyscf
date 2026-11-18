@@ -436,7 +436,7 @@ def _get_ZSI(cell, mesh=None, out=None):
 
     einsum('i,ij->j', Z, SI)
     '''
-    assert cell.dimension == 3
+    assert cell.dimension in (2, 3)
     if mesh is None:
         mesh = cell.mesh
     basex, basey, basez = get_Gv_base(cell, mesh)
