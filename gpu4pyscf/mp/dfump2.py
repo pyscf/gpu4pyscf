@@ -55,6 +55,21 @@ def kernel(
     [_, occ_coeff, vir_coeff, _] = dfmp2_addons.split_mo_coeff_unrestricted(mp, mo_coeff=mo_coeff, frozen_mask=frozen_mask, mo_occ=mo_occ)
     [_, occ_energy, vir_energy, _] = dfmp2_addons.split_mo_energy_unrestricted(mp, mo_energy=mo_energy, frozen_mask=frozen_mask, mo_occ=mo_occ)
 
+    # A UHF object may carry shared ROHF orbitals with unequal spin
+    # occupations. These orbitals do not diagonalize both spin Fock matrices.
+    # Semicanonicalize the active occupied and virtual spaces before applying
+    # the canonical DF-MP2 contraction, and include the first-order singles.
+    mo_coeff = mp.mo_coeff if mo_coeff is None else mo_coeff
+    mo_occ = mp.mo_occ if mo_occ is None else mo_occ
+    e_corr_singles = 0.
+    if _is_spin_paired_open_shell(mo_coeff, mo_occ):
+        if with_t2:
+            raise NotImplementedError(
+                'with_t2=True is not supported for spin-paired open-shell '
+                'references because amplitudes would be in the semicanonical basis.')
+        occ_coeff, vir_coeff, occ_energy, vir_energy, e_corr_singles = \
+            _semicanonicalize(mp, mo_coeff, mo_occ, occ_coeff, vir_coeff)
+
     # allocate t2 if needed
     if with_t2 is True:
         if mp.t2 is None:
@@ -88,15 +103,49 @@ def kernel(
     # handle results
     e_corr_os = result['e_corr_os']
     e_corr_ss = result['e_corr_ss']
-    e_corr = e_corr_os + e_corr_ss
+    e_corr = e_corr_os + e_corr_ss + e_corr_singles
 
+    mp.e_corr_singles = e_corr_singles
     mp.e_corr_os = e_corr_os
     mp.e_corr_ss = e_corr_ss
     mp.e_corr = e_corr
     return mp.e_corr
 
 
+def _is_spin_paired_open_shell(mo_coeff, mo_occ):
+    """Whether alpha and beta share spatial orbitals but have different occupations."""
+    mo_coeff = cp.asarray(mo_coeff)
+    mo_occ = cp.asarray(mo_occ)
+    return (not cp.array_equal(mo_occ[0], mo_occ[1])
+            and cp.allclose(mo_coeff[0], mo_coeff[1]))
+
+
+def _semicanonicalize(mp, mo_coeff, mo_occ, occ_coeff, vir_coeff):
+    """Semicanonicalize active orbitals and compute the first-order singles energy."""
+    mf = mp._scf
+    dm = mf.make_rdm1(cp.asarray(mo_coeff), cp.asarray(mo_occ))
+    fock_ao = mf.get_fock(dm=dm)
+    occ_out, vir_out, eo_out, ev_out = [], [], [], []
+    e_singles = 0.
+    for spin in (0, 1):
+        fock = fock_ao[spin]
+        eo, uo = cp.linalg.eigh(occ_coeff[spin].conj().T @ fock @ occ_coeff[spin])
+        ev, uv = cp.linalg.eigh(vir_coeff[spin].conj().T @ fock @ vir_coeff[spin])
+        co = occ_coeff[spin] @ uo
+        cv = vir_coeff[spin] @ uv
+        fov = co.conj().T @ fock @ cv
+        e_singles += float((abs(fov)**2 / (eo[:, None] - ev[None, :])).sum())
+        occ_out.append(co)
+        vir_out.append(cv)
+        eo_out.append(eo)
+        ev_out.append(ev)
+    return occ_out, vir_out, eo_out, ev_out, e_singles
+
+
 class DFUMP2(GPUDFMP2):
+    e_corr_singles = None
+    _keys = GPUDFMP2._keys | {'e_corr_singles'}
+
     get_nocc = pyscf.mp.ump2.get_nocc
     get_nmo = pyscf.mp.ump2.get_nmo
     get_frozen_mask = pyscf.mp.ump2.get_frozen_mask
