@@ -264,7 +264,7 @@ class PySCF(Calculator):
         method = self.method if self.method_scan is None else self.method_scan
         standard_path = self.atoms.cell.bandpath()
         band_kpts = method.cell.get_abs_kpts(standard_path.kpts)
-        e_k = cp.asnumpy(cp.array(method.get_bands(band_kpts)[0]))
+        e_k = cp.asnumpy(cp.array(method.get_bands(band_kpts)[0])) * HARTREE2EV
         if not method.istype('UHF'):
             e_k = e_k[None]
         fermi = self.get_fermi_level()
