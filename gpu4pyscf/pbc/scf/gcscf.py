@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Constant-chemical-potential SCF with a compensating planar gate.
+'''
+Constant-chemical-potential SCF with a compensating planar gate for the 1st case.
 
 The gate and finite-width dipole energies are differentiated with respect to
 both the density and their compensating charge. All charges and energies are
@@ -34,44 +35,45 @@ from gpu4pyscf.pbc.scf.slabdipole import (
 
 
 def constant_mu(mf, mu, sigma):
-    '''Enable fixed-mu SCF on a 3D RKS/UKS/KRKS/KUKS gate calculation.
+    '''
+    Enable fixed-mu SCF on a 3D RKS/UKS/KRKS/KUKS gate calculation.
 
-    Apply ``slabgate.gate_charge`` first, with ``barrier=False``. ``mu`` is the
+    Apply slabgate.gate_charge first, with barrier=False. mu is the
     electron chemical potential in Hartree in the variational gate reference;
-    ``sigma > 0`` is the Fermi-Dirac width in Hartree. Explicit, equally weighted
-    k-points are supported. A single chemical potential is used for both spins.
+    sigma > 0 is the Fermi-Dirac width in Hartree. A single chemical potential 
+    is used for both spins.
 
-    Returns the decorated SCF object, which must be used by the caller. The
-    ordinary DIIS, damping and level-shift settings are left unchanged. For
-    damping-only calculations, set ``diis=False``, ``damp > 0`` and
-    ``diis_start_cycle > max_cycle`` to keep ordinary Fock damping active.
+    Returns the decorated SCF object. The ordinary DIIS, damping and level-shift 
+    settings are left unchanged. For damping-only calculations, set diis=False, 
+    damp > 0 and diis_start_cycle > max_cycle to keep ordinary Fock damping active.
 
-    ``e_tot`` remains the internal energy, ``e_free`` the Helmholtz free energy,
-    and ``e_grand = e_free - mu0*gcscf_nelec`` the grand potential. The default
+    e_tot remains the internal energy, e_free the Helmholtz free energy,
+    and e_grand = e_free - mu0*gcscf_nelec the grand potential. The default
     convergence check uses the grand potential, density, electron number and
-    fixed-mu occupation residuals. ``conv_tol_nelec`` defaults to 1e-6 electrons
-    per cell. An instance ``check_convergence`` callback takes precedence.
+    fixed-mu occupation residuals. conv_tol_nelec defaults to 1e-6 electrons
+    per cell. An instance check_convergence callback takes precedence.
     As for smearing, thermodynamic energies use the latest get_occ occupations;
     they require the corresponding density, and are not arbitrary-DM entropy
     evaluations. A zero-cycle run does not produce self-consistent free energies.
 
-    The gate geometry and integration grids are fixed during SCF. Call reset
-    after changing the geometry, basis or grids. Barrier, gradients, response,
-    band k-points and conversion to CPU are not implemented for this addon.
+    It should be note that, the mu should be changed according to the neutral reference.
+    mu_target = mu - e delta U, where U is the voltage, and is 
+    mu_target = mu - delta U/27.2114, if U is in V.
     '''
     if not isinstance(mu, Real) or not np.isfinite(mu):
         raise ValueError('mu must be a finite real scalar in Hartree')
     if not isinstance(sigma, Real) or not np.isfinite(sigma) or sigma <= 0:
         raise ValueError('sigma must be a positive Fermi-Dirac width in Hartree')
+    # TODO: this may change, due to more environment support for constant-mu SCF.
     if not isinstance(mf, SlabGateCharge):
         raise ValueError('Apply gate_charge before constant_mu')
+    # TODO: support 2D cell.
     if mf.cell.dimension != 3 or not isinstance(mf, SlabDipoleCorrection):
         raise NotImplementedError('Constant-mu gate SCF requires a 3D cell with dipole correction')
     if mf.barrier:
         raise NotImplementedError('Constant-mu gate SCF does not support barrier')
-    if isinstance(getattr(mf, 'kpts', None), KPoints):
-        raise NotImplementedError('Constant-mu SCF requires explicit equally weighted k-points')
 
+    # if set mu0, constant mu routine is enabled.
     mf = smearing.smearing(mf, sigma=float(sigma), method='fermi',
                            mu0=float(mu), fix_spin=False)
     if not isinstance(mf, ConstantMuSCF):
@@ -177,7 +179,6 @@ class ConstantMuSCF:
         return data
 
     def _gcscf_veff(self, dm, cell=None, kpts=None):
-        '''Gate and dipole matrix derivative, with their complete energy tags.'''
         if cell is None:
             cell = self.cell
         is_kpts = self.istype('KSCF')
@@ -199,6 +200,7 @@ class ConstantMuSCF:
         shift = h_c + qc*b_c + field*f_c
         egate = qc*h_c + .5*qc**2*b_c
         edip = .5*field*dipole
+        # first two terms are identical of constant electron gate.
         potential = qc*c1 - field*position + shift*overlap
         if not is_kpts:
             potential = potential[0]
@@ -207,9 +209,7 @@ class ConstantMuSCF:
                          gcscf_shift=float(shift))
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
-                 hermi=1, kpts=None, kpts_band=None, *, kpt=None):
-        if kpts_band is not None:
-            raise NotImplementedError('Constant-mu gate SCF for band k-points')
+                 hermi=1, kpts=None, kpts_band=None, kpt=None):
         if cell is None:
             cell = self.cell
         if dm is None:
