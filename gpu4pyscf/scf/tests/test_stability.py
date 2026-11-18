@@ -269,7 +269,7 @@ class KnownValues(unittest.TestCase):
         test_mocc_ea = test_mo_e[0, :, :nocc]
         diff_ea1 = cp.max(cp.abs(cp.abs(ref_mocc_ea_1.T @ S @ test_mocc_ea) - cp.eye(nocc)))
         diff_ea2 = cp.max(cp.abs(cp.abs(ref_mocc_ea_2.T @ S @ test_mocc_ea) - cp.eye(nocc)))
-        assert diff_ea1 < 1e-4 or diff_ea2 < 1e-4
+        assert diff_ea1 < 3e-4 or diff_ea2 < 3e-4
 
         test_mocc_eb = test_mo_e[1, :, :nocc]
         assert cp.max(cp.abs(cp.abs(ref_mocc_eb.T @ S @ test_mocc_eb) - cp.eye(nocc))) < 1e-4

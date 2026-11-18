@@ -98,6 +98,7 @@ class KnownValues(unittest.TestCase):
         ])
 
         mf = KRHF(cell, kpts = kpts).density_fit()
+        mf.with_df.linear_dep_threshold = 1e-9 # The default in pyscf==2.8.0 is 1e-9, in pyscf==2.14.0 is 1e-10
         mf.conv_tol = 1e-10
         mf = gdm(mf)
         test_energy = mf.kernel()
