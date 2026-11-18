@@ -5533,6 +5533,34 @@ class CuESTWrapper(lib.StreamObject):
             self._math_mode = new_mode
             print(f"Switching math_mode to {new_mode}")
 
+    @property
+    def compute_capability_target(self):
+        major_version_handle = ce.data_uint32_t()
+        minor_version_handle = ce.data_uint32_t()
+        ce.cuestGetComputeCapabilityTarget(
+            handle = self.handles.cuest_handle,
+            targetMajorVersion = major_version_handle,
+            targetMinorVersion = minor_version_handle,
+        )
+        version = f"{major_version_handle.value}.{minor_version_handle.value}"
+        return version
+    @compute_capability_target.setter
+    def compute_capability_target(self, new_target):
+        assert isinstance(new_target, str)
+        major_version, minor_version = new_target.split(".")
+        major_version = int(major_version)
+        minor_version = int(minor_version)
+
+        # self.reset() # No need to reset
+        ce.cuestSetComputeCapabilityTarget(
+            handle = self.handles.cuest_handle,
+            targetMajorVersion = major_version,
+            targetMinorVersion = minor_version,
+        )
+        set_target = self.compute_capability_target
+        print(f"Switching compute_capability_target to {set_target}")
+        assert set_target == new_target, f"Failed to set compute_capability_target to {new_target}, the returned value is {set_target}."
+
     _additional_precision_control_parameters_template = {
         # 1e
         "CUEST_POTENTIALCOMPUTE_PARAMETERS_FFLOAT_USAGE_MODE" : ce.CuestFfloatUsageMode.CUEST_FFLOAT_USAGE_MODE_DEFAULT,
