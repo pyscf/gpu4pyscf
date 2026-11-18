@@ -40,13 +40,10 @@ set_target_properties(gint PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 if (USE_SYCL)
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
   # also compile it as its own TU.
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
     PROPERTIES HEADER_FILE_ONLY ON)
-  target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
-  target_link_libraries(gint PRIVATE sycl_compat gsycl)
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
   set_target_properties(gint PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

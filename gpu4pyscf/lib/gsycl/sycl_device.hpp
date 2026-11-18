@@ -92,10 +92,11 @@ enum cudaFuncCache {
 // (CUDA's __device__ does not force inlining; the IGC compile time of
 // fully flattened kernels grows steeply).
 #ifndef GPU4PYSCF_DEVICE_ATTR
-#define GPU4PYSCF_DEVICE_ATTR __attribute__((always_inline))
+//#define GPU4PYSCF_DEVICE_ATTR __attribute__((always_inline))
+#define GPU4PYSCF_DEVICE_ATTR
 #endif
 #define __device__ GPU4PYSCF_DEVICE_ATTR
-#define __forceinline__ __attribute__((always_inline))
+#define __forceinline__ inline __attribute__((always_inline))
 #define __host__ __attribute__((always_inline))
 #define __constant__ inline constexpr
 

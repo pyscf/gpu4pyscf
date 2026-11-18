@@ -42,17 +42,4 @@ target_compile_options(solvent PRIVATE
 set_target_properties(solvent PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-if (USE_SYCL)
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-  # Unlike the other GPU targets, `solvent` also carries Fortran sources, so
-  # the SYCL/C++-only flags must be guarded by a COMPILE_LANGUAGE genex
-  # instead of applied to the whole target.
-  target_compile_options(solvent PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:-x c++ -nocudainc -nocudalib>
-  )
-  target_link_libraries(solvent PRIVATE sycl_compat gsycl)
-else()
-  set_target_properties(solvent PROPERTIES
-    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
-endif()
 gpu4pyscf_configure_gpu_target(solvent)

@@ -12,7 +12,6 @@ set_target_properties(gvhf_md PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 if (USE_SYCL)
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
 
   # Under CUDA, md_indices.cu is a translation unit: it defines the
   # __device__/__constant__ index tables that every other TU declares
@@ -22,8 +21,6 @@ if (USE_SYCL)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/md_indices.cu
     PROPERTIES HEADER_FILE_ONLY ON)
 
-  target_compile_options(gvhf_md PRIVATE -x c++ -nocudainc -nocudalib)
-  target_link_libraries(gvhf_md PRIVATE sycl_compat gsycl)
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
   set_target_properties(gvhf_md PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

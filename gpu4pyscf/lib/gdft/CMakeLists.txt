@@ -61,11 +61,9 @@ if(USE_SYCL)
     ${CUH_HEADERS}
     $<TARGET_OBJECTS:exchcxx_shim>           # reuse compiled object, never recompiles
   )
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-  target_compile_options(gdft PRIVATE -x c++ -nocudainc -nocudalib)
   # Required: exchcxx.o inside libgdft.so calls ExchCXX device kernel symbols
   # that must be resolved against libexchcxx.so at runtime
-  target_link_libraries(gdft PRIVATE sycl_compat gsycl ExchCXX::ExchCXX)
+  target_link_libraries(gdft PRIVATE ExchCXX::ExchCXX)
 
   # Step 3: libxc.so -- the libxc ABI shim Python loads as _libxc.
   # Python _libxc handle: xc_func_alloc/init/end/free +

@@ -283,12 +283,27 @@ if(USE_HIP)
   endif()
 endif()
 
-# Configure a GPU library target for the HIP backend: compile the target's .cu
+# Configure a GPU library target for the HIP and SYCL backend: compile the target's .cu
 # sources as HIP and apply separable compilation + arch. On CUDA builds this is
 # a no-op, so each sub-project keeps its existing CUDA_* target properties
 # unchanged (those are simply inert when USE_HIP is ON).
 function(gpu4pyscf_configure_gpu_target target)
-  if(USE_HIP)
+  if(USE_SYCL)
+    get_target_property(_gpu_srcs ${target} SOURCES)
+    foreach(_src ${_gpu_srcs})
+      # Compile C sources as C++ too: SYCL flags are incompatible with C99.
+      if(_src MATCHES "\\.(c|cu)$")
+        set_source_files_properties(${_src} PROPERTIES LANGUAGE CXX)
+      endif()
+    endforeach()
+    # Tell the SYCL compiler to read the .cu files as C++ and skip the CUDA
+    # headers and device libraries it would normally add for CUDA compilation.
+    # Apply these flags only to C++ files: targets such as solvent also contain
+    # Fortran files, whose compiler does not accept these options.
+    target_compile_options(${target} PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:-x;c++;-nocudainc;-nocudalib>")
+    target_link_libraries(${target} PRIVATE sycl_compat gsycl)
+  elseif(USE_HIP)
     get_target_property(_gpu_srcs ${target} SOURCES)
     foreach(_src ${_gpu_srcs})
       if(_src MATCHES "\\.cu$")

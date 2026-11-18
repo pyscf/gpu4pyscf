@@ -24,17 +24,6 @@ set(GPU_SRCS
 
 add_library(sem SHARED ${GPU_SRCS})
 
-if (USE_SYCL)
-    set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-
-    set_target_properties(sem PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-    target_compile_options(sem PRIVATE -x c++ -nocudainc -nocudalib)
-    target_link_libraries(sem PRIVATE sycl_compat gsycl)
-else()
-    set_target_properties(sem PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-    )
-endif()
+set_target_properties(sem PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 gpu4pyscf_configure_gpu_target(sem)

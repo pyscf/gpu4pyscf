@@ -19,7 +19,6 @@ set(GPU_SRCS
 if (USE_SYCL)
   add_library(gvhf_rys SHARED ${GPU_SRCS})
 
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
   # also compile it as its own TU.
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
@@ -64,8 +63,6 @@ if (USE_SYCL)
 
   set_target_properties(gvhf_rys PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-  target_compile_options(gvhf_rys PRIVATE -x c++ -nocudainc -nocudalib)
-  target_link_libraries(gvhf_rys PRIVATE sycl_compat gsycl)
 else()
   list(APPEND GPU_SRCS rys_constant.cu)
   add_library(gvhf_rys SHARED ${GPU_SRCS})

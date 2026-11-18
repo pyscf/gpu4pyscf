@@ -57,18 +57,4 @@ set_target_properties(mgrid_v3 PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
 )
 
-if (USE_SYCL)
-  file(GLOB CUH_HEADERS_v3
-    "${CMAKE_CURRENT_SOURCE_DIR}/multigrid_v3/*.cuh"
-  )
-  get_target_property(GPU_SRCS_v3 mgrid_v3 SOURCES)
-  set_source_files_properties(${CUH_HEADERS_v3} ${GPU_SRCS_v3} PROPERTIES LANGUAGE CXX)
-  target_compile_options(mgrid_v3 PRIVATE -x c++ -nocudainc -nocudalib)
-  # Header-defined device helpers must be inline: every TU of this library
-  # includes them, and plain always_inline functions would be duplicate
-  # symbols at link time. __device__ expands to this attribute (sycl_device.hpp).
-  target_compile_definitions(mgrid_v3 PRIVATE
-    "GPU4PYSCF_DEVICE_ATTR=inline __attribute__((always_inline))")
-  target_link_libraries(mgrid_v3 PRIVATE sycl_compat gsycl)
-endif()
 gpu4pyscf_configure_gpu_target(mgrid_v3)
