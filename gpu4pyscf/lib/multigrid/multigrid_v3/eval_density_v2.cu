@@ -22,8 +22,7 @@
 #include "cartesian.cuh"
 #include "utils.cuh"
 
-#define TILE            8
-#define WARP_SIZE       32
+#define THREADS         256
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
@@ -33,14 +32,15 @@ void eval_density_kernel(double *rho_c, double *dm, PBCIntEnvVars envs,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c, double negligible)
 {
-    constexpr int nsp_per_block = WARP_SIZE;
-    constexpr int threads = WARP_SIZE * TILE;
+    constexpr int nsp_per_block = MGRID_SUBGROUP_SIZE;
+    constexpr int threads = THREADS;
+    constexpr int tile = threads / nsp_per_block;
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
     setup_context();
-    int tx = threadIdx_x;
-    int ty = threadIdx_y;
-    int thread_id = ty * nsp_per_block + tx;
+    int thread_id = threadIdx_x;
+    int tx = thread_id % nsp_per_block;
+    int ty = thread_id / nsp_per_block;
     int segment_id = blockIdx_x / atom_mesh_a_max;
     int a_index_id = blockIdx_x - atom_mesh_a_max * segment_id;
     SHARED_ARRAY(int, a_index);
@@ -158,7 +158,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                     dm_cache[i*SLICE_SIZE_J+j] = dm[ij_offset + i*nao+j];
                 } }
             }
-            for (int c_index = c_index0+ty; c_index < c_index1; c_index += TILE) {
+            for (int c_index = c_index0+ty; c_index < c_index1; c_index += tile) {
                 double x = a_index * c_dxyz_dabc[0] + b_start * c_dxyz_dabc[3] + c_index * c_dxyz_dabc[6];
                 double y = a_index * c_dxyz_dabc[1] + b_start * c_dxyz_dabc[4] + c_index * c_dxyz_dabc[7];
                 double z = a_index * c_dxyz_dabc[2] + b_start * c_dxyz_dabc[5] + c_index * c_dxyz_dabc[8];
@@ -230,7 +230,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
                     }
                     // Every lane participates, including inactive shell pairs.
                     for (int offset = nsp_per_block/2; offset > 0; offset >>= 1) {
-                        rho += __shfl_down_sync(0xffffffff, rho, offset);
+                        rho += __shfl_down_sync(__activemask(), rho, offset, MGRID_SUBGROUP_SIZE);
                     }
                     if (tx == 0) {
                         rho_cache[b_index*c_stride+c_index - bc_offset] += rho;
@@ -261,7 +261,7 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
 extern "C" {
 #define eval_density_kernel_case(li, lj, slice_i, slice_j) \
     case (li * LMAX1 + lj): { \
-        auto _threads = make_block(WARP_SIZE, TILE); \
+        auto _threads = make_block(threads); \
         auto _grids = make_grid(ntasks); \
         LAUNCH_KERNEL( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
             rho_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
@@ -281,7 +281,10 @@ int evaluate_density_v2(double *rho_c, double *placeholder, double *dm,
     int mesh_b = mesh[1];
     int mesh_c = mesh[2];
     int ntasks = nseg * atom_mesh[0];
-    int c_stride = (6000 / atom_mesh[1] / TILE) * TILE;
+    constexpr int threads = THREADS;
+    // Host compilation may use a different WARP_SIZE in a multi-arch HIP build.
+    int tile = threads / gpu4pyscf_effective_warp_size();
+    int c_stride = (6000 / atom_mesh[1] / tile) * tile;
     int shmsize = atom_mesh[1] * c_stride * sizeof(double);
     double a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] + dxyz_dabc[1] * dxyz_dabc[4] + dxyz_dabc[2] * dxyz_dabc[5];
     double a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] + dxyz_dabc[1] * dxyz_dabc[7] + dxyz_dabc[2] * dxyz_dabc[8];

@@ -84,3 +84,4 @@ endif()
 #endif()
 
 target_link_libraries(gvhf_rys PRIVATE OpenMP::OpenMP_C)
+gpu4pyscf_configure_gpu_target(gvhf_rys)

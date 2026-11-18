@@ -20,7 +20,7 @@ does not exist under SYCL. gpu4pyscf/cupy/__init__.py therefore redirects both
 so anything importing either name (x2c/x2c.py, lib/cupy_helper.py) reaches
 oneMKL instead.
 
-This module must mirror cusolver.py's public surface exactly -- `eigh`,
+This module must mirror cusolver.py's public surface exactly -- `eigh`, `eigh_std`,
 `cholesky`, `LinAlgError` and `MAX_EIGH_DIM` -- with the same signatures and
 the same failure behaviour, since callers are shared, unmodified upstream code.
 
@@ -116,6 +116,10 @@ libonemkl.onemkl_zpotrf.argtypes = [
 ]
 
 _buffersize = {}
+def eigh_std(a):
+    return dpnp.linalg.eigh(a)
+
+
 def eigh(h, s, overwrite=False):
     """
     Solve the generalized eigenvalue problem Hx = λ Sx using oneMKL.

@@ -860,8 +860,9 @@ static size_t buflen(int l, MGridBounds *bounds)
     int lj = MIN(l, LMAX);
     int nf2 = (l+1)*(l+2)/2;
     int nf3 = nf2*(l+3)/3;
-    size_t len1 = (nf3+nf2*2) * WARP_SIZE; 
-    size_t len2 = (lj+3)*(lj+3) * 3 * WARP_SIZE;
+    int warp = gpu4pyscf_effective_warp_size();
+    size_t len1 = (nf3+nf2*2) * warp; 
+    size_t len2 = (lj+3)*(lj+3) * 3 * warp;
     size_t len3 = (l+1) * ngrid_span * 2 + nf2 * ngrid_span;
     len2 = MAX(len2, len3);
     if (l <= 6) {

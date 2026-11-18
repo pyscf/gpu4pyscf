@@ -16,21 +16,24 @@ import unittest
 from unittest import mock
 import numpy as np
 import cupy as cp
-from pyscf.pbc import gto
+from pyscf.pbc import gto, dft as cpu_dft
 from pyscf.pbc.dft import numint as cpu_numint
-from gpu4pyscf.pbc import dft
+from gpu4pyscf.pbc import dft, df
 from gpu4pyscf.pbc.scf import slabgate
-from gpu4pyscf.pbc.scf.addons import gate_charge
-from gpu4pyscf.pbc.scf.slabdipole import _sawtooth, _slab_charge
-from gpu4pyscf.pbc.scf.slabgate import _sheet_potential, _barrier_potential
+from gpu4pyscf.pbc.scf.addons import gate_charge, slab_dipole_correction
+from gpu4pyscf.pbc.scf.slabdipole import (
+    SlabDipoleCorrection, _sawtooth, _slab_charge)
+from gpu4pyscf.pbc.scf.slabgate import (
+    _sheet_potential, _barrier_potential, _zero_temperature_occ)
 
 
-def make_cell(charge=2):
+def make_cell(charge=2, dimension=3):
+    length, zshift, nz = (60., -10., 249) if dimension == 2 else (22., 0., 91)
     return gto.M(
-        a=np.diag([7., 8., 22.]), unit='Bohr',
-        atom='F 2.1 2.8 10.; H 2.8 3.3 11.7',
+        a=np.diag([7., 8., length]), unit='Bohr',
+        atom=f'F 2.1 2.8 {10.+zshift}; H 2.8 3.3 {11.7+zshift}',
         charge=charge, basis='gth-szv', pseudo='gth-pade',
-        mesh=[31, 33, 91], precision=1e-10, verbose=0)
+        dimension=dimension, mesh=[31, 33, nz], precision=1e-10, verbose=0)
 
 
 def make_mf(cell, name='RKS', multigrid=False, becke=False):
@@ -130,12 +133,13 @@ class KnownValues(unittest.TestCase):
                 self.assertAlmostEqual(e-e0, mf.scf_summary['egate'] +
                                        mf.scf_summary['ebarrier'], delta=1e-10)
 
-    def test_smearing_energy(self):
+    def check_smearing_energy(self, dimension):
         sigma, entropy = .02, 1.25
-        gate_kwargs = dict(zgate=17., barrier=True, barrier_start=15.,
-                           barrier_end=19., barrier_width=.7)
         for name in ('RKS', 'UKS', 'KRKS', 'KUKS'):
-            cell = make_cell()
+            cell = make_cell(dimension=dimension)
+            zgate = cell.atom_coords()[0, 2] + 7.
+            gate_kwargs = dict(zgate=zgate, barrier=True, barrier_start=zgate-2.,
+                               barrier_end=zgate+2., barrier_width=.7)
             reference = gate_charge(make_mf(cell, name), **gate_kwargs)
             dm = reference.get_init_guess()
             h = reference.get_hcore()
@@ -162,6 +166,12 @@ class KnownValues(unittest.TestCase):
                             self.assertAlmostEqual(mf.scf_summary[key],
                                                    reference.scf_summary[key],
                                                    delta=1e-10)
+
+    def test_smearing_energy(self):
+        self.check_smearing_energy(dimension=3)
+
+    def test_smearing_energy_2d(self):
+        self.check_smearing_energy(dimension=2)
 
     def test_charge_per_cell(self):
         cell = make_cell()
@@ -221,13 +231,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.barrier_end, 17.5)
 
     def test_cell_dimension(self):
-        for dimension in (1, 2):
-            with self.subTest(dimension=dimension):
-                cell = make_cell()
-                mf = make_mf(cell)
-                cell.dimension = dimension
-                with self.assertRaisesRegex(NotImplementedError, '3D cell'):
-                    gate_charge(mf)
+        cell = make_cell()
+        mf = make_mf(cell)
+        cell.dimension = 1
+        with self.assertRaises(NotImplementedError):
+            gate_charge(mf)
 
     @mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', .4/22.)
     def test_barrier_positions(self):
@@ -275,6 +283,272 @@ class KnownValues(unittest.TestCase):
                 gate_charge(make_mf(cell), barrier=False,
                             dipole_gap=.1, barrier_width=.2, **kwargs)
 
+    def test_defaults_and_reset_2d(self):
+        cell = make_cell(dimension=2)
+        length = cell.lattice_vectors()[2, 2]
+        zgate = cell.atom_coords()[0, 2] + 7.
+        # The 2D geometry must not depend on 3D dipole parameters.
+        with mock.patch.object(slabgate, 'DIPOLE_WIDTH_RATIO', .4):
+            mf = gate_charge(make_mf(cell), zgate=zgate, barrier=True,
+                             dipole_gap=10., gate_side=1)
+        self.assertNotIsInstance(mf, SlabDipoleCorrection)
+        self.assertAlmostEqual(mf.barrier_start, zgate-.05*length)
+        self.assertAlmostEqual(mf.barrier_end, zgate+.05*length)
+        self.assertAlmostEqual(mf.barrier_width, .01*length)
+        mf.reset(cell.copy())
+        self.assertEqual(mf.zgate, zgate)
+        self.assertAlmostEqual(mf.barrier_start, zgate-.05*length)
+        self.assertAlmostEqual(mf.barrier_end, zgate+.05*length)
+        self.assertNotIsInstance(mf, SlabDipoleCorrection)
+        with self.assertRaisesRegex(ValueError, 'dimensionality'):
+            mf.reset(make_cell())
+
+    def test_outside_cell_gate_2d(self):
+        cell = make_cell(dimension=2)
+        length = cell.lattice_vectors()[2, 2]
+        area = cell.vol / length
+        # Both gates are outside the numerical cell and more than L/2
+        # from the slab. The addon must preserve these physical coordinates.
+        for zgate in (-length-5., length+5.):
+            with self.subTest(zgate=zgate):
+                start, end = zgate-2., zgate+2.
+                mf = gate_charge(make_mf(cell), zgate=zgate, barrier=True,
+                                 barrier_start=start, barrier_end=end,
+                                 barrier_width=.5)
+                self.assertEqual(mf.zgate, zgate)
+                self.assertEqual(mf.barrier_start, start)
+                self.assertEqual(mf.barrier_end, end)
+                params = mf._gate_parameters(cell)
+                self.assertEqual(params[1:4], (zgate, start, end))
+                qc = -cell.charge
+                ionic = -2*np.pi*qc/area * np.dot(
+                    cell.atom_charges(), abs(cell.atom_coords()[:, 2]-zgate))
+                egate, ebarrier = mf._gate_ionic_energy(cell)
+                self.assertAlmostEqual(egate, ionic, delta=1e-12)
+                self.assertAlmostEqual(ebarrier, -qc*mf.barrier_height, delta=1e-12)
+
+    @mock.patch('gpu4pyscf.pbc.scf.hf.ALLOWED_FFT_MESH_SIZE', 0)
+    def test_scf_2d_vs_3d(self):
+        # Use FFTDF on both sides, including the 3D nuclear potential, to
+        # isolate boundary-condition effects from the automatic MultiGrid path.
+        # Large vacuum suppresses the remaining nonplanar 3D image interactions.
+        for length, nz in ((60., 249), (80., 333)):
+            with self.subTest(length=length):
+                cell_2d = gto.M(
+                    a=np.diag([7., 8., length]), unit='Bohr', dimension=2,
+                    atom='C 2.1 2.8 0.; H 2.8 3.3 1.7',
+                    charge=1, spin=0, basis='gth-szv', pseudo='gth-pade',
+                    mesh=[31, 33, nz], precision=1e-10, verbose=0)
+                cell_3d = cell_2d.copy()
+                cell_3d.dimension = 3
+                cell_3d.build()
+                mf_2d = gate_charge(make_mf(cell_2d), zgate=-5., barrier=False)
+                mf_3d = gate_charge(make_mf(cell_3d), zgate=-5., barrier=False)
+                mf_2d.xc = 'pbe'
+                mf_3d.xc = 'pbe'
+
+                # Keep the return region well outside the electron-density
+                # tails, on the vacuum side of the gate. Do not use its default
+                # location immediately next to the gate for this comparison.
+                cut = (-length/3) % length
+                slab_dipole_correction(mf_3d, cut=cut, width=1.,
+                                       z0=(cut+length/2) % length)
+                self.assertNotIsInstance(mf_2d, SlabDipoleCorrection)
+                self.assertIsInstance(mf_3d, SlabDipoleCorrection)
+
+                # Independent SCFs from the same initial density; do not seed
+                # the second calculation with the first converged solution.
+                dm0 = mf_2d.get_init_guess()
+                energy_2d = mf_2d.kernel(dm0=dm0.copy())
+                energy_3d = mf_3d.kernel(dm0=dm0.copy())
+                self.assertTrue(mf_2d.converged, '2D SCF did not converge')
+                self.assertTrue(mf_3d.converged, '3D SCF did not converge')
+                # Compare full total energies without fitting a constant shift.
+                # Do not demand bitwise equality for different electrostatics.
+                self.assertAlmostEqual(energy_2d, energy_3d, delta=1e-6)
+                cp.testing.assert_allclose(mf_2d.make_rdm1(), mf_3d.make_rdm1(),
+                                            atol=1e-5, rtol=0)
+
+    def test_backend_selection_is_unchanged(self):
+        # Attaching a gate does not build or validate the base SCF backend.
+        mf = make_mf(make_cell(dimension=2))
+        mf.with_df = df.GDF(mf.cell)
+        mf.xc = 'pbe0'
+        backend, integrator = mf.with_df, mf._numint
+        zgate = mf.cell.atom_coords()[0, 2] + 7.
+        self.assertIs(gate_charge(mf, zgate=zgate), mf)
+        self.assertIs(mf.with_df, backend)
+        self.assertIs(mf._numint, integrator)
+        self.assertEqual(mf.xc, 'pbe0')
+
+
+def make_fractional_cell(nelectron=7.7):
+    cell = gto.M(
+        a=np.diag([7., 8., 22.]), unit='Bohr',
+        atom='O 3 4 10; H 3 2.57 11.1; H 3 5.43 11.1',
+        basis='gth-szv', pseudo='gth-pade', mesh=[9, 9, 25],
+        precision=1e-6, verbose=0)
+    if nelectron is None:
+        cell.charge = 2
+    else:
+        cell.charge = 8 - nelectron
+        cell.nelectron = nelectron
+    return cell
+
+
+def make_fractional_mf(cell, name='RKS', nkpts=1):
+    if name.startswith('K'):
+        mf = getattr(dft, name)(cell, cell.make_kpts([nkpts, 1, 1]), xc='lda,vwn')
+    else:
+        mf = getattr(dft, name)(cell, xc='lda,vwn')
+    mf.chkfile = None
+    return mf
+
+
+def energies(name, nkpts):
+    energy = cp.linspace(-1., 1., 6)
+    if name.startswith('K'):
+        energy = energy[None, :] + cp.arange(nkpts)[:, None] * 1e-4
+    return energy
+
+
+class FractionalOccupations(unittest.TestCase):
+    def assert_density_count(self, dm, overlap, nkpts):
+        count = float(cp.einsum('...ij,...ji->...', dm, overlap).real.sum()) / nkpts
+        self.assertAlmostEqual(count, 7.7, delta=1e-9)
+
+    def test_zero_temperature(self):
+        cases = [('RKS', 1, 7), ('RKS', 1, 8), ('RKS', 1, 7.7),
+                 ('KRKS', 1, 7.7), ('KRKS', 2, 7.),
+                 ('KRKS', 2, 7.7), ('KRKS', 2, 8.3), ('KRKS', 20, 7.7)]
+        for name, nkpts, target in cases:
+            with self.subTest(name=name, nkpts=nkpts, target=target):
+                mf = gate_charge(make_fractional_mf(make_fractional_cell(target), name, nkpts),
+                                 fractional_electrons=True)
+                energy = energies(name, nkpts)
+                occ = mf.get_occ(energy)
+                # Independent filling by cumulative capacity for distinct levels.
+                expected = cp.clip(target * nkpts - 2 * cp.arange(energy.size), 0, 2)
+                cp.testing.assert_allclose(occ.ravel()[cp.argsort(energy.ravel())],
+                                           expected, atol=1e-12, rtol=0)
+        np.testing.assert_allclose(
+            _zero_temperature_occ([0., 1., 2., 3., 3.], 7.7), [2, 2, 2, .85, .85])
+
+    def test_smearing_orders(self):
+        for name, nkpts, method in [('RKS', 1, 'fermi'), ('KRKS', 2, 'fermi'),
+                                    ('KRKS', 2, 'gaussian')]:
+            for gate_first in (False, True):
+                with self.subTest(name=name, method=method, gate_first=gate_first):
+                    mf = make_fractional_mf(make_fractional_cell(), name, nkpts)
+                    if gate_first:
+                        mf = gate_charge(mf, fractional_electrons=True)
+                        mf = mf.smearing(.03, method=method)
+                    else:
+                        mf = gate_charge(mf.smearing(.03, method=method),
+                                         fractional_electrons=True)
+                    energy = energies(name, nkpts)
+                    self.assertAlmostEqual(float(mf.get_occ(energy).sum()) / nkpts,
+                                           7.7, delta=1e-10)
+                    self.assertGreater(mf.entropy, 0.)
+                    mf.sigma = 0.
+                    self.assertAlmostEqual(float(mf.get_occ(energy).sum()) / nkpts,
+                                           7.7, delta=1e-10)
+                    self.assertEqual(mf.entropy, 0.)
+
+    def test_validation_and_legacy_charge(self):
+        old_cell = make_fractional_cell(None)
+        old_mf = gate_charge(make_fractional_mf(old_cell, 'KRKS', 2))
+        self.assertFalse(hasattr(old_mf, '_gate_nelectron'))
+        self.assertEqual(_slab_charge(old_mf, old_cell), 1.)
+        mf = gate_charge(make_fractional_mf(make_fractional_cell(), 'KRKS', 2), fractional_electrons=True)
+        self.assertAlmostEqual(_slab_charge(mf, mf.cell), .3)
+        mf.cell.charge = -.3
+        with self.assertRaisesRegex(ValueError, 'match'):
+            mf.get_occ(energies('KRKS', 2))
+        cell = make_fractional_cell(None)
+        cell.charge = .3
+        with self.assertRaisesRegex(ValueError, 'explicitly'):
+            gate_charge(make_fractional_mf(cell), fractional_electrons=True)
+
+        mf = make_fractional_mf(make_fractional_cell())
+        mf.cell.spin = 1
+        with self.assertRaisesRegex(NotImplementedError, 'spin=0'):
+            gate_charge(mf, fractional_electrons=True)
+        with self.assertRaisesRegex(NotImplementedError, 'RKS/KRKS'):
+            gate_charge(make_fractional_mf(make_fractional_cell(), 'UKS'), fractional_electrons=True)
+        mf = gate_charge(make_fractional_mf(make_fractional_cell()), fractional_electrons=True).smearing(.03)
+        mf.mu0 = 0.
+        with self.assertRaisesRegex(ValueError, 'mu0'):
+            mf.get_occ(energies('RKS', 1))
+
+    def test_explicit_switch(self):
+        # Explicit integer N alone keeps the original occupation methods.
+        mf = make_fractional_mf(make_fractional_cell(8))
+        original_get_occ = mf.get_occ.__func__
+        gate_charge(mf)
+        self.assertFalse(hasattr(mf, '_gate_nelectron'))
+        self.assertIs(mf.get_occ.__func__, original_get_occ)
+        for charge, nelectron in [(.3, None), (.3, 7.7), (0, 7.7), (1, 7)]:
+            with self.subTest(charge=charge, nelectron=nelectron):
+                cell = make_fractional_cell(nelectron)
+                cell.charge = charge
+                with self.assertRaisesRegex(ValueError, 'fractional_electrons=True'):
+                    gate_charge(make_fractional_mf(cell), fractional_electrons=False)
+        with self.assertRaisesRegex(ValueError, 'explicitly'):
+            gate_charge(make_fractional_mf(make_fractional_cell(None)), fractional_electrons=True)
+
+        # Legacy explicit N must match charge/Nk, not charge per cell.
+        cell = make_fractional_cell(None)
+        cell.nelectron = 7
+        mf = gate_charge(make_fractional_mf(cell, 'KRKS', 2))
+        self.assertFalse(hasattr(mf, '_gate_nelectron'))
+        self.assertEqual(_slab_charge(mf, cell), 1.)
+        with self.assertRaisesRegex(ValueError, 'match charge/nkpts'):
+            gate_charge(make_fractional_mf(make_fractional_cell(6), 'KRKS', 2))
+
+        mf = gate_charge(make_fractional_mf(make_fractional_cell()), fractional_electrons=True)
+        self.assertIs(gate_charge(mf, fractional_electrons=True), mf)
+        with self.assertRaisesRegex(ValueError, 'Cannot disable'):
+            gate_charge(mf, fractional_electrons=False)
+        self.assertAlmostEqual(mf._gate_nelectron(), 7.7)
+
+    def test_fractional_orbital_gradient(self):
+        for name, nkpts in [('RKS', 1), ('KRKS', 2)]:
+            with self.subTest(name=name):
+                # Smearing outside gate must also use the fractional gradient.
+                mf = gate_charge(make_fractional_mf(make_fractional_cell(), name, nkpts),
+                                 fractional_electrons=True).smearing(.03)
+                coeff, occ = cp.eye(4), cp.asarray([2., 2., 2., 1.7])
+                fock = cp.ones((4, 4))
+                if name == 'KRKS':
+                    coeff = cp.repeat(coeff[None], nkpts, axis=0)
+                    occ = cp.repeat(occ[None], nkpts, axis=0)
+                    fock = cp.repeat(fock[None], nkpts, axis=0)
+                expected = cp.tile(cp.asarray([0., 0., 0., .3, .3, .3]), nkpts)
+                for sigma in (.03, 0.):
+                    mf.sigma = sigma
+                    cp.testing.assert_allclose(mf.get_grad(coeff, occ, fock), expected,
+                                               atol=1e-12, rtol=0)
+
+    def test_scf_run(self):
+        for name, nkpts, sigma in [('RKS', 1, 0.), ('KRKS', 2, .03)]:
+            with self.subTest(name=name):
+                mf = gate_charge(make_fractional_mf(make_fractional_cell(), name, nkpts), zgate=17.,
+                                 fractional_electrons=True)
+                if sigma:
+                    mf = mf.smearing(sigma)
+                overlap = mf.get_ovlp()
+                dm = mf.get_init_guess(s1e=overlap)
+                self.assert_density_count(dm, overlap, nkpts)
+                # Check the SCF path and electron count, not energy convergence.
+                mf.max_cycle = 2
+                mf.diis = False
+                self.assertTrue(np.isfinite(mf.kernel(dm0=dm)))
+                self.assertAlmostEqual(float(mf.mo_occ.sum()) / nkpts, 7.7, delta=1e-10)
+                self.assert_density_count(mf.make_rdm1(), overlap, nkpts)
+                self.assertTrue(np.isfinite(mf.scf_summary['egate']))
+
 
 if __name__ == '__main__':
+    print("Full tests for slabgate.")
     unittest.main()

@@ -57,3 +57,4 @@ else()
   set_target_properties(cupy_helper PROPERTIES
     CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 endif()
+gpu4pyscf_configure_gpu_target(cupy_helper)

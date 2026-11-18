@@ -64,6 +64,8 @@ class _SmearingKSCF(mol_smearing._SmearingSCF):
         This is a k-point version of scf.hf.SCF.get_occ
         '''
         from gpu4pyscf.pbc import scf
+        if hasattr(self, '_get_gate_occ'):
+            return self._get_gate_occ(mo_energy_kpts, mo_coeff_kpts)
         if (self.sigma == 0) or (not self.sigma) or (not self.smearing_method):
             mo_occ_kpts = super().get_occ(mo_energy_kpts, mo_coeff_kpts)
             return mo_occ_kpts
@@ -155,6 +157,8 @@ class _SmearingKSCF(mol_smearing._SmearingSCF):
         return cp.array(mo_occ_kpts)
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
+        if hasattr(self, '_get_gate_grad'):
+            return self._get_gate_grad(mo_coeff_kpts, mo_occ_kpts, fock)
         if (self.sigma == 0) or (not self.sigma) or (not self.smearing_method):
             return super().get_grad(mo_coeff_kpts, mo_occ_kpts, fock)
 
@@ -170,8 +174,12 @@ class _SmearingKSCF(mol_smearing._SmearingSCF):
 
     def to_cpu(self):
         from pyscf.pbc.scf.addons import smearing
-        return smearing(self.undo_smearing().to_cpu(), self.sigma,
-                        self.smearing_method, self.mu0, self.fix_spin)
+        obj = smearing(self.undo_smearing().to_cpu(), self.sigma,
+                       self.smearing_method, self.mu0, self.fix_spin)
+        obj.entropy = self.entropy
+        obj.e_free = self.e_free
+        obj.e_zero = self.e_zero
+        return obj
 
 def from_cpu(method):
     from pyscf.scf.addons import _SmearingSCF

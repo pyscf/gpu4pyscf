@@ -26,7 +26,7 @@ import numpy as np
 import cupy as cp
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 
 __all__ = [
     'KPointMesh',
@@ -48,7 +48,7 @@ def _direction_index(direction):
     return direction
 
 
-def _commensurate_bvk_mesh(cell, kpts, kmesh=None):
+def _commensurate_bvkmesh(cell, kpts, kmesh=None):
     # FTOpt folds outer BvK images without a twist phase. Every absolute
     # k-point, not just the spacing of the mesh, must be commensurate.
     scaled = np.asarray(cell.get_scaled_kpts(kpts))
@@ -56,7 +56,7 @@ def _commensurate_bvk_mesh(cell, kpts, kmesh=None):
             np.max(np.abs(scaled * kmesh - np.rint(scaled * kmesh))) <= 1e-8):
         return kmesh
     try:
-        return kpts_to_kmesh(
+        return kpts_to_bvkmesh(
             cell, kpts, precision=1e-10, bound_by_supmol=False)
     except RuntimeError as err:
         raise ValueError(
@@ -309,14 +309,14 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh=None, topology=None):
     reciprocal_steps = np.asarray([
         topology.reciprocal_step(direction) for direction in range(3)])
 
-    bvk_mesh = _commensurate_bvk_mesh(cell, kpts, kmesh)
-    ft_opt = ft_ao.FTOpt(cell, bvk_mesh)
+    bvkmesh = _commensurate_bvkmesh(cell, kpts, kmesh)
+    ft_opt = ft_ao.FTOpt(cell, bvkmesh)
     ft_opt.permutation_symmetry = False
-    ft_kernel = ft_opt.gen_ft_kernel()
+    ft_kernel = ft_opt.gen_ft_kernel(kpts=kpts)
 
     # With k_j = k and Gv = -b, raw[k,d] is <f_mu,k+b | f_nu,k>.
     # Its adjoint gives the forward link while sharing kpts for all directions.
-    raw = ft_kernel(-reciprocal_steps, q=np.zeros(3), kpts=kpts)
+    raw = ft_kernel(-reciprocal_steps, q=np.zeros(3))
     s_ao = raw.conj().transpose(1, 0, 3, 2)
     return cp.matmul(
         mo_coeff_kpts.conj().transpose(0, 2, 1)[None],

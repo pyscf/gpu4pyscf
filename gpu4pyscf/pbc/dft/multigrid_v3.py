@@ -50,8 +50,9 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.tools import k2gamma, get_coulG, ke_to_mesh, mesh_to_ke
-from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix, _normalize_kpts
+from gpu4pyscf.pbc.tools import get_coulG, ke_to_mesh, mesh_to_ke
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, fft_matrix, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.aft import _get_ZSI
 from gpu4pyscf.gto.mole import (
@@ -76,8 +77,7 @@ def _aft_eval_density(ni, dm_sc, kpts=None, with_tau=False):
     assert _is_orthogonal_lattice(a), 'Must be orthogonal lattice'
     b = cell.reciprocal_vectors()
 
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
+    weight = 1.
 
     rhoG = cp.zeros(ni.mesh, dtype=np.complex128)
     kern = libmgrid.orth_contract_aopair_dm
@@ -207,7 +207,6 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
 
     work = cp.empty_like(rhoG)
     if not with_tau:
@@ -222,7 +221,7 @@ def _eval_density_v2(ni, dm_sc, kpts=None, with_tau=False):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
+        weight = vol / ngrids
 
         dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
@@ -279,7 +278,6 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
 
     a = cell.lattice_vectors()
     vol = np.linalg.det(a)
-    nkpts = len(ni.bvkmesh_Ls)
 
     nimgs = cell.nimgs
     Tx = np.arange(-nimgs[0], nimgs[0]+1, dtype=np.float64)
@@ -303,7 +301,7 @@ def _eval_density_v1(ni, dm_sc, kpts=None, with_tau=False):
     for bucket in fft_buckets:
         mesh = bucket['mesh']
         ngrids = np.prod(mesh)
-        weight = vol / ngrids / nkpts
+        weight = vol / ngrids
 
         dxyz_dabc = bucket['dxyz_dabc']
         libmgrid.update_dxyz_dabc(dxyz_dabc.ctypes, ctypes.c_void_p(stream.ptr))
@@ -527,8 +525,7 @@ def _eval_gradients(ni, dm_sc, vxcG, fft_buckets, work=None):
         work = ndarray((4,vrhoG.size), dtype=np.float64, buffer=work)
         kern = libmgrid.evaluate_mgga_grad
 
-    nkpts = len(ni.bvkmesh_Ls)
-    weight = 1./nkpts
+    weight = 1.
 
     mg_envs = ni.mg_envs
 
@@ -1030,9 +1027,8 @@ def _apply_Gv_1j(rhoG, Gx, Gy, Gz, out=None):
     fn_name = 'apply_Gv_1j'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
-#include <cuComplex.h>
 extern "C" __global__
-void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *rhoG,
+void ''' + fn_name + r'''(double2* __restrict__ out, double2 *rhoG,
     double *Gx, double *Gy, double *Gz, long long nx, long long ny, long long nz) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     int stride = gridDim.x * blockDim.x;
@@ -1043,9 +1039,9 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *rh
         int iyz = g - nyz * ix;
         int iy = iyz / nz;
         int iz = iyz - nz * iy;
-        cuDoubleComplex rho = rhoG[g];
+        double2 rho = rhoG[g];
         double Gv = Gx[ix] + Gy[iy] + Gz[iz];
-        out[g] = make_cuDoubleComplex(-Gv * cuCimag(rho), Gv * cuCreal(rho));
+        out[g] = {-Gv * rho.y, Gv * rho.x};
     }
 }''')
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
@@ -1061,9 +1057,8 @@ def _contract_Gv_1j(out, xc, Gx, Gy, Gz):
     fn_name = 'contract_Gv_1j'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
-#include <cuComplex.h>
 extern "C" __global__
-void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vxcG,
+void ''' + fn_name + r'''(double2* __restrict__ out, double2 *vxcG,
     double *Gx, double *Gy, double *Gz, long long nx, long long ny, long long nz) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     int stride = gridDim.x * blockDim.x;
@@ -1076,11 +1071,9 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vx
         int iz = iyz - nz * iy;
         // (-i Gv) * v
         double Gv = Gx[ix] + Gy[iy] + Gz[iz];
-        cuDoubleComplex res = out[g];
-        cuDoubleComplex v = vxcG[g];
-        res.x += Gv * cuCimag(v);
-        res.y -= Gv * cuCreal(v);
-        out[g] = res;
+        double2 res = out[g];
+        double2 v = vxcG[g];
+        out[g] = {res.x + Gv * v.y, res.y - Gv * v.x};
     }
 }''')
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
@@ -1090,7 +1083,7 @@ void ''' + fn_name + r'''(cuDoubleComplex* __restrict__ out, cuDoubleComplex *vx
     kernel((workers*2,), (1024,), (out, xc, Gx, Gy, Gz, len(Gx), len(Gy), len(Gz)))
     return out
 
-def _get_coulomb_in_place(rhoG, Gv_bases, omega=0):
+def _get_coulomb_in_place(cell, rhoG, Gv_bases, omega=0):
     '''
     Computes
         Ecoul = rhoG.conj().dot(rhoG * coulG)
@@ -1098,7 +1091,16 @@ def _get_coulomb_in_place(rhoG, Gv_bases, omega=0):
     where
         coulG = 4pi/G^2 for full-range Coulomb potential or
         coulG = 4pi/G^2*exp(-G^2/(4*omega^2)) for long-range potential
+    Passing a 2D cell uses its truncated kernel, including the finite G=0
+    term. 3D cells retain the optimized implementation.
     '''
+    if cell.dimension == 2:
+        assert cell.low_dim_ft_type != 'inf_vacuum'
+        mesh = tuple(x.shape[1] for x in Gv_bases)
+        coulG = get_coulG(cell, mesh=mesh, omega=omega).reshape(rhoG.shape)
+        ecoul = cp.vdot(rhoG, rhoG * coulG).real
+        rhoG *= coulG
+        return ecoul, rhoG
     fn_name = 'get_coulG'
     if fn_name not in _kernel_registery:
         kernel_code = ('''\
@@ -1134,8 +1136,9 @@ void ''' + fn_name + r'''(double *energy, double2* __restrict__ rhoG,
         }
         rhoG[g] = coul;
     }
+    // __activemask() has HIP's 64-bit mask type; width 32 keeps logical warps.
     for (int offset = 16; offset > 0; offset >>= 1) {
-        Ecoul += __shfl_down_sync(0xffffffff, Ecoul, offset);
+        Ecoul += __shfl_down_sync(__activemask(), Ecoul, offset, 32);
     }
     __shared__ double swap[32];
     int lane = tid % 32;
@@ -1146,7 +1149,7 @@ void ''' + fn_name + r'''(double *energy, double2* __restrict__ rhoG,
     if (warp == 0) {
         Ecoul = (lane < num_warps) ? swap[lane] : 0.;
         for (int offset = 16; offset > 0; offset >>= 1) {
-            Ecoul += __shfl_down_sync(0xffffffff, Ecoul, offset);
+            Ecoul += __shfl_down_sync(__activemask(), Ecoul, offset, 32);
         }
     }
     if (tid == 0) atomicAdd(energy, Ecoul);
@@ -1208,18 +1211,19 @@ int nx, int ny, int nz)
     int num_warps = blockDim.x / 32;
     for (int n = 0; n < 9; n++) {
         for (int offset = 16; offset > 0; offset >>= 1) {
-            sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+            sigma[n] += __shfl_down_sync(__activemask(), sigma[n], offset, 32);
         }
         if (lane == 0) swap[warp] = sigma[n];
         __syncthreads();
         if (warp == 0) {
             sigma[n] = (lane < num_warps) ? swap[lane] : 0.;
             for (int offset = num_warps/2; offset > 0; offset >>= 1) {
-                sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+                sigma[n] += __shfl_down_sync(__activemask(), sigma[n], offset, 32);
             }
         }
         __syncthreads();
         if (tid == 0) atomicAdd(out+n, sigma[n]);
+        __syncthreads(); // Finish reading swap before the next component writes it.
     }
 }'''
         _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
@@ -1345,9 +1349,9 @@ double cexp0, double cexp1, double cexp2, double cexp3)
         for (int ia = 0; ia < block; ++ia) {
             if (ia0 + ia >= atom_batch_size) break;
             for (int offset = 16; offset > 0; offset >>= 1) {
-                de[ia*3+0] += __shfl_down_sync(0xffffffff, de[ia*3+0], offset);
-                de[ia*3+1] += __shfl_down_sync(0xffffffff, de[ia*3+1], offset);
-                de[ia*3+2] += __shfl_down_sync(0xffffffff, de[ia*3+2], offset);
+                de[ia*3+0] += __shfl_down_sync(__activemask(), de[ia*3+0], offset, 32);
+                de[ia*3+1] += __shfl_down_sync(__activemask(), de[ia*3+1], offset, 32);
+                de[ia*3+2] += __shfl_down_sync(__activemask(), de[ia*3+2], offset, 32);
             }
             if (lane == 0) {
                 int i_atom = atom_ids[ia0+ia];
@@ -1357,7 +1361,7 @@ double cexp0, double cexp1, double cexp2, double cexp3)
     }
     for (int offset = 16; offset > 0; offset >>= 1) {
         for (int n = 0; n < 9; n++) {
-            sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+            sigma[n] += __shfl_down_sync(__activemask(), sigma[n], offset, 32);
         }
     }
     if (lane == 0) {
@@ -1461,7 +1465,7 @@ int nx, int ny, int nz, int natm)
         }
         for (int offset = 16; offset > 0; offset >>= 1) {
             for (int n = 0; n < 3; n++) {
-                de[n] += __shfl_down_sync(0xffffffff, de[n], offset);
+                de[n] += __shfl_down_sync(__activemask(), de[n], offset, 32);
             }
         }
         if (lane == 0) {
@@ -1470,7 +1474,7 @@ int nx, int ny, int nz, int natm)
     }
     for (int offset = 16; offset > 0; offset >>= 1) {
         for (int n = 0; n < 9; n++) {
-            sigma[n] += __shfl_down_sync(0xffffffff, sigma[n], offset);
+            sigma[n] += __shfl_down_sync(__activemask(), sigma[n], offset, 32);
         }
     }
     if (lane == 0) {
@@ -1577,6 +1581,11 @@ def _vxc_to_reciprocal_space(vxc, out, Gv_bases=None, work=None):
         return out
 
 def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
+    # A single non-Gamma point can produce a complex image-space density.
+    # The current real-valued multigrid kernels do not support.
+    assert len(kpts) > 1 or is_zero(kpts), \
+        'Single non-Gamma k-point sampling is not supported by multigrid'
+
     ni._ensure_initialized(kpts, xctype)
 
     cell = ni.sorted_cell
@@ -1595,16 +1604,17 @@ def _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1, xctype='LDA', out=None):
     if bvk_ncells == 1:
         dm_sc = dms
     else:
-        if bvk_ncells != nkpts:
-            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
-        else:
-            expLk = fft_matrix(ni.kmesh)
+        kmesh, with_gamma_point = _get_kmesh(ni.cell, kpts, ni.bvkmesh)
+        assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
+        expLk = fft_matrix(kmesh, with_gamma_point)
         dm_sc = contract('nkpq,Lk->nLqp', dms, expLk)
         assert absmax(dm_sc.imag) < cell.precision*5e2
     dm_sc = cp.asarray(dm_sc.real, order='C')
 
     dm_sc = cell.apply_C_mat_CT(dm_sc.reshape(-1,nao,nao), out=out)
 
+    # Include the normalization when transforming to super-cell gamma-point dm
+    dm_sc *= 1. / nkpts
     if hermi == 1:
         dm_sc *= 2
 
@@ -1617,11 +1627,13 @@ def _inverse_wannier_transform_fock(ni, veff, kpts):
 
     bvk_ncells = len(ni.bvkmesh_Ls)
     if bvk_ncells != 1:
-        if len(kpts) != bvk_ncells:
-            expLk = cp.exp(1j*cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        kmesh, with_gamma_point = _get_kmesh(ni.cell, kpts, ni.bvkmesh)
+        if kmesh is not None:
+            expLk = fft_matrix(kmesh, with_gamma_point)
         else:
-            expLk = fft_matrix(ni.kmesh)
-        nkpts = expLk.shape[1]
+            # veff might be evaluated at arbitrary band points
+            expLk = cp.exp(1j * cp.asarray(ni.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        nkpts = len(kpts)
         expLkz = expLk.view(np.float64).reshape(bvk_ncells, nkpts, 2)
         veff = contract('Lpq,Lkz->kpqz', veff, expLkz)
         veff = veff.view(np.complex128)[:,:,:,0]
@@ -1670,9 +1682,12 @@ def get_nuc(ni, kpts=None):
     ni._ensure_initialized(kpts, 'LDA')
 
     mesh = ni.mesh
-    ZSI = _get_ZSI(cell, mesh)
-    Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
-    vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+    if cell.dimension == 2:
+        vneG = multigrid_v1.eval_nucG(cell, mesh).reshape(mesh)
+    else:
+        ZSI = _get_ZSI(cell, mesh)
+        Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
+        vneG = _get_coulomb_in_place(cell, ZSI, Gv_bases)[1]
 
     vne = _eval_xc_mat(ni, vneG)
     vne = _inverse_wannier_transform_fock(ni, vne, kpts)
@@ -1786,7 +1801,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     if xctype == 'HF':
         assert with_j
-        ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
+        ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(cell, rhoG, Gv_bases)
         ecoul = (.5 / vol) * float(ecoul.get())
         xc_for_fock = coulomb_on_g_mesh
         log.debug('Multigrid Coulomb energy %s', ecoul)
@@ -1824,7 +1839,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         t0 = log.timer_debug1("eval_xc_eff", *t0)
 
         if with_j:
-            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(rhoG, Gv_bases)
+            ecoul, coulomb_on_g_mesh = _get_coulomb_in_place(cell, rhoG, Gv_bases)
             ecoul = (.5 / vol) * float(ecoul.get())
             log.debug('Multigrid Coulomb energy %s', ecoul)
         else:
@@ -1844,8 +1859,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
-        ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
+        ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
         ni.mesh = mesh
@@ -1953,7 +1968,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     xc_for_fock *= weight
     coulomb_a, coulomb_b = rhoG, rhoGb
     if with_j:
-        ecoul, coulomb_a = _get_coulomb_in_place(rhoG, Gv_bases)
+        ecoul, coulomb_a = _get_coulomb_in_place(cell, rhoG, Gv_bases)
         ecoul = (.5 / vol) * float(ecoul.get())
         log.debug('Multigrid Coulomb energy %s', ecoul)
         coulomb_b[:] = coulomb_a
@@ -1980,8 +1995,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     else:
         kpts_band, _ = _normalize_kpts(kpts_band)
-        kmesh = k2gamma.kpts_to_kmesh(cell, kpts_band)
-        ni = ni.copy().reset().build(kmesh=kmesh, xctype=xctype)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
+        ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
         # this new mesh.
         ni.mesh = mesh
@@ -2052,7 +2067,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         self._reciprocal_lattice_vectors = None
         return self
 
-    def build(self, kmesh=None, xctype='MGGA'):
+    def build(self, bvkmesh=None, xctype='MGGA'):
         log = logger.new_logger(self.cell)
         t0 = log.init_timer()
         cell = self.sorted_cell = SortedGTO.from_cell(
@@ -2060,15 +2075,15 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
 
         self.xctype = xctype
-        self.kmesh = kmesh
-        if kmesh is None:
+        self.bvkmesh = bvkmesh
+        if bvkmesh is None:
             bvkcell = cell
             bvkmesh_Ls = np.zeros((1, 3))
         else:
-            bvkcell = super_cell(cell, kmesh, wrap_around=True)
+            bvkcell = super_cell(cell, bvkmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in the super_cell function
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            bvkmesh_Ls = translation_vectors_for_kmesh(cell, kmesh, wrap_around=True)
+            bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, wrap_around=True)
         self.bvkcell = bvkcell
         self.bvkmesh_Ls = bvkmesh_Ls
         bvk_ncells = len(bvkmesh_Ls)
@@ -2156,13 +2171,13 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         return self
 
     def _ensure_initialized(self, kpts, xctype):
-        kmesh = k2gamma.kpts_to_kmesh(self.cell, kpts)
+        bvkmesh = kpts_to_bvkmesh(self.cell, kpts, bound_by_supmol=True)
         if (self.bvkcell is None or
-            any(self.kmesh != kmesh) or
+            any(self.bvkmesh != bvkmesh) or
             # LDA and GGA share the same initialization parameters.
             # MGGA requires a little bit higher energy cutoff and rcut
             (xctype == 'MGGA' and self.xctype != xctype)):
-            self.build(kmesh, xctype)
+            self.build(bvkmesh, xctype)
         return self
 
     get_nuc = get_nuc
@@ -2221,7 +2236,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             rho1 = None
 
             if with_j:
-                coulomb = _get_coulomb_in_place(rhoG, Gv_bases)[1]
+                coulomb = _get_coulomb_in_place(cell, rhoG, Gv_bases)[1]
             else:
                 coulomb = rhoG
                 coulomb.fill(0.)
@@ -2290,7 +2305,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
             coulomb_a, coulomb_b = rhoG, rhoGb
             if with_j:
-                coulomb_a = _get_coulomb_in_place(rhoG, Gv_bases)[1]
+                coulomb_a = _get_coulomb_in_place(cell, rhoG, Gv_bases)[1]
                 coulomb_b[:] = coulomb_a
             else:
                 coulomb_a.fill(0)
@@ -2489,7 +2504,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             else:
                 grad_sigma += _ne_derivatives(cell, rhoG, Gv_bases)
                 ZSI = _get_ZSI(cell, mesh, out=tauG)
-                vneG = _get_coulomb_in_place(ZSI, Gv_bases)[1]
+                vneG = _get_coulomb_in_place(cell, ZSI, Gv_bases)[1]
                 coulomb_on_g_mesh = vneG.reshape(mesh)
                 ZSI = vneG = None
 
@@ -2497,7 +2512,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
             sigma += _coulomb_strain_derivatives(cell, mesh, rhoG, Gv_bases) * 0.5
             # rhoG will be overwritten by _get_coulomb_in_place. Must be called
             # after other operations.
-            ecoul, coulomb_on_g_mesh1 = _get_coulomb_in_place(rhoG, Gv_bases)
+            ecoul, coulomb_on_g_mesh1 = _get_coulomb_in_place(cell, rhoG, Gv_bases)
             ecoul = (.5 / vol) * ecoul
             # grid weight response
             sigma += ecoul * cp.eye(3)
@@ -2536,5 +2551,15 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         t0 = log.timer("xc integration", *t0)
         return grad_sigma.get()
 
-    to_cpu = NotImplemented
+    if cp.cuda.runtime.is_hip:
+        def to_cpu(self):
+            # No GPU libXC on HIP: the XC-on-CPU fallback in gpu4pyscf/dft/numint.py
+            # calls to_cpu().eval_xc_eff(...). Supply a CPU numint for that without
+            # converting the multigrid machinery. On CUDA the integrator keeps
+            # upstream's behaviour and does not support conversion to CPU.
+            from pyscf.pbc.dft import numint as numint_cpu
+            return numint_cpu.NumInt()
+    else:
+        to_cpu = NotImplemented
+
     to_gpu = NotImplemented

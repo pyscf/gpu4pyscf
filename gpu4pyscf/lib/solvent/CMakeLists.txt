@@ -52,6 +52,7 @@ if (USE_SYCL)
   )
   target_link_libraries(solvent PRIVATE sycl_compat gsycl)
 else()
-set_target_properties(solvent PROPERTIES 
-  CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+  set_target_properties(solvent PROPERTIES
+    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 endif()
+gpu4pyscf_configure_gpu_target(solvent)

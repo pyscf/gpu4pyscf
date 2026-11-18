@@ -712,6 +712,7 @@ class Gradients(rhf_grad.GradientsBase):
         out.cphf_max_cycle = method.cphf_max_cycle
         out.cphf_conv_tol = method.cphf_conv_tol
         out.state = method.state
+        out.atmlst = method.atmlst
         out.de = method.de
         return out
 

@@ -29,12 +29,12 @@ from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts, _get_kmesh
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
@@ -230,7 +230,7 @@ class AFTDF(lib.StreamObject):
             coulG *= kws
         return coulG
 
-    def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,
+    def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvkmesh=None,
                 max_memory=None, transform_ao=True, **kwargs):
         '''
         Fourier transform iterator for all kpti which satisfy
@@ -246,11 +246,16 @@ class AFTDF(lib.StreamObject):
             assert is_zero(q)
             kpts = self.kpts
         kpts, _ = _normalize_kpts(kpts)
-        if bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+        if bvkmesh is None:
+            bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
-        ft_opt = FTOpt(cell, bvk_kmesh).build()
-        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
+        ft_opt = FTOpt(cell, bvkmesh)
+        # General k sampling does not contain k/-k partners required by the
+        # permutation_symmetry.
+        kmesh, _ = _get_kmesh(cell, kpts, bvkmesh)
+        ki_kj_identical = q is None or is_zero(q)
+        ft_opt.permutation_symmetry = kmesh is not None and ki_kj_identical
+        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao, kpts=kpts)
 
         bvk_ncells = len(ft_opt.bvkmesh_Ls)
         nao = ft_opt.cell.nao
@@ -267,7 +272,7 @@ class AFTDF(lib.StreamObject):
         blksize = min(blksize, ngrids)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            dat = ft_kern(Gv[p0:p1], q, kpts)
+            dat = ft_kern(Gv[p0:p1], q)
             yield dat, p0, p1
 
     @contextlib.contextmanager
@@ -436,7 +441,7 @@ def _get_ZSI(cell, mesh=None, out=None):
 
     einsum('i,ij->j', Z, SI)
     '''
-    assert cell.dimension == 3
+    assert cell.dimension in (2, 3)
     if mesh is None:
         mesh = cell.mesh
     basex, basey, basez = get_Gv_base(cell, mesh)

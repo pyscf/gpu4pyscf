@@ -30,17 +30,46 @@ DIPOLE_WIDTH_RATIO = getattr(__config__, 'pbc_scf_slabgate_dipole_width_ratio', 
 
 def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                 barrier_end=None, barrier_height=.05, barrier_width=None,
-                dipole_gap=1e-4, gate_side=-1):
+                dipole_gap=1e-4, gate_side=-1, *,
+                fractional_electrons=False):
     '''
-    Apply a compensating planar gate and its dipole correction in place.
+    Apply a compensating planar gate, with a dipole correction only in 3D.
 
-    The sheet carries qc = -q, where q = cell.charge/nkpts is the charge
-    PER PRIMITIVE CELL. At a single k-point, q = cell.charge. Negative q
-    adds electrons. The gate charge is determined solely by cell.charge
-    and the number of sampled k-points. To fix a target q per primitive
-    cell when changing the k mesh, reset cell.charge = nkpts*q.
-    Build the cell with a consistent charge/spin; KUKS spin counts are totals
-    over the k-points. No electron-count setting is changed by this addon.
+    For dimension=2, phi_c = -2*pi*qc/A*abs(s), with the default PySCF
+    finite-part reference (not inf_vacuum). The sheet self-energy is zero;
+    no background or dipole correction is added. In 2D, s=z-zgate and all
+    gate/barrier coordinates are used as supplied, without periodic wrapping.
+    The user must choose a consistent integration region and sufficient vacuum
+    for the base 2D electrostatics; no gate-slab distance check is performed.
+    Default uniform grids span [-L/2, L/2) along z.
+    The default barrier edges are zgate +/- .05*L and its ramp width is .01*L;
+    gate_side and dipole_gap do not affect these 2D defaults.
+    The base SCF method and its derivatives must support dimension=2;
+    backend availability is not checked by this addon.
+    The potential, self-energy and dipole placement below describe 3D.
+
+    The sheet carries qc = -q, where q is the slab charge per primitive cell.
+    Negative q adds electrons. With fractional_electrons=False, the legacy
+    convention q = cell.charge/nkpts is retained. To keep q fixed in this mode,
+    set cell.charge = nkpts*q when changing the k mesh.
+
+    For RKS/KRKS with spin=0, fractional_electrons=True enables real electron
+    counts and requires an explicit cell.nelectron. In this mode cell.charge is PER
+    PRIMITIVE CELL, and cell.nelectron + cell.charge must equal the sum of
+    effective ionic charges. For example, after building an 8-valence-electron
+    cell, set cell.charge = .3 and cell.nelectron = 7.7. No input is changed
+    automatically. Setting cell.nelectron alone does not enable this mode.
+    Occupations are filled globally at zero temperature, sharing any frontier
+    degeneracy, or obtained with Fermi/Gaussian smearing at fixed electron
+    number. Both orders of applying gate_charge and smearing are supported.
+    Fractional-electron mode currently excludes UKS/KUKS, level shifting,
+    fixed chemical potentials and second-order SCF. Nuclear gradients keep
+    the electron number and external gate parameters fixed. With Fermi smearing
+    at fixed sigma, they differentiate e_free, not e_tot or e_zero.
+    In the legacy mode, build the cell with consistent charge/spin; KUKS spin
+    counts are totals over the k-points. An explicit cell.nelectron must be
+    an integer matching the legacy charge/nkpts convention. Restricted SCF
+    requires an even total electron count in this mode.
     The standard 3D Coulomb calculation retains its G=0 convention.
     With A = Omega/L and s = (z-zgate+L/2) % L - L/2, the sheet potential is
 
@@ -63,6 +92,8 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     and sheet terms should vanish or remain constant when placed in vacuum.
     scf_summary['egate'] and ['ebarrier'] report these complete additions.
     Electronic contributions are already in scf_summary['e1'].
+    ** It should be noted that the qc*v_b(zgate) term is constant for fixed
+    parameters, some codes may ignore it. **
 
     The dipole-plane separation dipole_width is DIPOLE_WIDTH_RATIO*L
     (default: .01*L, as in Brumme). The return region is centered at
@@ -72,7 +103,7 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     before importing this module.
 
     Args:
-        mf: RKS/UKS/KRKS/KUKS for a three-dimensionally periodic slab.
+        mf: RKS/UKS/KRKS/KUKS for a slab with dimension=3 or 2.
             The slab normal is z, with the third lattice vector along positive
             z and the other two in the xy plane.
         zgate: Sheet position in Bohr; None means L/2.
@@ -87,9 +118,14 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
             gate_side=-1, start defaults to cut-dipole_width/2 and end to
             start+.1*L. For gate_side=+1, end defaults to cut+dipole_width/2
             and start to end-.1*L. Explicit edges are coordinates along
-            z, independent of gate_side. Intervals can cross the boundary.
+            z, independent of gate_side. Intervals can cross the boundary in
+            3D; in 2D they are ordinary intervals with start < end.
             When barrier=True, the interval must contain zgate strictly
-            inside and cover the entire dipole return region.
+            inside and, in 3D, cover the entire dipole return region.
+        fractional_electrons: Enable real per-cell electron counts (default:
+            False). Requires explicit, consistent cell.nelectron and cell.charge.
+            Integer targets are also supported. When reapplying gate_charge to
+            an enabled object, pass True again; use a new SCF object to disable.
         barrier_height: Plateau height in Hartree (default: .05 = .1 Ry).
         barrier_width: Linear ramp width INSIDE each edge, in Bohr; None
             means dipole_width, as in Brumme. Zero gives a rectangular barrier.
@@ -99,7 +135,7 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     differentiating atomic positions. Gradients are dE/dR; forces are -dE/dR.
     No translation-force subtraction is made for this external field.
 
-    The dipole correction is added automatically to cancel the periodic
+    In 3D, the dipole correction is added automatically to cancel the periodic
     residual field. An existing dipole addon is reused and its cut,
     width and z0 are reset to the Brumme convention. In particular,
     z0 = (cut+L/2) % L makes Eq. (7) vanish without a constant shift.
@@ -120,41 +156,94 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     from gpu4pyscf.pbc.scf.slabdipole import slab_dipole_correction
     if not isinstance(mf, (rks.RKS, uks.UKS, krks.KRKS, kuks.KUKS)):
         raise NotImplementedError('Gate charge requires RKS/UKS/KRKS/KUKS')
-    length = _slab_length(mf.cell)
+    if isinstance(mf, GateFractionalOccupations) and not fractional_electrons:
+        raise ValueError('Cannot disable fractional_electrons on an existing object; '
+                         'create a new SCF object')
+    if fractional_electrons:
+        from gpu4pyscf.scf.soscf import _CIAH_SOSCF
+        if not isinstance(mf, (rks.RKS, krks.KRKS)):
+            raise NotImplementedError('Fractional gate electron counts require RKS/KRKS')
+        if isinstance(mf, _CIAH_SOSCF):
+            raise NotImplementedError('Second-order SCF with fractional gate occupations')
+        GateFractionalOccupations._gate_nelectron(mf)
+    else:
+        charge = mf.cell.charge
+        if not np.isfinite(charge) or charge != round(charge):
+            raise ValueError('Fractional gate charge requires fractional_electrons=True '
+                             'and an explicit cell.nelectron')
+        if mf.cell._nelectron is not None:
+            nelectron = float(mf.cell.nelectron)
+            if nelectron != round(nelectron):
+                raise ValueError('Fractional cell.nelectron requires fractional_electrons=True')
+            nkpts = len(mf.kpts) if mf.istype('KSCF') else 1
+            # Explicit N is per cell even in the legacy charge/nkpts mode.
+            if abs(nelectron + charge / nkpts - mf.cell.atom_charges().sum()) > 1e-9:
+                raise ValueError('cell.nelectron and cell.charge must match charge/nkpts '
+                                 'in legacy mode; use fractional_electrons=True '
+                                 'for per-cell charge')
+            if isinstance(mf, (rks.RKS, krks.KRKS)) and round(nelectron * nkpts) % 2:
+                raise ValueError('An odd restricted electron count requires '
+                                 'fractional_electrons=True')
+    length = _slab_length(mf.cell, allow_2d=True)
+    dimension = mf.cell.dimension
+    if getattr(mf, '_gate_dimension', dimension) != dimension:
+        raise ValueError('Changing gate dimensionality requires a new SCF object')
+    if dimension == 2:
+        _check_2d_gate(mf, mf.cell)
     if gate_side not in (-1, 1):
         raise ValueError('gate_side must be -1 or +1')
-    zgate = (.5*length if zgate is None else zgate) % length
-    dipole_width = DIPOLE_WIDTH_RATIO * length
-    if not 0 < dipole_width < length:
-        raise ValueError('Gate dipole width must satisfy 0 < width < cell length')
-    if not 0 < dipole_gap < length-dipole_width:
-        raise ValueError('Dipole gap must satisfy 0 < gap < cell length - dipole width')
-    # z_dip - gate_side*d_dip/2 = z_mono + gate_side*epsilon.
-    cut = (zgate + gate_side*(dipole_gap + dipole_width/2)) % length
-    if gate_side == -1:
+    zgate = .5*length if zgate is None else zgate
+    if dimension == 3:
+        zgate %= length
+    if dimension == 2:
+        # No dipole return region in 2D. Center the default barrier on the
+        # gate, independently of the 3D dipole placement parameters.
         if barrier_start is None:
-            barrier_start = (cut - dipole_width/2) % length
+            barrier_start = zgate - .05*length
         if barrier_end is None:
-            barrier_end = (barrier_start + .1*length) % length
+            barrier_end = zgate + .05*length
+        if barrier_width is None:
+            barrier_width = .01*length
     else:
-        if barrier_end is None:
-            barrier_end = (cut + dipole_width/2) % length
-        if barrier_start is None:
-            barrier_start = (barrier_end - .1*length) % length
-    if barrier_width is None:
-        barrier_width = dipole_width
+        dipole_width = DIPOLE_WIDTH_RATIO * length
+        if not 0 < dipole_width < length:
+            raise ValueError('Gate dipole width must satisfy 0 < width < cell length')
+        if not 0 < dipole_gap < length-dipole_width:
+            raise ValueError('Dipole gap must satisfy 0 < gap < cell length - dipole width')
+        # z_dip - gate_side*d_dip/2 = z_mono + gate_side*epsilon.
+        cut = (zgate + gate_side*(dipole_gap + dipole_width/2)) % length
+        if gate_side == -1:
+            if barrier_start is None:
+                barrier_start = (cut - dipole_width/2) % length
+            if barrier_end is None:
+                barrier_end = (barrier_start + .1*length) % length
+        else:
+            if barrier_end is None:
+                barrier_end = (cut + dipole_width/2) % length
+            if barrier_start is None:
+                barrier_start = (barrier_end - .1*length) % length
+        if barrier_width is None:
+            barrier_width = dipole_width
     if barrier:
-        span = (barrier_end - barrier_start) % length
-        # Unwrap relative to the barrier start so crossing z=0 is allowed.
-        gate_pos = (zgate - barrier_start) % length
+        if dimension == 3:
+            # Periodic barrier intervals can cross the cell boundary in 3D.
+            span = (barrier_end - barrier_start) % length
+            gate_pos = (zgate - barrier_start) % length
+        else:
+            span = barrier_end - barrier_start
+            gate_pos = zgate - barrier_start
         if not 0 < gate_pos < span:
             raise ValueError('Gate plane must lie strictly inside the barrier interval')
-        return_start = (gate_pos + gate_side*(dipole_gap + dipole_width/2)
-                        - dipole_width/2)
-        if return_start < -1e-10 or return_start + dipole_width > span + 1e-10:
-            raise ValueError('Barrier interval must cover the entire dipole return region')
+        if dimension == 3:
+            return_start = (gate_pos + gate_side*(dipole_gap + dipole_width/2)
+                            - dipole_width/2)
+            if return_start < -1e-10 or return_start + dipole_width > span + 1e-10:
+                raise ValueError('Barrier interval must cover the entire dipole return region')
     if not isinstance(mf, SlabGateCharge):
         lib.set_class(mf, (SlabGateCharge, mf.__class__))
+    if fractional_electrons and not isinstance(mf, GateFractionalOccupations):
+        lib.set_class(mf, (GateFractionalOccupations, mf.__class__))
+    mf._gate_dimension = dimension
     mf.gate_side = gate_side
     mf.zgate = zgate
     mf.barrier = barrier
@@ -163,6 +252,9 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     mf.barrier_height = barrier_height
     mf.barrier_width = barrier_width
     mf._gate_parameters(mf.cell)
+    if dimension == 2:
+        # dimension 2 needs no dipole correction.
+        return mf
     # Mark the compensating gate before checking the slab's net charge.
     # The dipole factory adds its mixin only if absent, and resets parameters.
     # z0 = (cut+L/2) % L vanish the dipole potential constant shift.
@@ -170,51 +262,89 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
                                   width=dipole_width, z0=(cut+length/2) % length)
 
 
-def _sheet_potential(z, zgate, length, area, charge, deriv=0):
+def _sheet_potential(z, zgate, length, area, charge, deriv=0, dimension=3):
+    '''Sheet electrostatic potential in the 3D or 2D reference.
+
+    The 2D branch uses the physical distance z-zgate, without periodic
+    wrapping or a compensating background, in PySCF's finite-part reference.
     '''
-    Electrostatic potential of a sheet and its neutralizing background.
-    '''
+    if dimension not in (2, 3):
+        raise NotImplementedError('Gate potential requires dimension=2 or 3')
     z = cp.asarray(z)
-    s = (z - zgate + length/2) % length - length/2
+    if dimension == 3:
+        s = (z - zgate + length/2) % length - length/2
+    else:
+        s = z - zgate
     factor = 2*np.pi*charge/area
+    if dimension == 2:
+        return -factor * (cp.sign(s) if deriv else cp.abs(s))
     if deriv:
         return factor * (-cp.sign(s) + 2*s/length)
     return factor * (-cp.abs(s) + s*s/length + length/6)
 
 
-def _barrier_potential(z, start, end, length, height, width, deriv=0):
-    '''
-    Periodic barrier with linear ramps inside its edges.
-    '''
+def _barrier_potential(z, start, end, length, height, width, deriv=0, dimension=3):
+    '''Barrier with linear ramps; periodic in 3D, an ordinary interval in 2D.'''
     z = cp.asarray(z)
-    t = (z - start) % length
-    span = (end - start) % length
+    if dimension == 3:
+        t = (z - start) % length
+        span = (end - start) % length
+    else:
+        t = z - start
+        span = end - start
     if width == 0:
         return cp.zeros_like(z) if deriv else height * ((t < span) & (t >= 0))
     if deriv:
-        return height/width * (cp.asarray(t < width, dtype=float)
+        return height/width * (cp.asarray((t >= 0) & (t < width), dtype=float)
                                - cp.asarray((t > span-width) & (t < span), dtype=float))
     return height * cp.maximum(0., cp.minimum(1., cp.minimum(t, span-t)/width))
+
+
+def _check_2d_gate(mf, cell):
+    from gpu4pyscf.pbc.scf.slabdipole import SlabDipoleCorrection
+    if isinstance(mf, SlabDipoleCorrection):
+        raise ValueError('A 2D gate cannot include a periodic dipole correction; '
+                         'create a new SCF object')
+    if cell.low_dim_ft_type == 'inf_vacuum':
+        raise NotImplementedError('2D gate requires the default truncated-Coulomb '
+                                  'reference, not inf_vacuum (often used for 0 or 1D). ')
 
 
 class SlabGateCharge:
     __name_mixin__ = 'Gate'
 
     _keys = {'gate_side', 'zgate', 'barrier', 'barrier_start',
-             'barrier_end', 'barrier_height', 'barrier_width'}
+             'barrier_end', 'barrier_height', 'barrier_width', '_gate_dimension'}
+
+    def reset(self, cell=None):
+        # Changing dimension would leave a 3D dipole mixin attached, or omit
+        # it for a 2D-to-3D transition. Require a new object in either case.
+        self._gate_parameters(self.cell if cell is None else cell)
+        return super().reset(cell)
 
     def _gate_parameters(self, cell):
-        length = _slab_length(cell)
-        zgate = self.zgate % length
-        start = self.barrier_start % length
-        end = self.barrier_end % length
+        if cell.dimension != self._gate_dimension:
+            raise ValueError('Changing gate dimensionality requires a new SCF object')
+        length = _slab_length(cell, allow_2d=True)
+        if cell.dimension == 3:
+            zgate = self.zgate % length
+            start = self.barrier_start % length
+            end = self.barrier_end % length
+        else:
+            _check_2d_gate(self, cell)
+            zgate, start, end = self.zgate, self.barrier_start, self.barrier_end
         width = self.barrier_width
         if self.barrier:
-            span = (end - start) % length
+            if cell.dimension == 3:
+                span = (end - start) % length
+            else:
+                span = end - start
             if span == 0 or not 0 <= width <= span/2:
                 raise ValueError('Barrier ramp width must lie between 0 and half the interval')
             if self.barrier_height < 0:
                 raise ValueError('Barrier height must be nonnegative')
+            if cell.dimension == 2 and not start < zgate < end:
+                raise ValueError('Gate plane must lie strictly inside the barrier interval')
         return length, zgate, start, end, self.barrier_height, width
 
     def _gate_matrices(self, cell, kpts):
@@ -233,8 +363,10 @@ class SlabGateCharge:
                 charge_matrix = cp.zeros(shape, dtype=ao_kpts.dtype)
                 barrier_matrix = cp.zeros_like(charge_matrix)
             z = coords[:, 2]
-            vc = -_sheet_potential(z, zgate, length, area, qc) # - for electron
-            vb = (_barrier_potential(z, start, end, length, height, width)
+            vc = -_sheet_potential(z, zgate, length, area, qc,
+                                   dimension=cell.dimension) # - for electron
+            vb = (_barrier_potential(z, start, end, length, height, width,
+                                     dimension=cell.dimension)
                   if self.barrier else cp.zeros_like(z))
             for k, ao in enumerate(ao_kpts):
                 charge_matrix[k] += ao.conj().T @ ((weight*vc)[:, None] * ao)
@@ -249,17 +381,22 @@ class SlabGateCharge:
         qc = -_slab_charge(self, cell)
         z = cell.atom_coords()[:, 2]
         egate = np.dot(cell.atom_charges(),
-                       _sheet_potential(z, zgate, length, area, qc).get())
-        egate += np.pi*qc**2*length/(6*area)
+                       _sheet_potential(z, zgate, length, area, qc,
+                                        dimension=cell.dimension).get())
+        # In the 2D finite-part reference phi(zgate)=0, hence no sheet self term.
+        if cell.dimension == 3:
+            egate += np.pi*qc**2*length/(6*area)
         ebarrier = 0.
         if self.barrier:
             # TODO: the following two terms may be modified.
             # if barrier interacts with atoms this will appear
             ebarrier = -np.dot(cell.atom_charges(),
-                               _barrier_potential(z, start, end, length, height, width).get())
+                               _barrier_potential(z, start, end, length, height, width,
+                                                  dimension=cell.dimension).get())
             # this term can be ignored for this is a constant.
             ebarrier -= qc * float(
-                _barrier_potential(zgate, start, end, length, height, width))
+                _barrier_potential(zgate, start, end, length, height, width,
+                                   dimension=cell.dimension))
         return float(egate), float(ebarrier)
 
     def get_hcore(self, cell=None, kpts=None, *, kpt=None):
@@ -313,3 +450,159 @@ class SlabGateCharge:
 
     def to_cpu(self):
         raise NotImplementedError('Gate charge is a GPU SCF addon')
+
+
+# TODO: this may be applied to normal SCF calculations as well.
+def _check_nelectron(cell):
+    if cell._nelectron is None:
+        raise ValueError('Set cell.nelectron explicitly for fractional gate occupations')
+    nelectron = float(cell.nelectron)
+    charge = float(cell.charge)
+    if not np.isfinite(nelectron) or nelectron < 0 or not np.isfinite(charge):
+        raise ValueError('Gate electron number must be finite and nonnegative')
+    if abs(nelectron + charge - cell.atom_charges().sum()) > 1e-9:
+        raise ValueError('cell.nelectron and cell.charge must match per primitive cell')
+    if cell.spin != 0:
+        raise NotImplementedError('Fractional gate occupations require spin=0 RKS/KRKS')
+    return nelectron
+
+
+def _zero_temperature_occ(mo_energy, nelectron):
+    '''
+    Global filling adapted from pbc.scf.khf.get_occ.
+    '''
+    energies = np.asarray(mo_energy)
+    occ = np.zeros_like(energies, dtype=float)
+    if nelectron == 0:
+        return occ
+    # Unlike khf.get_occ's N//2, include the partially occupied frontier state.
+    fermi = np.sort(energies.ravel())[int(np.ceil(nelectron / 2)) - 1]
+    # Replace the normal energy <= fermi -> 2 rule by sharing the remainder.
+    below = energies < fermi - 1e-9
+    frontier = abs(energies - fermi) <= 1e-9
+    occ[below] = 2
+    occ[frontier] = (nelectron - 2 * below.sum()) / frontier.sum()
+    return occ
+
+
+class GateFractionalOccupations:
+    '''
+    Opt-in, per-cell electron counting; ordinary SCF objects are unchanged.
+    '''
+    __name_mixin__ = 'Fractional'
+
+    def _gate_nelectron(self, cell=None):
+        nelectron = _check_nelectron(self.cell if cell is None else cell)
+        if getattr(self, 'mu0', None) is not None:
+            raise ValueError('Gate occupations fix the electron number; mu0 must be None')
+        if self.level_shift:
+            # TODO: how to do level shifting with fractional gate occupations?
+            raise NotImplementedError('Level shifting with fractional gate occupations')
+        return nelectron
+
+    def build(self, cell=None):
+        self._gate_nelectron(cell)
+        return super().build(cell)
+
+    def reset(self, cell=None):
+        self._gate_nelectron(cell)
+        return super().reset(cell)
+
+    def _get_gate_occ(self, mo_energy=None, mo_coeff=None):
+        '''
+        Restricted-spin adaptation of _SmearingSCF/_SmearingKSCF.get_occ.
+        '''
+        from gpu4pyscf.scf import smearing
+
+        nelectron = self._gate_nelectron()
+        nkpts = len(self.kpts) if self.istype('KSCF') else 1
+        if mo_energy is None:
+            mo_energy = self.mo_energy
+        energies = cp.asnumpy(mo_energy)
+        # Do not use Cell.tot_electrons(nkpts): it rounds the explicit count.
+        target = nelectron * nkpts
+        if not 0 <= target <= 2 * energies.size:
+            raise ValueError('Electron number exceeds the available orbital capacity')
+        sigma = getattr(self, 'sigma', None)
+        method = getattr(self, 'smearing_method', None)
+        if sigma and method:
+            if method.lower() == 'fermi':
+                f_occ = smearing._fermi_smearing_occ
+            elif method.lower() == 'gaussian':
+                f_occ = smearing._gaussian_smearing_occ
+            else:
+                raise ValueError('Gate smearing supports fermi or gaussian')
+            if target == 0 or target == 2 * energies.size:
+                occ = np.full_like(energies, 0. if target == 0 else 2., dtype=float)
+                self.entropy = 0.
+            else:
+                # Reuse the solver, replacing KRKS's (N+1)//2 by real N/2.
+                mu, occ = smearing._smearing_optimize(
+                    f_occ, energies.ravel(), target / 2, sigma)
+                self.entropy = 2 * self._get_entropy(energies.ravel(), occ, mu) / nkpts
+                occ = (2 * occ).reshape(energies.shape)
+                logger.info(self, '    sigma = %g  Optimized mu = %.12g  entropy = %.12g',
+                            sigma, mu, self.entropy)
+        else:
+            occ = _zero_temperature_occ(energies, target)
+            if hasattr(self, 'entropy'):
+                self.entropy = 0.
+                self.e_free = self.e_zero = None
+        if abs(occ.sum() / nkpts - nelectron) > 1e-9:
+            raise RuntimeError('Gate occupations do not conserve the electron number')
+        return cp.asarray(occ)
+
+    get_occ = _get_gate_occ
+
+    def get_init_guess(self, cell=None, key='minao', s1e=None):
+        from gpu4pyscf.scf import hf
+
+        if cell is None:
+            cell = self.cell
+        target = self._gate_nelectron(cell)
+        # Adapt pbc.scf.hf.RHF / khf.KRHF.get_init_guess: reuse the common
+        # dispatcher, but normalize to the real target rather than tot_electrons.
+        dm = hf.RHF.get_init_guess(self, cell, key)
+        if s1e is None:
+            s1e = self.get_ovlp(cell)
+        nkpts = len(self.kpts) if self.istype('KSCF') else 1
+        count = float(cp.einsum('...ij,...ji->...', dm, s1e).real.sum()) / nkpts
+        if count == 0:
+            if target != 0:
+                raise ValueError('Cannot normalize an empty gate initial density')
+            return dm
+
+        scale = target / count
+        dm *= scale
+        if hasattr(dm, 'mo_occ'):
+            dm.mo_occ *= scale
+        return dm
+
+    def _get_gate_grad(self, mo_coeff, mo_occ, fock=None):
+        self._gate_nelectron()
+        if fock is None:
+            dm = self.make_rdm1(mo_coeff, mo_occ)
+            fock = self.get_hcore() + self.get_veff(self.cell, dm)
+        f_mo = mo_coeff.swapaxes(-1, -2).conj() @ fock @ mo_coeff
+        # Normal hf/khf.get_grad only pairs occupied and empty orbitals.
+        # Occupation differences also include full-to-partial rotations.
+        gradient = f_mo * (mo_occ[..., None, :] - mo_occ[..., :, None])
+        i, j = cp.tril_indices(mo_occ.shape[-1], -1)
+        return gradient[..., i, j].ravel()
+
+    get_grad = _get_gate_grad
+
+    def get_fermi(self, mo_energy=None, mo_occ=None):
+        target = self._gate_nelectron()
+        if target == 0:
+            return -np.inf
+        if mo_energy is None:
+            mo_energy = self.mo_energy
+        nkpts = len(self.kpts) if self.istype('KSCF') else 1
+        # Unlike normal get_fermi's integer truncation, include the partial state.
+        # This remains a zero-temperature reference, not the smearing chemical potential.
+        index = int(np.ceil(target * nkpts / 2)) - 1
+        return float(cp.sort(cp.asarray(mo_energy).ravel())[index])
+
+    def newton(self):
+        raise NotImplementedError('Second-order SCF with fractional gate occupations')

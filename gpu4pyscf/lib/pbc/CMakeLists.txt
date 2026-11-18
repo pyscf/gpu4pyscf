@@ -20,6 +20,7 @@ add_library(pbc SHARED
 set_target_properties(pbc PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON)
+gpu4pyscf_configure_gpu_target(pbc)
 
 if (USE_SYCL)
   # icx rejects the project-wide -std=gnu99 (CMAKE_C_STANDARD 99) together
@@ -39,7 +40,7 @@ if (USE_SYCL)
   # other's device image (kernels then read uninitialised offsets). Give
   # libpbc its own name.
   target_compile_definitions(pbc PRIVATE s_rys_gxyz_offset=s_pbc_gxyz_offset)
-  target_link_libraries(pbc sycl_compat gsycl)
+  target_link_libraries(pbc PRIVATE sycl_compat gsycl)
 endif()
 
-target_link_libraries(pbc OpenMP::OpenMP_C)
+target_link_libraries(pbc PRIVATE OpenMP::OpenMP_C)

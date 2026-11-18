@@ -58,7 +58,7 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights,
     SHARED_ARRAY(double, zij);
     SHARED_ARRAY(double, aij);
     SHARED_ARRAY(double, theta_rr);
-    SHARED_ARRAY(double, swap, [8]);
+    SHARED_ARRAY(double, swap, [256 / MGRID_SUBGROUP_SIZE]);
 
     int *bas = envs.bas;
     double *env = envs.env;

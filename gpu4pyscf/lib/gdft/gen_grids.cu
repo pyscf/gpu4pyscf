@@ -395,6 +395,8 @@ typedef struct {
     double3 y;
     double3 z;
 } double9;
+// Nested braces so this compiles both where double3 is a plain aggregate (CUDA)
+// and where it is a vector class with constructors (HIP).
 __device__ constexpr double9 identity_3 = { {1,0,0}, {0,1,0}, {0,0,1} };
 __device__ double9 operator+(const double9& v1, const double9& v2) { return { v1.x + v2.x, v1.y + v2.y, v1.z + v2.z }; }
 __device__ double9 operator-(const double9& v1, const double9& v2) { return { v1.x - v2.x, v1.y - v2.y, v1.z - v2.z }; }

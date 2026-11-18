@@ -18,6 +18,7 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import cupy
+from gpu4pyscf.lib.cusolver import eigh_std
 import numpy
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
@@ -156,7 +157,8 @@ class _DFHF:
             if with_k and not self.only_dfj:
                 factor_l, factor_r = factorize_dm(dm, hermi)
                 if factor_r is None:
-                    factor_r = factor_l
+                    # Occupied spinors represent D = C_occ @ C_occ.conj().T.
+                    factor_r = factor_l.conj()
                 n2c, nocc = factor_l.shape[-2:]
                 nao = n2c // 2
                 factor_l = factor_l.reshape(-1, n2c, nocc)
@@ -403,14 +405,8 @@ class _DFHF:
                     n, exc, vxc = 0, 0, 0
                 else:
                     max_memory = self.max_memory - lib.current_memory()[0]
-                    if ni.collinear[0].lower() != 'm':
-                        raise NotImplementedError('Only multi-colinear GKS is implemented for DF')
                     if self.grids.coords is None:
-                        self.initialize_grids(mol, dm)
-                    
-                    if self.grids.coords is None:
-                        self.initialize_grids(mol, dm)
-                    
+                        rks.initialize_grids(self, mol, dm)
                     n, exc, vxc = ni.get_vxc(mol, self.grids, self.xc, dm,
                                              hermi=hermi, max_memory=max_memory)
                     log.debug('nelec by numeric integration = %s', n)
@@ -735,7 +731,7 @@ def decompose_rdm1_svd(dm, hermi=0):
             Contains orbol * eigenvalues (occupancies)
     '''
     if hermi == 1:
-        s, u = cp.linalg.eigh(dm)
+        s, u = eigh_std(dm)
         mask = abs(s) > 1e-8
         if dm.ndim == 2:
             c = u[:,mask]

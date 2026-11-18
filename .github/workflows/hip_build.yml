@@ -1,0 +1,50 @@
+name: HIP build
+
+on:
+  push:
+    branches: [ "master" ]
+    paths:
+      - "gpu4pyscf/lib/**"
+      - "setup.py"
+      - "MANIFEST.in"
+      - ".github/workflows/hip_build.yml"
+  pull_request:
+    branches: [ "master" ]
+    paths:
+      - "gpu4pyscf/lib/**"
+      - "setup.py"
+      - "MANIFEST.in"
+      - ".github/workflows/hip_build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: HIP (all architectures)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    container:
+      image: rocm/dev-ubuntu-24.04:7.2.4
+    env:
+      ROCM_PATH: /opt/rocm
+      USE_HIP: "1"
+      GPU_TARGET: all
+      CMAKE_GENERATOR: Ninja
+      # Override setup.py's default parallelism to fit runner memory.
+      CMAKE_BUILD_ARGS: "--parallel 2"
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install build dependencies
+      run: |
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          cmake ninja-build gfortran hipcub-dev python3-setuptools python3-wheel
+
+    - name: Build HIP libraries
+      run: python3 setup.py build_py

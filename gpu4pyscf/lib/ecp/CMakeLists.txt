@@ -59,3 +59,4 @@ endif()
 
 set_target_properties(gecp PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+gpu4pyscf_configure_gpu_target(gecp)

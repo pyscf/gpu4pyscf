@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest import mock
 import numpy as np
 import cupy as cp
 from pyscf.lib.parameters import BOHR
@@ -200,6 +201,33 @@ class KnownValues(unittest.TestCase):
         dm = mf.get_init_guess()
         slab_dipole_correction(mf)
         self.assertLess(mf.get_veff(dm=dm).edip, 1e-10)
+
+    @mock.patch('gpu4pyscf.pbc.scf.hf.ALLOWED_FFT_MESH_SIZE', 0)
+    def test_scf_2d_vs_3d(self):
+        for length, nz in ((60., 429), (80., 573)):
+            with self.subTest(length=length):
+                cell_2d = gto.M(
+                    a=np.diag([7., 8., length]), unit='Bohr', dimension=2,
+                    atom='F 2.1 2.8 0.; H 2.8 3.3 1.7',
+                    basis='gth-szv', pseudo='gth-pade',
+                    mesh=[49, 55, nz], precision=1e-10, verbose=0)
+                cell_3d = cell_2d.copy()
+                cell_3d.dimension = 3
+                cell_3d.build()
+                kpts = cell_2d.make_kpts([2, 1, 1])
+                mf_2d = dft.KRKS(cell_2d, kpts, xc='pbe')
+                mf_3d = slab_dipole_correction(
+                    dft.KRKS(cell_3d, kpts, xc='pbe'),
+                    cut=length/2, z0=0., width=1.)
+
+                dm0 = mf_2d.get_init_guess()
+                energy_2d = mf_2d.kernel(dm0=dm0.copy())
+                energy_3d = mf_3d.kernel(dm0=dm0.copy())
+                self.assertTrue(mf_2d.converged, '2D SCF did not converge')
+                self.assertTrue(mf_3d.converged, '3D SCF did not converge')
+                self.assertAlmostEqual(energy_2d, energy_3d, delta=1e-6)
+                cp.testing.assert_allclose(
+                    mf_2d.make_rdm1(), mf_3d.make_rdm1(), atol=1e-5, rtol=0)
 
 
 if __name__ == '__main__':

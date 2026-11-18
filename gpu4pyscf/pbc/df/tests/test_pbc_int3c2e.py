@@ -95,6 +95,28 @@ def test_int3c2e_kpoints():
     ref = int3c().reshape(dat.shape)
     assert abs(dat - ref).max() < 1e-8
 
+def test_int3c2e_off_gamma():
+    cell = pyscf.M(
+        atom='He .2 .3 .4; He 1.2 1.5 1.8',
+        a=np.diag([5., 5.5, 6.]), unit='Bohr',
+        basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+        precision=1e-10, verbose=0)
+    auxcell = cell.copy()
+    auxcell.basis = [[0, [1.1, 1.]], [1, [.7, 1.]]]
+    auxcell.build()
+    kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+    nkpts = len(kpts)
+    omega = -.5
+    dat = sr_aux_e2(cell, auxcell, omega, kpts).get()
+    builder = rsdf_builder._RSGDFBuilder(cell, auxcell, kpts).build(omega=abs(omega))
+    kernel = builder.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
+    ref = kernel().reshape(nkpts, nkpts, cell.nao, cell.nao, auxcell.nao)
+    np.testing.assert_allclose(dat, ref, atol=1e-8, rtol=0)
+
+    dat_j = sr_aux_e2(cell, auxcell, omega, kpts, j_only=True).get()
+    diag_idx = np.diag_indices(nkpts)
+    np.testing.assert_allclose(dat_j, ref[diag_idx], atol=1e-8, rtol=0)
+
 def test_minor_diffused_basis():
     cell = pyscf.M(
         atom='''H   1.3    .2       .3
@@ -193,7 +215,7 @@ def test_sr_int2c2e():
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvkmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
     cell = cell.copy()
@@ -225,7 +247,7 @@ C    D
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvkmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
 def test_contract_dm_gamma_point():
@@ -399,7 +421,7 @@ C    D
     batch_size = int(ref.shape[0] *.23)
     eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
     counts = int3c2e._count_ao_pairs(
-        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+        opt.cell, batches, cell.cart, np.prod(opt.bvkmesh))
     ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
@@ -415,14 +437,14 @@ C    D
         dat[:,:,p0:p1] = eval_j3c(aux_batch_id=i)
     assert abs(dat - ref).max() < 2e-10
 
-    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh=[3,1,2]).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvkmesh=[3,1,2]).build()
     eval_j3c = opt.int3c2e_evaluator()[0]
     ref = eval_j3c()
     batch_size = int(ref.shape[0] *.23)
 
     eval_j3c, batches = opt.int3c2e_evaluator(ao_pair_batch_size=batch_size)[:2]
     counts = int3c2e._count_ao_pairs(
-        opt.cell, batches, cell.cart, np.prod(opt.bvk_kmesh))
+        opt.cell, batches, cell.cart, np.prod(opt.bvkmesh))
     ao_pair_offsets = np.append(0, np.cumsum(counts))
     dat = cp.empty_like(ref)
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
@@ -526,7 +548,7 @@ def test_contract_auxvec_with_kpts():
                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
                     mesh=[15]*3, precision=1e-8, verbose=0)
     kpts = cell.make_kpts([3, 1, 1])
-    opt = int3c2e.SRInt3c2eOpt(cell, cell, omega=-.4, bvk_kmesh=[3, 1, 1]).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, cell, omega=-.4, bvkmesh=[3, 1, 1]).build()
     args = (cp.ones(opt.auxcell.nao),)
     gamma = opt.contract_auxvec(*args)
     gamma_batch = opt.contract_auxvec(*args, kpts=np.zeros((1, 3)))

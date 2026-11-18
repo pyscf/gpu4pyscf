@@ -154,7 +154,7 @@ def _rotate_mo(mo_coeff, mo_occ, v):
     nmo = mo_occ.shape[-1]
     nocc = get_nocc(mo_occ)
     kappa = -v.reshape((nmo - nocc, nocc)).T # The kappa from gdm is the upper right corner (nocc, nvir), the kappa from soscf is the lower left corner (nvir, nocc).
-    new_mo = apply_exp_U(mo_coeff, nocc, kappa)
+    new_mo = apply_exp_U(mo_coeff, nocc, nmo, kappa)
     return new_mo
 
 def _rotate_mo_uhf(mo_coeff, mo_occ, v):
@@ -166,7 +166,7 @@ def _rotate_mo_uhf(mo_coeff, mo_occ, v):
     vb = v[nocca * (nmo - nocca):]
     kappaa = -va.reshape((nmo - nocca, nocca)).T
     kappab = -vb.reshape((nmo - noccb, noccb)).T
-    new_mo = apply_exp_U(mo_coeff, (nocca, noccb), (kappaa, kappab))
+    new_mo = apply_exp_U(mo_coeff, (nocca, noccb), nmo, (kappaa, kappab))
     return new_mo
 
 def rhf_internal(mf, with_symmetry=False, verbose=None, return_status=False,

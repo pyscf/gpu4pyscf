@@ -23,6 +23,7 @@ from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.gto import pseudo
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -47,8 +48,14 @@ try:
     libmgrid.MG_init_constant.restype = ctypes.c_int
     libmgrid.ovlp_mask_estimation.restype = ctypes.c_int
     libmgrid.filter_supmol_bas.restype = ctypes.c_int
+    libmgrid.MG_warp_size.restype = ctypes.c_int
+    # Effective wavefront width of the running GPU (32 on RDNA/NVIDIA, 64 on
+    # GCN/CDNA), queried from the compiled library so the `pool` scratch sized below
+    # matches the per-arch device WARP_SIZE stride in a single multi-arch build.
+    WARP_SIZE = libmgrid.MG_warp_size() if libmgrid is not None else 32
 except OSError:
     libmgrid = None
+    WARP_SIZE = 32
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
@@ -57,7 +64,6 @@ PRIMBAS_COORD = 3
 LMAX = 4
 SHM_SIZE = shm_size - 1024
 del shm_size
-WARP_SIZE = 32
 
 DEBUG = False
 
@@ -696,7 +702,9 @@ def get_rho(ni, dm, kpts=None):
 
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
-    assert cell.dimension == 3
+    assert cell.dimension in (2, 3)
+    if cell.dimension == 2:
+        assert cell.low_dim_ft_type != 'inf_vacuum'
     Gv, (basex, basey, basez) = get_Gv_weights(cell, mesh)[:2]
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
@@ -741,6 +749,19 @@ _kernel_registery = {}
 def eval_vpplocG(cell, mesh, out=None):
     '''PRB, 58, 3641 Eq (5)
     '''
+    if cell.dimension == 2:
+        assert cell.low_dim_ft_type != 'inf_vacuum'
+        # Use the same truncated GTH kernel, including its finite G=0 term,
+        # as FFTDF. The 3D alpha correction below must not be added again.
+        Gv = cell.get_Gv(mesh)
+        vloc = cp.asarray(pseudo.get_vlocG(cell, Gv))
+        Gv = cp.asarray(Gv)
+        coords = cp.asarray(cell.atom_coords())
+        vlocG = ndarray(np.prod(mesh), dtype=np.complex128, buffer=out)
+        vlocG.fill(0)
+        for ia in range(cell.natm):
+            vlocG -= cp.exp(-1j * Gv.dot(coords[ia])) * vloc[ia]
+        return vlocG
     assert cell.dimension == 3
     Gv_bases = _get_Gv_bases(mesh, cell.reciprocal_vectors())
     coords = cp.asarray(cell.atom_coords())
@@ -1438,4 +1459,12 @@ class MultiGridNumInt(MultiGridNumIntBase):
     device = utils.device
 
     def to_cpu(self):
-        raise RuntimeError('Not available')
+        if not cp.cuda.runtime.is_hip:
+            raise RuntimeError('Not available')
+        # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
+        # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU
+        # bridge for the multigrid grid machinery, so return a lightweight CPU
+        # numint sufficient for that functional evaluation. Removable once a
+        # HIP libXC keeps XC on the GPU.
+        from pyscf.pbc.dft import numint as numint_cpu
+        return numint_cpu.NumInt()

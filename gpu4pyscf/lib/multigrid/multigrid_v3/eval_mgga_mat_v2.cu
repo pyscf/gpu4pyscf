@@ -39,7 +39,6 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
 
     SHARED_ARRAY(int, a_start);
     SHARED_ARRAY(int, a_stop);
-    SHARED_ARRAY(int, a_center);
     SHARED_ARRAY(int, b_start);
     SHARED_ARRAY(int, b_stop);
     SHARED_ARRAY(int, c_start);
@@ -61,7 +60,7 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
     SHARED_ARRAY(double, aj);
     SHARED_ARRAY(double, aij);
     SHARED_ARRAY(double, theta_rr);
-    SHARED_ARRAY(double, swap, [8]);
+    SHARED_ARRAY(double, swap, [256 / MGRID_SUBGROUP_SIZE]);
 
     int *bas = envs.bas;
     double *env = envs.env;

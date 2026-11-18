@@ -29,6 +29,8 @@ def gate_grad(grad, dm, kpts=None):
     '''
     Explicit d(E_gate + E_barrier)/dR at fixed AO density, Hartree/Bohr.
 
+    The gate charge, position, cell and integration grid remain fixed.
+
     AO center derivatives are minus spatial derivatives. The underlying SCF
     gradient already contains the Pulay term with corrected orbital energies.
     '''
@@ -54,9 +56,11 @@ def gate_grad(grad, dm, kpts=None):
         if vmat is None:
             vmat = cp.zeros((len(kpts), 3, cell.nao, cell.nao), dtype=ao_kpts.dtype)
         z = coords[:, 2]
-        v = -_sheet_potential(z, zgate, length, area, qc)
+        v = -_sheet_potential(z, zgate, length, area, qc,
+                              dimension=cell.dimension)
         if mf.barrier:
-            v += _barrier_potential(z, start, end, length, height, width)
+            v += _barrier_potential(z, start, end, length, height, width,
+                                    dimension=cell.dimension)
         for k, ao in enumerate(ao_kpts):
             aow = (weight*v)[:, None] * ao[0]
             # TODO: this can be optimized
@@ -65,9 +69,11 @@ def gate_grad(grad, dm, kpts=None):
     de = -contract_h1e_dm(cell, vmat, dm, hermi=1) / len(kpts)
 
     z = cell.atom_coords()[:, 2]
-    ionic = _sheet_potential(z, zgate, length, area, qc, deriv=1)
+    ionic = _sheet_potential(z, zgate, length, area, qc, deriv=1,
+                             dimension=cell.dimension)
     if mf.barrier:
-        ionic -= _barrier_potential(z, start, end, length, height, width, deriv=1)
+        ionic -= _barrier_potential(z, start, end, length, height, width, deriv=1,
+                                    dimension=cell.dimension)
     de[:, 2] += cell.atom_charges() * ionic.get()
     return de
 

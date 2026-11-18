@@ -498,13 +498,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
         b_a2b -= cp.einsum('ibja->iajb', eri_mo[:, nocc_a:, :nocc_b]) * hyb
 
     if isinstance(mf, scf.hf.KohnShamDFT):
-        from pyscf.dft import xc_deriv
-        from pyscf.dft import numint2c
-
-        ni0 = mf._numint
-        ni = numint2c.NumInt2C()
-        ni.collinear = 'mcol'
-        ni.collinear_samples = collinear_samples
+        ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.nlc or ni.libxc.is_nlc(mf.xc):
             logger.warn(
@@ -561,12 +555,12 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
             mem_now = lib.current_memory()[0]
             max_memory = max(2000, mf.max_memory * 0.8 - mem_now)
             # it should be optimized, which is the disadvantage of mc approach.
-            fxc = cache_xc_kernel_sf(ni0, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
+            fxc = cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
             p0, p1 = 0, 0  # the two parameters are used for counts the batch of grids.
-            opt = getattr(ni0, 'gdftopt', None)
+            opt = getattr(ni, 'gdftopt', None)
             if opt is None:
-                ni0.build(mol, mf.grids.coords)
-                opt = ni0.gdftopt
+                ni.build(mol, mf.grids.coords)
+                opt = ni.gdftopt
             _sorted_mol = opt._sorted_mol
             orbo_a = opt.sort_orbitals(orbo_a, axis=[0])
             orbv_a = opt.sort_orbitals(orbv_a, axis=[0])
@@ -574,7 +568,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
             orbv_b = opt.sort_orbitals(orbv_b, axis=[0])
             if xctype == 'LDA':
                 ao_deriv = 0
-                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
                     p1 += weight.shape[0]
                     wfxc = fxc[0, 0][..., p0:p1] * weight
@@ -604,7 +598,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
 
             elif xctype == 'GGA':
                 ao_deriv = 1
-                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
                     p1 += weight.shape[0]
                     wfxc = fxc[..., p0:p1] * weight
@@ -642,7 +636,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
 
             elif xctype == 'MGGA':
                 ao_deriv = 1
-                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
                     p1 += weight.shape[0]
                     wfxc = fxc[..., p0:p1] * weight

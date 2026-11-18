@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 import sys
 import numpy as np
 import scipy.linalg
@@ -435,7 +436,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         if problem_type == 'eigenvalue':
             if gram_schmidt:
                 ''' solve ax=xΩ '''
-                omega, x = cp.linalg.eigh(sub_A)
+                omega, x = eigh_std(sub_A)
                 x = _align_eigh_phase_SYCL(sub_A, x)
             else:
                 ''' solve ax=sxΩ 
@@ -458,7 +459,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 x = math_helper.solve_AX_Xla_B(sub_A, omega_shift, sub_rhs)
                 # # alternative solver
                 # x = scipy.linalg.solve_sylvester(sub_A.get(), -cp.diag(omega_shift).get(), sub_rhs.get())
-                # e, u = cp.linalg.eigh(sub_A) 
+                # e, u = eigh_std(sub_A)
                 # print('e ', e)
                 # print('omega_shift', omega_shift)
                 # for shift in omega_shift:

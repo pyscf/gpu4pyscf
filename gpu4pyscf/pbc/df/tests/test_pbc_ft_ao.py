@@ -22,7 +22,7 @@ from pyscf.pbc import gto as pgto
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from pyscf.pbc.lib.kpts_helper import kk_adapted_iter
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -104,12 +104,12 @@ class KnownValues(unittest.TestCase):
         kpti, kptj = kpti_kptj = np.random.random((2,3))
         Gv = cell.get_Gv([3]*3)
         kpts = kptj.reshape(1,3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         ft_opt = ft_ao_gpu.FTOpt(cell, kmesh)
         ft_opt.permutation_symmetry = False
-        ft_kern = ft_opt.gen_ft_kernel()
+        ft_kern = ft_opt.gen_ft_kernel(kpts=kpts)
         q = kptj - kpti
-        dat = ft_kern(Gv, q=q, kpts=kpts).get()
+        dat = ft_kern(Gv, q=q).get()
         ref = ft_ao_cpu.ft_aopair(cell, Gv, kpti_kptj=kpti_kptj)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
@@ -148,7 +148,7 @@ class KnownValues(unittest.TestCase):
             dat[p0:p1] = eval_ft(Gv, i)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 12)
 
-        ft_opt = ft_ao_gpu.FTOpt(cell, bvk_kmesh=[3,1,2]).build()
+        ft_opt = ft_ao_gpu.FTOpt(cell, bvkmesh=[3,1,2]).build()
         eval_ft, ao_pair_offsets = ft_opt.ft_evaluator()
         ref = eval_ft(Gv)
 
@@ -238,16 +238,39 @@ class KnownValues(unittest.TestCase):
         kpt_iters = list(kk_adapted_iter(cell, kpts))
 
         opt = ft_ao_gpu.FTOpt(cell, kmesh)
-        ft_kern = opt.gen_ft_kernel()
+        ft_kern = opt.gen_ft_kernel(kpts=kpts)
+        conj_kernel = opt.gen_ft_kernel(kpts=-kpts)
 
         Gv = cell.get_Gv([3,2,5])
         for kpt, ki_idx, kj_idx, self_conj in kpt_iters:
-            dat = ft_kern(Gv, kpt, kpts, kj_idx)
-            dat_conj = ft_kern(-Gv, -kpt, -kpts, kj_idx)
+            dat = ft_kern(Gv, kpt, kj_idx=kj_idx)
+            dat_conj = conj_kernel(-Gv, -kpt, kj_idx=kj_idx)
             self.assertAlmostEqual(abs(dat_conj-dat.conj()).max().get(), 0, 9)
 
             ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=kpt, kptjs=kpts)
             self.assertAlmostEqual(abs(ref-dat.get()).max(), 0, 9)
+
+    def test_gen_ft_kernel_off_gamma(self):
+        cell = pgto.M(
+            atom='He .2 .3 .4; He 1.2 1.5 1.8',
+            a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]], unit='Bohr',
+            basis=[[0, [1., 1.]], [1, [.6, 1.]]],
+            precision=1e-10, verbose=0)
+        kpts = cell.make_kpts([2, 3, 1], with_gamma_point=False)
+        bvkmesh = kpts_to_bvkmesh(cell, kpts)
+        np.testing.assert_array_equal(bvkmesh, [4, 3, 1])
+        opt = ft_ao_gpu.FTOpt(cell, bvkmesh)
+
+        cached_kernel = opt.gen_ft_kernel(kpts=kpts)
+        Gv = cell.get_Gv([3, 3, 3])
+
+        for q, ki_idx, kj_idx, self_conj in kk_adapted_iter(cell, kpts):
+            ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=q, kptjs=kpts)
+            dat = cached_kernel(Gv, q, kj_idx=kj_idx)
+            np.testing.assert_allclose(dat.get(), ref, atol=1e-9, rtol=0)
+            # The original sampling object is accepted for compatibility.
+            dat = cached_kernel(Gv, q, kpts, kj_idx)
+            np.testing.assert_allclose(dat.get(), ref, atol=1e-9, rtol=0)
 
     def test_ft_ao_strain_deriv(self):
         from gpu4pyscf.gto.mole import SortedGTO
@@ -329,6 +352,9 @@ class KnownValues(unittest.TestCase):
         cached = kernel(Gv)
         assert cached.shape == (2, len(Gv), cell_he.nao, cell_he.nao)
         cp.testing.assert_allclose(cached, kernel(Gv, kpts=kpts), atol=1e-12, rtol=0)
+        # Sampling cannot be replaced after kernel creation.
+        with self.assertRaises(AssertionError):
+            kernel(Gv, kpts=-kpts)
 
     def test_fourier_nonzero_single_and_batch(self):
         kpts = cell_he.make_kpts([3, 1, 1])
@@ -352,15 +378,14 @@ class KnownValues(unittest.TestCase):
         result = kernel(Gv)
         assert result.shape == reference.shape
         cp.testing.assert_allclose(result, reference, atol=1e-12, rtol=0)
-        assert kernel(Gv, kpts=np.zeros(3)).shape == reference.shape
-        assert kernel(Gv, kpts=np.zeros((1, 3))).shape == (1,) + reference.shape
+
+        kernel = opt.gen_ft_kernel(kpts=np.zeros(3))
+        cp.testing.assert_allclose(kernel(Gv), reference, atol=1e-12, rtol=0)
 
         kernel = opt.gen_ft_kernel(kpts=np.zeros((1, 3)))
         result = kernel(Gv)
         assert result.shape == (1,) + reference.shape
         cp.testing.assert_allclose(result[0], reference, atol=1e-12, rtol=0)
-        assert kernel(Gv, kpts=np.zeros(3)).shape == reference.shape
-        assert kernel(Gv, kpts=np.zeros((1, 3))).shape == (1,) + reference.shape
 
     def test_ft_aopair_kpts_with_KPoints(self):
         kpts = cell_he.make_kpts([3, 1, 1])

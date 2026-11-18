@@ -12,20 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2
+cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2 and the first-class HIP language
+project (gpu4pyscf C CXX)
 
-# Backend selection — mutually exclusive (like ExchCXX)
 option(USE_SYCL "Using SYCL backend" OFF)
-option(USE_CUDA "Using CUDA backend" ON)
+option(USE_HIP "Using HIP backend" OFF)
 
-if(USE_SYCL AND USE_CUDA)
-  message(FATAL_ERROR "SYCL and CUDA backends are mutually exclusive; choose one")
+if(USE_HIP)
+  # Set explicit targets before compiler detection so builds do not need a GPU.
+  if(DEFINED GPU_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "${GPU_ARCHITECTURES}")
+  endif()
+  enable_language(HIP)
 endif()
-if(NOT USE_SYCL AND NOT USE_CUDA)
-  message(FATAL_ERROR "Must select at least one backend: USE_SYCL=ON or USE_CUDA=ON")
-endif()
-
-project (gpu4pyscf C CXX Fortran)
 
 set(CMAKE_C_STANDARD "99")
 set(CMAKE_CXX_STANDARD 17)
@@ -130,9 +129,37 @@ if (USE_SYCL)
   # Every subdirectory links the sycl_compat INTERFACE target, which injects
   # gsycl/ at the front of the include path (no raw <cuda*> includes remain
   # outside gsycl/ itself -- sources use gpu_compat.h instead).
-endif()
-
-if (NOT USE_SYCL)
+elseif(USE_HIP)
+  # AMD GPU targets. Honour the explicit override set above or a pre-set
+  # CMAKE_HIP_ARCHITECTURES; otherwise auto-detect the installed AMD GPU(s)
+  # with rocm_agent_enumerator. No specific gfx arch is hard-coded.
+  if(NOT CMAKE_HIP_ARCHITECTURES)
+    find_program(ROCM_AGENT_ENUMERATOR NAMES rocm_agent_enumerator
+                 HINTS ENV ROCM_PATH ENV HIP_PATH ENV ROCM_HOME PATH_SUFFIXES bin)
+    if(ROCM_AGENT_ENUMERATOR)
+      execute_process(COMMAND ${ROCM_AGENT_ENUMERATOR}
+                      OUTPUT_VARIABLE _rocm_agents
+                      OUTPUT_STRIP_TRAILING_WHITESPACE)
+      string(REPLACE "\n" ";" _rocm_agents "${_rocm_agents}")
+      set(_hip_archs "")
+      foreach(_agent ${_rocm_agents})
+        # skip the host/CPU agent (gfx000) and any blank lines
+        if(_agent MATCHES "^gfx" AND NOT _agent STREQUAL "gfx000")
+          list(APPEND _hip_archs "${_agent}")
+        endif()
+      endforeach()
+      list(REMOVE_DUPLICATES _hip_archs)
+      set(CMAKE_HIP_ARCHITECTURES "${_hip_archs}")
+    endif()
+  endif()
+  if(NOT CMAKE_HIP_ARCHITECTURES)
+    message(FATAL_ERROR
+      "USE_HIP is ON but no AMD GPU architecture could be determined. "
+      "Pass -DGPU_ARCHITECTURES=gfxXXXX (e.g. gfx90a, gfx942, gfx1100, gfx1151) "
+      "or set CMAKE_HIP_ARCHITECTURES.")
+  endif()
+  message("HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
+else()
   # Set architectures before enabling CUDA, which otherwise initializes its own default.
   # For better performance on A100, the option
   # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
@@ -214,12 +241,79 @@ include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/deps/include)
 link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 
+if(USE_HIP)
+  # Place the CUDA->HIP compatibility stubs (cuda_runtime.h / cuda.h) ahead of
+  # the ROCm headers, and force-include the shim so the CUDA-authored .cu
+  # kernels build unmodified with hipcc.
+  include_directories(BEFORE ${PROJECT_SOURCE_DIR}/hip_compat)
+  # -Wno-register: the CUDA sources use the C++17-removed `register` keyword.
+  # gpu_runtime.h: CUDA->HIP shim (force-included). warp_size.h: per-arch WARP_SIZE
+  # + the host effective-warp-size helper (force-included after the shim, so the
+  # HIP runtime it uses is already available).
+  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/hip_compat/gpu_runtime.h -include ${PROJECT_SOURCE_DIR}/warp_size.h")
+
+  # Wavefront width is derived per device sub-compilation from the target
+  # __gfxNNN__ macro in the force-included warp_size.h (64 on GCN/CDNA, 32 on
+  # RDNA+), so a single fat binary is native on every listed arch with no global
+  # flag -- host-side sizing uses gpu4pyscf_effective_warp_size() (runtime
+  # warpSize), so the host pass' fallback of 32 is harmless. We only classify the
+  # arches here to decide the gint nrys>=7 cap: that kernel's stack frame exceeds
+  # the amdgpu limit under wave64, so it is dropped whenever any wave64 arch is in
+  # the build (a mixed binary also caps it for its wave32 arch(es) -- a niche
+  # high-angular-momentum path).
+  set(_wave64_archs "")
+  foreach(_a IN LISTS CMAKE_HIP_ARCHITECTURES)
+    if(_a MATCHES "^gfx[89]")   # gfx8xx / gfx9xx = GCN/CDNA = wave64
+      list(APPEND _wave64_archs "${_a}")
+    endif()
+  endforeach()
+
+  # Manual override: force wave64 even on RDNA to validate the wave64 code path on
+  # an RDNA dev GPU (e.g. gfx1151). -mwavefrontsize64 switches RDNA into wave64
+  # mode; -DWARP_SIZE=64 overrides the per-arch derivation for every sub-compile.
+  option(USE_WAVE64 "Force wave64 wavefronts (RDNA dev-validation of wave64 kernels)" OFF)
+  if(USE_WAVE64)
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mwavefrontsize64 -DWARP_SIZE=64 -DGPU4PYSCF_WAVE64=1")
+    message("USE_WAVE64: forcing wave64 (-mwavefrontsize64 -DWARP_SIZE=64)")
+  elseif(_wave64_archs)
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -DGPU4PYSCF_WAVE64=1")
+    message("Wavefront: per-arch native (wave64 arch(es): ${_wave64_archs}; gint nrys>=7 capped)")
+  else()
+    message("Wavefront: per-arch native (all RDNA/wave32: ${CMAKE_HIP_ARCHITECTURES})")
+  endif()
+endif()
+
+# Configure a GPU library target for the HIP backend: compile the target's .cu
+# sources as HIP and apply separable compilation + arch. On CUDA builds this is
+# a no-op, so each sub-project keeps its existing CUDA_* target properties
+# unchanged (those are simply inert when USE_HIP is ON).
+function(gpu4pyscf_configure_gpu_target target)
+  if(USE_HIP)
+    get_target_property(_gpu_srcs ${target} SOURCES)
+    foreach(_src ${_gpu_srcs})
+      if(_src MATCHES "\\.cu$")
+        set_source_files_properties(${_src} PROPERTIES LANGUAGE HIP)
+      endif()
+    endforeach()
+    # Relocatable device code so __device__/__constant__ globals declared in one
+    # translation unit and used in another link across the library (the CUDA
+    # build relies on CUDA_SEPARABLE_COMPILATION for the same reason). Set the
+    # flag explicitly at compile and link time -- HIP_SEPARABLE_COMPILATION alone
+    # does not reliably add -fgpu-rdc at compile time.
+    set_target_properties(${target} PROPERTIES
+      HIP_SEPARABLE_COMPILATION ON
+      HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}")
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)
+    target_link_options(${target} PRIVATE -fgpu-rdc --hip-link)
+  endif()
+endfunction()
+
 #list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 
-option(ENABLE_MULTIGRID_V2 "Enable multigrid-v2 kernels" ON)
+option(ENABLE_MULTIGRID_V2 "Enable multigrid-v2 kernels" OFF)
 option(ENABLE_FP32_MULTIGRID "Enable experimental FP32 multigrid-v2 collocation kernels" OFF)
 
 if(USE_SYCL)
@@ -277,7 +371,11 @@ if(USE_SYCL)
     set(cutlass_SOURCE_DIR ${SOURCE_DIR})
   endif(BUILD_CUTLASS)
 else()
-  option(BUILD_CUTLASS "Using cutlass" ON)
+  if(USE_HIP)
+    option(BUILD_CUTLASS "Using cutlass" OFF)
+  else()
+    option(BUILD_CUTLASS "Using cutlass" ON)
+  endif()
   if(BUILD_CUTLASS)
     include(ExternalProject)
     ExternalProject_Add(cutlass
@@ -303,7 +401,11 @@ if(USE_SYCL)
   option(BUILD_LIBXC "Build libxc for CUDA backend (XC functionals)" OFF)
 else()
   option(BUILD_EXCHCXX "Build ExchCXX for SYCL backend (XC functionals)" OFF)
-  option(BUILD_LIBXC "Build libxc for CUDA backend (XC functionals)" ON)
+  if(USE_HIP)
+    option(BUILD_LIBXC "Using libxc for DFT" OFF)
+  else()
+    option(BUILD_LIBXC "Using libxc for DFT" ON)
+  endif()
 endif()
 
 # Enforce correct combination based on backend. FORCE is the safety net for
@@ -315,7 +417,6 @@ if(USE_SYCL)
   message(STATUS "SYCL backend: BUILD_EXCHCXX=ON, BUILD_LIBXC=OFF")
 else()
   set(BUILD_EXCHCXX OFF CACHE BOOL "Build ExchCXX for SYCL" FORCE)
-  # BUILD_LIBXC keeps user/default value (ON)
 endif()
 
 # ExchCXX setup (SYCL only) — must run before gdft which links ExchCXX::ExchCXX
@@ -401,6 +502,7 @@ add_subdirectory(sem)
 
 option(BUILD_SOLVENT "Using SMD solvent" ON)
 if(BUILD_SOLVENT)
+  enable_language(Fortran)
   add_subdirectory(solvent)
 endif()
 
