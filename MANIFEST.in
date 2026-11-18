@@ -1,5 +1,8 @@
 include MANIFEST.in
 include README.md setup.py CHANGELOG AUTHORS LICENSE NOTICE
+recursive-include gpu4pyscf *.c *.cpp *.cu *.cuh *.h *.hpp
+recursive-include gpu4pyscf/lib CMakeLists.txt *.cmake
+include gpu4pyscf/lib/libxc_prune.patch
 
 global-exclude *.py[cod]
 global-exclude *~
