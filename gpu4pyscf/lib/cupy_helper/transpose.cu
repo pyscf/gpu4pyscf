@@ -23,7 +23,7 @@ static __global__
 void _transpose_dsum(double *a, int n, int counts, int hermi)
 {
     setup_context();
-    SHARED_ARRAY(double, block, [THREADS][THREADS]);
+    DECLARE_SHARED(double, block, [THREADS][THREADS]);
     if(blockIdx_x > blockIdx_y){
         return;
     }
@@ -71,8 +71,8 @@ static __global__
 void _transpose_zsum(double *a, int n, int counts, int hermi)
 {
     setup_context();
-    SHARED_ARRAY(double, blockR, [THREADS][THREADS]);
-    SHARED_ARRAY(double, blockI, [THREADS][THREADS]);
+    DECLARE_SHARED(double, blockR, [THREADS][THREADS]);
+    DECLARE_SHARED(double, blockI, [THREADS][THREADS]);
     if(blockIdx_x > blockIdx_y){
         return;
     }

@@ -35,16 +35,16 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs,
                             int *gout_stride_lookup)
 {
     setup_context();
-    SHARED_ARRAY(int, shl_pair0);
-    SHARED_ARRAY(int, shl_pair1);
-    SHARED_ARRAY(int, nbas);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(int, nroots);
-    SHARED_ARRAY(int, nao);
-    SHARED_ARRAY(int, iprim);
-    SHARED_ARRAY(int, jprim);
-    SHARED_ARRAY(int, gout_stride);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, nbas);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, gout_stride);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sp_block_id = blockIdx_x;

@@ -24,18 +24,18 @@
 // sp_threads (constexpr) in the enclosing kernel.
 #define KERNEL_SETUP() \
     setup_context(); \
-    SHARED_ARRAY(int, sp_block_id); \
-    SHARED_ARRAY(int, shl_pair0); \
-    SHARED_ARRAY(int, shl_pair1); \
-    SHARED_ARRAY(int, li); \
-    SHARED_ARRAY(int, lj); \
-    SHARED_ARRAY(int, iprim); \
-    SHARED_ARRAY(int, jprim); \
-    SHARED_ARRAY(int, nao); \
-    SHARED_ARRAY(int, gout_stride); \
-    SHARED_ARRAY(int, nsp_per_block); \
-    SHARED_ARRAY(int, img_max); \
-    SHARED_ARRAY(int, img_counts, [sp_threads]); \
+    DECLARE_SHARED(int, sp_block_id); \
+    DECLARE_SHARED(int, shl_pair0); \
+    DECLARE_SHARED(int, shl_pair1); \
+    DECLARE_SHARED(int, li); \
+    DECLARE_SHARED(int, lj); \
+    DECLARE_SHARED(int, iprim); \
+    DECLARE_SHARED(int, jprim); \
+    DECLARE_SHARED(int, nao); \
+    DECLARE_SHARED(int, gout_stride); \
+    DECLARE_SHARED(int, nsp_per_block); \
+    DECLARE_SHARED(int, img_max); \
+    DECLARE_SHARED(int, img_counts, [sp_threads]); \
     DYNAMIC_SHARED_PTR(double, shared_memory); \
     int thread_id = threadIdx_x; \
     int Gv_id_in_block = thread_id % nGv_per_block; \

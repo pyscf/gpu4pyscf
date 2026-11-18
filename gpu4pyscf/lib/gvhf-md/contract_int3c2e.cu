@@ -37,21 +37,6 @@
 #define WARP_FULL_MASK 0xffffffffU
 #endif
 
-// Shared-var packs for the unrolled int3c2e kernels (file scope: both
-// __shared__ and group-local storage require namespace-scope types).
-struct Int3c2eSharedVars {
-    int shl_pair0, shl_pair1, order, nf3ij, nf3ijkl, kprim;
-    int nsp_per_block, Rt_stride;
-    double rk[3];
-    double ak, ck;
-};
-
-struct AuxvecSharedVars {
-    int shl_pair0, shl_pair1, ksh0, ksh1;
-    int order, nf3ij, nf3ijkl;
-    int nsp_per_block, Rt_stride;
-};
-
 template <int RT_SIZE> __device__ inline
 void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
                int nsq_per_block, int gout_id, int gout_stride)
@@ -364,21 +349,17 @@ void unrolled_contract_int3c2e(RysIntEnvVars& envs, JKMatrix& jk,
 {
     setup_context();
 
-    // Pack small shared vars into a single group_local_memory allocation
-    // instead of 9 separate ones
-    SHARED_ARRAY(Int3c2eSharedVars, sv);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, order);
+    DECLARE_SHARED(int, nf3ij);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, nsp_per_block);
+    DECLARE_SHARED(int, Rt_stride);
+    DECLARE_SHARED(double, rk, [3]);
+    DECLARE_SHARED(double, ak);
+    DECLARE_SHARED(double, ck);
     DYNAMIC_SHARED_PTR(double, shared_memory);
-    int &shl_pair0 = sv.shl_pair0;
-    int &shl_pair1 = sv.shl_pair1;
-    int &order     = sv.order;
-    int &nf3ij     = sv.nf3ij;
-    int &nf3ijkl   = sv.nf3ijkl;
-    int &kprim     = sv.kprim;
-    int &nsp_per_block = sv.nsp_per_block;
-    int &Rt_stride = sv.Rt_stride;
-    double (&rk)[3] = sv.rk;
-    double &ak     = sv.ak;
-    double &ck     = sv.ck;
     constexpr int lk = LK;
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
     constexpr int nf3k = nfk * (lk + 3) / 3;
@@ -606,17 +587,15 @@ void unroll_contract_auxvec(RysIntEnvVars& envs, JKMatrix& jk,
 {
     setup_context();
 
-    SHARED_ARRAY(AuxvecSharedVars, sv);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, ksh0);
+    DECLARE_SHARED(int, ksh1);
+    DECLARE_SHARED(int, order);
+    DECLARE_SHARED(int, nf3ij);
+    DECLARE_SHARED(int, nsp_per_block);
+    DECLARE_SHARED(int, Rt_stride);
     DYNAMIC_SHARED_PTR(double, shared_memory);
-    int &shl_pair0 = sv.shl_pair0;
-    int &shl_pair1 = sv.shl_pair1;
-    int &ksh0       = sv.ksh0;
-    int &ksh1       = sv.ksh1;
-    int &order      = sv.order;
-    int &nf3ij      = sv.nf3ij;
-    int &nf3ijkl    = sv.nf3ijkl;
-    int &nsp_per_block = sv.nsp_per_block;
-    int &Rt_stride  = sv.Rt_stride;
     constexpr int lk = LK;
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
     constexpr int nf3k = nfk * (lk + 3) / 3;

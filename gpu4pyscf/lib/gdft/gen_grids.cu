@@ -45,14 +45,14 @@ void GDFTgrid_weight_kernel(double *weight, const double *coords, const double *
     int tx = threadIdx_x;
     int ty = threadIdx_y;
 
-    SHARED_ARRAY(double, atom_xi, [TILE]);
-    SHARED_ARRAY(double, atom_yi, [TILE]);
-    SHARED_ARRAY(double, atom_zi, [TILE]);
-    SHARED_ARRAY(double, atom_xj, [TILE]);
-    SHARED_ARRAY(double, atom_yj, [TILE]);
-    SHARED_ARRAY(double, atom_zj, [TILE]);
-    SHARED_ARRAY(double, a_smem, [if_radii_adjust ? (TILE*TILE) : 1]); // CUDA doesn't allow zero-sized array
-    SHARED_ARRAY(double, dij_smem, [TILE*TILE]);
+    DECLARE_SHARED(double, atom_xi, [TILE]);
+    DECLARE_SHARED(double, atom_yi, [TILE]);
+    DECLARE_SHARED(double, atom_zi, [TILE]);
+    DECLARE_SHARED(double, atom_xj, [TILE]);
+    DECLARE_SHARED(double, atom_yj, [TILE]);
+    DECLARE_SHARED(double, atom_zj, [TILE]);
+    DECLARE_SHARED(double, a_smem, [if_radii_adjust ? (TILE*TILE) : 1]); // CUDA doesn't allow zero-sized array
+    DECLARE_SHARED(double, dij_smem, [TILE*TILE]);
     int thread_id = ty * TILE + tx;
     int grid_id = blockIdx_x * TILE*TILE + thread_id;
     double xg = 0.0;
@@ -799,9 +799,9 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
     setup_context();
     const int grid_id = global_x;
     const int tx = threadIdx_x;
-    SHARED_ARRAY(double, x_atom, [NATOM_PER_BLOCK]);
-    SHARED_ARRAY(double, y_atom, [NATOM_PER_BLOCK]);
-    SHARED_ARRAY(double, z_atom, [NATOM_PER_BLOCK]);
+    DECLARE_SHARED(double, x_atom, [NATOM_PER_BLOCK]);
+    DECLARE_SHARED(double, y_atom, [NATOM_PER_BLOCK]);
+    DECLARE_SHARED(double, z_atom, [NATOM_PER_BLOCK]);
 
     double xg = coords[grid_id];
     double yg = coords[grid_id + ngrids];

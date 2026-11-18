@@ -468,7 +468,7 @@ void supmol_non_trivial_pairs_kernel(int64_t *supmol_bas_ij, int64_t *bas_ij_idx
     setup_context();
     int thread_id = threadIdx_x;
     int pair_id = global_x;
-    SHARED_ARRAY(int8_t, img_cache, [THREADS*batch_size]);
+    DECLARE_SHARED(int8_t, img_cache, [THREADS*batch_size]);
     if (pair_id >= npairs) {
         return;
     }

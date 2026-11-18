@@ -37,16 +37,16 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   uint32_t *pool, int *head, int reserved_shm_size)
 {
     setup_context();
-    SHARED_ARRAY(int, ntasks);
-    SHARED_ARRAY(int, pair_ij);
-    SHARED_ARRAY(int, pair_kl0);
-    SHARED_ARRAY(int, ish);
-    SHARED_ARRAY(int, jsh);
-    SHARED_ARRAY(double, ri, [3]);
-    SHARED_ARRAY(double, rjri, [3]);
-    SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_ARRAY(int, expi);
-    SHARED_ARRAY(int, expj);
+    DECLARE_SHARED(int, ntasks);
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, pair_kl0);
+    DECLARE_SHARED(int, ish);
+    DECLARE_SHARED(int, jsh);
+    DECLARE_SHARED(double, ri, [3]);
+    DECLARE_SHARED(double, rjri, [3]);
+    DECLARE_SHARED(double, aij_cache, [2]);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
@@ -509,16 +509,16 @@ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             uint32_t *pool, int *head, int reserved_shm_size)
 {
     setup_context();
-    SHARED_ARRAY(int, ntasks);
-    SHARED_ARRAY(int, pair_ij);
-    SHARED_ARRAY(int, pair_kl0);
-    SHARED_ARRAY(int, ish);
-    SHARED_ARRAY(int, jsh);
-    SHARED_ARRAY(double, ri, [3]);
-    SHARED_ARRAY(double, rjri, [3]);
-    SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_ARRAY(int, expi);
-    SHARED_ARRAY(int, expj);
+    DECLARE_SHARED(int, ntasks);
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, pair_kl0);
+    DECLARE_SHARED(int, ish);
+    DECLARE_SHARED(int, jsh);
+    DECLARE_SHARED(double, ri, [3]);
+    DECLARE_SHARED(double, rjri, [3]);
+    DECLARE_SHARED(double, aij_cache, [2]);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;

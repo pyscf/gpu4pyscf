@@ -121,7 +121,7 @@ struct gpu4pyscf_dim3 {
 
 
 // Static shared / local memory declaration, arrays and scalars alike.
-// Usage: SHARED_ARRAY(double, tile, [16][16]);  SHARED_ARRAY(int, ntasks);
+// Usage: DECLARE_SHARED(double, tile, [16][16]);  DECLARE_SHARED(int, ntasks);
 // CUDA: __shared__ double tile[16][16];          __shared__ int ntasks;
 // SYCL: work_group_static storage (sycl_ext_oneapi_work_group_static), not
 // group_local_memory: when a TU also uses get_work_group_scratch_memory, DPC++
@@ -139,13 +139,13 @@ template <typename T> struct _wgs_raw { alignas(T) unsigned char bytes[sizeof(T)
 template <typename T, typename Tag>
 sycl::ext::oneapi::experimental::work_group_static<_wgs_raw<T>> _wgs_storage;
 }
-#define SHARED_ARRAY(type, name, ...) \
+#define DECLARE_SHARED(type, name, ...) \
     using _smt_##name##_t = type __VA_ARGS__; \
     struct _wgs_tag_##name {}; \
     _smt_##name##_t& name = *reinterpret_cast<_smt_##name##_t*>( \
         (&gpu4pyscf_detail::_wgs_storage<_smt_##name##_t, _wgs_tag_##name>)->bytes)
 #else
-#define SHARED_ARRAY(type, name, ...) __shared__ type name __VA_ARGS__
+#define DECLARE_SHARED(type, name, ...) __shared__ type name __VA_ARGS__
 #endif
 
 // Dynamically-sized shared / local memory. SYCL uses the
@@ -155,7 +155,7 @@ sycl::ext::oneapi::experimental::work_group_static<_wgs_raw<T>> _wgs_storage;
 // (see launch_kernel below, via nd_launch + launch_config). No explicit
 // pointer is passed through the kernel signature on the SYCL side.
 // Static shared uses sycl_ext_oneapi_work_group_static storage (see
-// SHARED_ARRAY above), likewise with no kernel arg.
+// DECLARE_SHARED above), likewise with no kernel arg.
 // CUDA keeps the extern __shared__ idiom, so kernel signatures stay
 // identical with no shared-memory argument on either side.
 // Inside the kernel, after setup_context():

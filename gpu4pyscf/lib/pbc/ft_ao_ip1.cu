@@ -412,7 +412,7 @@ void ft_ao_deriv_kernel(double *grad, double *sigma, double *auxvec, double2 *dm
                         double *Gv, RysIntEnvVars envs, int nGv)
 {
     setup_context();
-    SHARED_ARRAY(double, g, [(AUXL+2)*FT_AO_THREADS * 6]);
+    DECLARE_SHARED(double, g, [(AUXL+2)*FT_AO_THREADS * 6]);
     int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_block_id = gridDim_y - blockIdx_y - 1;
     int Gv_block_id = blockIdx_x;

@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 // CUDA and SYCL headers plus the backend-agnostic kernel macros (setup_context,
-// SHARED_ARRAY, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*), for every C++ TU that
+// DECLARE_SHARED, DYNAMIC_SHARED_PTR, LAUNCH_KERNEL_*), for every C++ TU that
 // includes vhf.cuh (kernels, drivers, and shared .cuh helpers like
 // rys_contract_k.cuh). The plain C files that include it only need the structs.
 #ifdef __cplusplus

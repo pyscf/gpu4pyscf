@@ -60,15 +60,15 @@ void build_jk_2c2e_kernel(
 
     // Allocate shared memory. 
     // In PM6, the maximum number of orbitals per atom is 9 (s, p, d).
-    SHARED_ARRAY(double, s_PAA, [81]);
-    SHARED_ARRAY(double, s_PBB, [81]);
-    SHARED_ARRAY(double, s_PAB, [81]);
-    SHARED_ARRAY(double, s_PBA, [81]);
+    DECLARE_SHARED(double, s_PAA, [81]);
+    DECLARE_SHARED(double, s_PBB, [81]);
+    DECLARE_SHARED(double, s_PAB, [81]);
+    DECLARE_SHARED(double, s_PBA, [81]);
 
-    SHARED_ARRAY(double, s_JAA, [81]);
-    SHARED_ARRAY(double, s_JBB, [81]);
-    SHARED_ARRAY(double, s_KAB, [81]);
-    SHARED_ARRAY(double, s_KBA, [81]);
+    DECLARE_SHARED(double, s_JAA, [81]);
+    DECLARE_SHARED(double, s_JBB, [81]);
+    DECLARE_SHARED(double, s_KAB, [81]);
+    DECLARE_SHARED(double, s_KBA, [81]);
 
     int tid = threadIdx_x;
     int bdim = blockDim_x;
@@ -243,9 +243,9 @@ void build_jk_1c2e_kernel(
     int offset = aoslice[A * 2]; 
     int nao_A = natorb[A];
     
-    SHARED_ARRAY(double, s_P, [81]);
-    SHARED_ARRAY(double, s_J, [81]);
-    SHARED_ARRAY(double, s_K, [81]);
+    DECLARE_SHARED(double, s_P, [81]);
+    DECLARE_SHARED(double, s_J, [81]);
+    DECLARE_SHARED(double, s_K, [81]);
     
     for (int i = threadIdx_x; i < 81; i += blockDim_x) {
         s_J[i] = 0.0;

@@ -38,7 +38,7 @@ __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
     setup_context();
-    SHARED_ARRAY(double, g, [(AUXL+1)*FT_AO_THREADS * 6]);
+    DECLARE_SHARED(double, g, [(AUXL+1)*FT_AO_THREADS * 6]);
     int sh_block_id = gridDim_y - blockIdx_y - 1;
     int Gv_block_id = blockIdx_x;
     int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
@@ -201,19 +201,19 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                       int *head, int nbatches_shl_pair)
 {
     setup_context();
-    SHARED_ARRAY(int, Gv_block_id);
-    SHARED_ARRAY(int, sp_block_id);
-    SHARED_ARRAY(int, shl_pair0);
-    SHARED_ARRAY(int, shl_pair1);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(int, iprim);
-    SHARED_ARRAY(int, jprim);
-    SHARED_ARRAY(int, nao);
-    SHARED_ARRAY(int, gout_stride);
-    SHARED_ARRAY(int, nsp_per_block);
-    SHARED_ARRAY(int, img_max);
-    SHARED_ARRAY(int, img_counts, [WARPS]);
+    DECLARE_SHARED(int, Gv_block_id);
+    DECLARE_SHARED(int, sp_block_id);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nsp_per_block);
+    DECLARE_SHARED(int, img_max);
+    DECLARE_SHARED(int, img_counts, [WARPS]);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     constexpr int nGv_per_block = WARP_SIZE;

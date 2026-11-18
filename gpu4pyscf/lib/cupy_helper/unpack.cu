@@ -152,7 +152,7 @@ void d_t_kernel(double *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
-    SHARED_ARRAY(double, buf, [RBLKSIZE][CBLKSIZE+1]);
+    DECLARE_SHARED(double, buf, [RBLKSIZE][CBLKSIZE+1]);
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];
@@ -194,7 +194,7 @@ void z_d_t_kernel(double2 *out, size_t out_stride,
     size_t Npairs = npairs;
     size_t Nao = nao;
 
-    SHARED_ARRAY(double2, buf, [RBLKSIZE][CBLKSIZE+1]);
+    DECLARE_SHARED(double2, buf, [RBLKSIZE][CBLKSIZE+1]);
     if (pair_start+tx < npairs) {
         for (int k = ty; k < min(RBLKSIZE, daux-aux_start); k += STRIDE) {
             buf[k][tx] = cderi[(aux_start+k)*Npairs+pair_start+tx];

@@ -36,16 +36,16 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
                                uint32_t *pool, double *dd_pool, int *head, int nf)
 {
     setup_context();
-    SHARED_ARRAY(int, ntasks);
-    SHARED_ARRAY(int, pair_ij);
-    SHARED_ARRAY(int, pair_kl0);
-    SHARED_ARRAY(int, ish);
-    SHARED_ARRAY(int, jsh);
-    SHARED_ARRAY(double, rjri, [3]);
-    SHARED_ARRAY(double, aij_cache, [4]);
-    SHARED_ARRAY(int, ri);
-    SHARED_ARRAY(int, expi);
-    SHARED_ARRAY(int, expj);
+    DECLARE_SHARED(int, ntasks);
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, pair_kl0);
+    DECLARE_SHARED(int, ish);
+    DECLARE_SHARED(int, jsh);
+    DECLARE_SHARED(double, rjri, [3]);
+    DECLARE_SHARED(double, aij_cache, [4]);
+    DECLARE_SHARED(int, ri);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;
@@ -634,16 +634,16 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                               uint32_t *pool, double *dd_pool, int *head, int nf)
 {
     setup_context();
-    SHARED_ARRAY(int, ntasks);
-    SHARED_ARRAY(int, pair_ij);
-    SHARED_ARRAY(int, pair_kl0);
-    SHARED_ARRAY(int, ish);
-    SHARED_ARRAY(int, jsh);
-    SHARED_ARRAY(double, rjri, [3]);
-    SHARED_ARRAY(double, aij_cache, [4]);
-    SHARED_ARRAY(int, ri);
-    SHARED_ARRAY(int, expi);
-    SHARED_ARRAY(int, expj);
+    DECLARE_SHARED(int, ntasks);
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, pair_kl0);
+    DECLARE_SHARED(int, ish);
+    DECLARE_SHARED(int, jsh);
+    DECLARE_SHARED(double, rjri, [3]);
+    DECLARE_SHARED(double, aij_cache, [4]);
+    DECLARE_SHARED(int, ri);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int sq_id = threadIdx_x;

@@ -36,17 +36,17 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
     setup_context();
     int sp_block_id = blockIdx_x;
     int thread_id = threadIdx_x;
-    SHARED_ARRAY(int, shl_pair0);
-    SHARED_ARRAY(int, shl_pair1);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(int, nroots);
-    SHARED_ARRAY(int, iprim);
-    SHARED_ARRAY(int, jprim);
-    SHARED_ARRAY(int, g_size);
-    SHARED_ARRAY(int, nao);
-    SHARED_ARRAY(int, gout_stride);
-    SHARED_ARRAY(int, nsp_per_block);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, g_size);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nsp_per_block);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int *bas = envs.bas;

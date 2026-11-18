@@ -118,24 +118,24 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
                         uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     setup_context();
-    SHARED_ARRAY(int, shl_pair0);
-    SHARED_ARRAY(int, shl_pair1);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(int, lk);
-    SHARED_ARRAY(int, nroots);
-    SHARED_ARRAY(int, iprim);
-    SHARED_ARRAY(int, jprim);
-    SHARED_ARRAY(int, kprim);
-    SHARED_ARRAY(int, g_size);
-    SHARED_ARRAY(int, gout_stride);
-    SHARED_ARRAY(int, nst_per_block);
-    SHARED_ARRAY(int, dm_id0);
-    SHARED_ARRAY(double, xk);
-    SHARED_ARRAY(double, yk);
-    SHARED_ARRAY(double, zk);
-    SHARED_ARRAY(int, expk);
-    SHARED_ARRAY(int, ck);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, lk);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, g_size);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nst_per_block);
+    DECLARE_SHARED(int, dm_id0);
+    DECLARE_SHARED(double, xk);
+    DECLARE_SHARED(double, yk);
+    DECLARE_SHARED(double, zk);
+    DECLARE_SHARED(int, expk);
+    DECLARE_SHARED(int, ck);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;
@@ -370,19 +370,19 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, int n_dm, int n
 {
     // For better load balance, consume blocks in the reversed order
     setup_context();
-    SHARED_ARRAY(int, shl_pair0);
-    SHARED_ARRAY(int, shl_pair1);
-    SHARED_ARRAY(int, ksh0);
-    SHARED_ARRAY(int, ksh1);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(int, lk);
-    SHARED_ARRAY(int, nroots);
-    SHARED_ARRAY(int, iprim);
-    SHARED_ARRAY(int, jprim);
-    SHARED_ARRAY(int, kprim);
-    SHARED_ARRAY(int, gout_stride);
-    SHARED_ARRAY(int, nst_per_block);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, ksh0);
+    DECLARE_SHARED(int, ksh1);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, lk);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nst_per_block);
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
     int thread_id = threadIdx_x;

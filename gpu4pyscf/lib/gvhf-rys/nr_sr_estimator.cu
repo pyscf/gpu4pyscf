@@ -105,15 +105,15 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
     int thread_id = threadIdx_x;
     int threads = blockDim_x;
     DYNAMIC_SHARED_PTR(float, shared_memory);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(int, iprim);
-    SHARED_ARRAY(int, jprim);
-    SHARED_ARRAY(int, nroots);
-    SHARED_ARRAY(int, stride_k);
-    SHARED_ARRAY(int, g_size);
-    SHARED_ARRAY(int, gout_stride);
-    SHARED_ARRAY(int, nsp_per_block);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, stride_k);
+    DECLARE_SHARED(int, g_size);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nsp_per_block);
 
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];

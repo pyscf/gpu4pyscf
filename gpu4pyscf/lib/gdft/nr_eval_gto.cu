@@ -66,7 +66,7 @@ static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     setup_context();
-    SHARED_ARRAY(double, gridx_cache, [NG_PER_BLOCK*3]);
+    DECLARE_SHARED(double, gridx_cache, [NG_PER_BLOCK*3]);
 
     int grid_block_id = blockIdx_x;
     int grid_start = grid_block_id * block_size;
@@ -132,7 +132,7 @@ static void _screen_index_legacy(int *non0shl_idx, double cutoff, int ang, int n
     setup_context();
     int grid_id = global_x;
     int ish = blockIdx_y + bas_offset;
-    SHARED_ARRAY(int, sdata, [NG_PER_BLOCK]);
+    DECLARE_SHARED(int, sdata, [NG_PER_BLOCK]);
 
     const bool active = grid_id < ngrids;
 

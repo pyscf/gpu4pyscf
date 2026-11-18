@@ -979,10 +979,10 @@ __global__ void calc_local_rep_core_kernel(
     int e_i = ele_id[ni]; // Element index
     int e_j = ele_id[nj]; // Element index
 
-    SHARED_ARRAY(double, s_ri, [22]);
-    SHARED_ARRAY(double, s_rep, [491]);
-    SHARED_ARRAY(double, s_core, [20]);
-    SHARED_ARRAY(double, s_gab);
+    DECLARE_SHARED(double, s_ri, [22]);
+    DECLARE_SHARED(double, s_rep, [491]);
+    DECLARE_SHARED(double, s_core, [20]);
+    DECLARE_SHARED(double, s_gab);
 
     int tid = threadIdx_x;
 
@@ -1179,10 +1179,10 @@ __global__ void global_transform_kernel(
     int limij = ii * (ii + 1) / 2;
     int limkl = kk * (kk + 1) / 2;
 
-    SHARED_ARRAY(double, s_R, [45][45]);
-    SHARED_ARRAY(double, s_V, [45][45]);
-    SHARED_ARRAY(double, s_L_A, [45]);
-    SHARED_ARRAY(double, s_L_B, [45]);
+    DECLARE_SHARED(double, s_R, [45][45]);
+    DECLARE_SHARED(double, s_V, [45][45]);
+    DECLARE_SHARED(double, s_L_A, [45]);
+    DECLARE_SHARED(double, s_L_B, [45]);
 
     if (tid == 0) {
         double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];

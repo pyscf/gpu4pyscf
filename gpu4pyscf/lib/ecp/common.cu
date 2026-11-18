@@ -120,7 +120,7 @@ void cache_fac(double *fx, double *ri){
 __device__
 void block_reduce(double val, double *d_out) {
     setup_context();
-    SHARED_ARRAY(double, sdata, [THREADS]);
+    DECLARE_SHARED(double, sdata, [THREADS]);
     const unsigned int tid = threadIdx_x;
 
     sdata[tid] = val;

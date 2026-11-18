@@ -40,7 +40,7 @@ void type2_cart_ipipv(double *gctr,
 
     constexpr int nfi2_max = (AO_LMAX+3)*(AO_LMAX+4)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    SHARED_ARRAY(double, buf1, [nfi2_max*nfj_max]);
+    DECLARE_SHARED(double, buf1, [nfi2_max*nfj_max]);
     type2_cart_kernel<2,0>(
         buf1, LI+2, LJ, LC,
         ish, jsh, ksh,
@@ -113,7 +113,7 @@ void type2_cart_ipvip(double *gctr,
 
     constexpr int nfi1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj1_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
-    SHARED_ARRAY(double, buf1, [nfi1_max*nfj1_max]);
+    DECLARE_SHARED(double, buf1, [nfi1_max*nfj1_max]);
     type2_cart_kernel<1,1>(
         buf1, LI+1, LJ+1, LC,
         ish, jsh, ksh,

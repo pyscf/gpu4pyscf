@@ -148,7 +148,7 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
     setup_context();
     const int i = global_x;
 
-    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
+    DECLARE_SHARED(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -275,7 +275,7 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
     setup_context();
     const int i = global_x;
 
-    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
+    DECLARE_SHARED(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -368,7 +368,7 @@ static void _pcm_left_multiply_dS_one_atom(double* __restrict__ output, const do
     setup_context();
     const int i = global_x;
 
-    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
+    DECLARE_SHARED(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -462,7 +462,7 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
     setup_context();
     const int i = global_x;
 
-    SHARED_ARRAY(double, sum_shared, [THREADS * THREADS]);
+    DECLARE_SHARED(double, sum_shared, [THREADS * THREADS]);
     if (i >= n) {
         return;
     }
@@ -646,7 +646,7 @@ static void _pcm_contract_d2S_offdiagonal(double* __restrict__ output,
     const int i_atom = blockIdx_x;
     const int j_atom = blockIdx_y;
 
-    SHARED_ARRAY(double, sum_shared, [n_thread_per_block * n_thread_per_block]);
+    DECLARE_SHARED(double, sum_shared, [n_thread_per_block * n_thread_per_block]);
     const int i_grid_start = gridslice[i_atom * 2 + 0];
     const int i_grid_end = gridslice[i_atom * 2 + 1];
     const int j_grid_start = gridslice[j_atom * 2 + 0];

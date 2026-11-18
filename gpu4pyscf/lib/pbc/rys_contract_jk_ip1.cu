@@ -38,20 +38,20 @@ void rys_ejk_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         int reserved_shm_size)
 {
     setup_context();
-    SHARED_ARRAY(int, ntasks);
-    SHARED_ARRAY(int, pair_ij);
-    SHARED_ARRAY(int, pair_kl0);
-    SHARED_ARRAY(int, cell_j);
-    SHARED_ARRAY(int, ish_cell0);
-    SHARED_ARRAY(int, jsh_cell0);
-    SHARED_ARRAY(int, i0);
-    SHARED_ARRAY(int, j0);
-    SHARED_ARRAY(double, ri, [3]);
-    SHARED_ARRAY(double, rj, [3]);
-    SHARED_ARRAY(double, rjri, [3]);
-    SHARED_ARRAY(double, aij_cache, [2]);
-    SHARED_ARRAY(int, expi);
-    SHARED_ARRAY(int, expj);
+    DECLARE_SHARED(int, ntasks);
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, pair_kl0);
+    DECLARE_SHARED(int, cell_j);
+    DECLARE_SHARED(int, ish_cell0);
+    DECLARE_SHARED(int, jsh_cell0);
+    DECLARE_SHARED(int, i0);
+    DECLARE_SHARED(int, j0);
+    DECLARE_SHARED(double, ri, [3]);
+    DECLARE_SHARED(double, rj, [3]);
+    DECLARE_SHARED(double, rjri, [3]);
+    DECLARE_SHARED(double, aij_cache, [2]);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
     DYNAMIC_SHARED_PTR(double, shared_memory);
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;

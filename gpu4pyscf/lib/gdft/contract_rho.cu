@@ -37,7 +37,7 @@ void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, 
 {
     setup_context();
     int grid_id = global_x;
-    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    DECLARE_SHARED(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
     int ix = threadIdx_x;
     int iy = threadIdx_y;
 
@@ -66,7 +66,7 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
 {
     setup_context();
     int grid_id = global_x;
-    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    DECLARE_SHARED(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
     int ix = threadIdx_x;
     int iy = threadIdx_y;
     const bool active = grid_id < ngrids;
@@ -103,7 +103,7 @@ void GDFTcontract_rho_gga_kernel(double *rho, double *bra, double *ket, int ngri
 {
     setup_context();
     const int grid_id = global_x;
-    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    DECLARE_SHARED(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
     const int ix = threadIdx_x;
     const int iy = threadIdx_y;
     const bool active = grid_id < ngrids;
@@ -152,7 +152,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
 {
     setup_context();
     const int grid_id = global_x;
-    SHARED_ARRAY(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
+    DECLARE_SHARED(double, buf, [BLKSIZEX*(BLKSIZEY+1)]);
     const int ix = threadIdx_x;
     const int iy = threadIdx_y;
     const bool active = grid_id < ngrids;

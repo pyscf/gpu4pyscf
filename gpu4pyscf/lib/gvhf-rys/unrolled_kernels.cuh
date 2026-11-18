@@ -35,15 +35,15 @@
     int gout_id = threadIdx_y; \
     int _nsq_per_block = blockDim_x; \
     uint32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH; \
-    SHARED_ARRAY(int, ntasks); \
-    SHARED_ARRAY(int, pair_ij); \
-    SHARED_ARRAY(int, pair_kl0); \
-    SHARED_ARRAY(int, ish); \
-    SHARED_ARRAY(int, jsh); \
-    SHARED_ARRAY(double, ri, [3]); \
-    SHARED_ARRAY(double, rjri, [3]); \
-    SHARED_ARRAY(int, expi); \
-    SHARED_ARRAY(int, expj); \
+    DECLARE_SHARED(int, ntasks); \
+    DECLARE_SHARED(int, pair_ij); \
+    DECLARE_SHARED(int, pair_kl0); \
+    DECLARE_SHARED(int, ish); \
+    DECLARE_SHARED(int, jsh); \
+    DECLARE_SHARED(double, ri, [3]); \
+    DECLARE_SHARED(double, rjri, [3]); \
+    DECLARE_SHARED(int, expi); \
+    DECLARE_SHARED(int, expj); \
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
 #define LAUNCH_JKMATRIX_KERNEL(KERNEL) { \
@@ -68,15 +68,15 @@
     int gout_id = threadIdx_y; \
     int _nsq_per_block = blockDim_x; \
     int worker_id = blockIdx_x; \
-    SHARED_ARRAY(int, ntasks); \
-    SHARED_ARRAY(int, pair_ij); \
-    SHARED_ARRAY(int, pair_kl0); \
-    SHARED_ARRAY(int, ish); \
-    SHARED_ARRAY(int, jsh); \
-    SHARED_ARRAY(double, ri, [3]); \
-    SHARED_ARRAY(double, rjri, [3]); \
-    SHARED_ARRAY(int, expi); \
-    SHARED_ARRAY(int, expj); \
+    DECLARE_SHARED(int, ntasks); \
+    DECLARE_SHARED(int, pair_ij); \
+    DECLARE_SHARED(int, pair_kl0); \
+    DECLARE_SHARED(int, ish); \
+    DECLARE_SHARED(int, jsh); \
+    DECLARE_SHARED(double, ri, [3]); \
+    DECLARE_SHARED(double, rjri, [3]); \
+    DECLARE_SHARED(int, expi); \
+    DECLARE_SHARED(int, expj); \
     DYNAMIC_SHARED_PTR(double, shared_memory);
 
 #define LAUNCH_JKENERGY_KERNEL(KERNEL) { \

@@ -51,7 +51,7 @@ void type1_cart_unrolled_kernel(double *gctr,
     constexpr int LIJ1 = LI+LJ+1;
     constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
 
-    SHARED_ARRAY(double, rad_ang, [LIJ3]);
+    DECLARE_SHARED(double, rad_ang, [LIJ3]);
     set_shared_memory(rad_ang, LIJ3);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
@@ -66,7 +66,7 @@ void type1_cart_unrolled_kernel(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
 
-            SHARED_ARRAY(double, rad_all, [LIJ1*LIJ1]);
+            DECLARE_SHARED(double, rad_all, [LIJ1*LIJ1]);
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
@@ -262,14 +262,14 @@ void type1_cart_ip1(double *gctr,
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    SHARED_ARRAY(double, gctr_smem, [nfi*nfj*3]);
+    DECLARE_SHARED(double, gctr_smem, [nfi*nfj*3]);
     for (int ij = threadIdx_x; ij < nfi*nfj*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
     constexpr int nfi1 = (LI+2)*(LI+3)/2;
-    SHARED_ARRAY(double, buf, [nfi1*nfj]);
+    DECLARE_SHARED(double, buf, [nfi1*nfj]);
 
     type1_cart_unrolled_kernel<1,0,LI+1,LJ>(
         buf, ish, jsh, ksh,
@@ -324,7 +324,7 @@ void type1_cart_ip1_general(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
-    SHARED_ARRAY(double, gctr_smem, [NF_MAX*NF_MAX*3]);
+    DECLARE_SHARED(double, gctr_smem, [NF_MAX*NF_MAX*3]);
     for (int ij = threadIdx_x; ij < NF_MAX*NF_MAX*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
@@ -332,7 +332,7 @@ void type1_cart_ip1_general(double *gctr,
 
     constexpr int nfi_max = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int nfj_max = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    SHARED_ARRAY(double, buf, [nfi_max*nfj_max]);
+    DECLARE_SHARED(double, buf, [nfi_max*nfj_max]);
 
     type1_cart_kernel<1,0>(
         buf, LI+1, LJ,

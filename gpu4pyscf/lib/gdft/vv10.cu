@@ -34,8 +34,8 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
 {
     setup_context();
     const int i = global_x;
-    SHARED_ARRAY(double3, shared_omega_kappa_rhow_j, [NG_PER_BLOCK]);
-    SHARED_ARRAY(double3, shared_r_j, [NG_PER_BLOCK]);
+    DECLARE_SHARED(double3, shared_omega_kappa_rhow_j, [NG_PER_BLOCK]);
+    DECLARE_SHARED(double3, shared_r_j, [NG_PER_BLOCK]);
 
     const bool active = i < ngrids;
 

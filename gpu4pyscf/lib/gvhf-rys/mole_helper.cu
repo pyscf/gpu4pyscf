@@ -36,7 +36,7 @@
     int col0      = blockIdx_x * COL_BLKSIZE; \
     int c_bas_id  = blockIdx_y; \
     int count     = blockIdx_z; \
-    SHARED_ARRAY(int, p_ao_offsets, [NPRIM_MAX]);
+    DECLARE_SHARED(int, p_ao_offsets, [NPRIM_MAX]);
 
 #define SETUP_KET_KERNEL() \
     setup_context(); \
@@ -44,7 +44,7 @@
     int ty       = threadIdx_y; \
     int row0     = blockIdx_x * ROW_BLKSIZE; \
     int c_bas_id = blockIdx_y * TILE_X + tx; \
-    SHARED_ARRAY(int, p_ao_offsets, [NPRIM_MAX*TILE_X]);
+    DECLARE_SHARED(int, p_ao_offsets, [NPRIM_MAX*TILE_X]);
 
 #define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
     auto _blocks = make_grid(nbatch_col_, nbas_, counts_); \

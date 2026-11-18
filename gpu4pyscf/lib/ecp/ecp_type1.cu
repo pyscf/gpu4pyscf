@@ -252,7 +252,7 @@ void type1_cart(double *gctr,
     }
 
     constexpr int LIJ1 = LI+LJ+1;
-    SHARED_ARRAY(double, rad_ang, [LIJ1*LIJ1*LIJ1]);
+    DECLARE_SHARED(double, rad_ang, [LIJ1*LIJ1*LIJ1]);
     set_shared_memory(rad_ang, LIJ1*LIJ1*LIJ1);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
@@ -265,7 +265,7 @@ void type1_cart(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai[ip] + aj[jp];
 
-            SHARED_ARRAY(double, rad_all, [LIJ1*LIJ1]);
+            DECLARE_SHARED(double, rad_all, [LIJ1*LIJ1]);
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 

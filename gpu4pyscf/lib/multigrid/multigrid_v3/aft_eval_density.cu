@@ -47,15 +47,15 @@ void orth_aopair_dm_kernel(double *outR, double *outI, double *dm,
     int tile_id = blockIdx_x % ntiles;
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
-    SHARED_ARRAY(double, gx, [NGV_PER_BLOCK*3*2*LMAX1*LMAX1]);
-    SHARED_ARRAY(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]);
-    SHARED_ARRAY(int, mesh_start, [3]);
-    SHARED_ARRAY(int, ri);
-    SHARED_ARRAY(int, rj);
-    SHARED_ARRAY(size_t, ij_offset);
-    SHARED_ARRAY(double, fac);
-    SHARED_ARRAY(double, ai);
-    SHARED_ARRAY(double, aj);
+    DECLARE_SHARED(double, gx, [NGV_PER_BLOCK*3*2*LMAX1*LMAX1]);
+    DECLARE_SHARED(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]);
+    DECLARE_SHARED(int, mesh_start, [3]);
+    DECLARE_SHARED(int, ri);
+    DECLARE_SHARED(int, rj);
+    DECLARE_SHARED(size_t, ij_offset);
+    DECLARE_SHARED(double, fac);
+    DECLARE_SHARED(double, ai);
+    DECLARE_SHARED(double, aj);
 
     int *bas = envs.bas;
     int nbas = envs.nbas;

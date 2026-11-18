@@ -43,12 +43,12 @@ void eval_tau_kernel(double *rho_c, double *tau_c, double *dm, PBCIntEnvVars env
     int ty = thread_id / nsp_per_block;
     int segment_id = blockIdx_x / atom_mesh_a_max;
     int a_index_id = blockIdx_x - atom_mesh_a_max * segment_id;
-    SHARED_ARRAY(int, a_index);
-    SHARED_ARRAY(int, b_start);
-    SHARED_ARRAY(int, b_stop);
-    SHARED_ARRAY(int, c_start);
-    SHARED_ARRAY(int, c_stop);
-    SHARED_ARRAY(int, c_index1);
+    DECLARE_SHARED(int, a_index);
+    DECLARE_SHARED(int, b_start);
+    DECLARE_SHARED(int, b_stop);
+    DECLARE_SHARED(int, c_start);
+    DECLARE_SHARED(int, c_stop);
+    DECLARE_SHARED(int, c_index1);
     DYNAMIC_SHARED_PTR(double, rho_cache);
 
     float2 x_range = atom_frac_ranges[       segment_id];

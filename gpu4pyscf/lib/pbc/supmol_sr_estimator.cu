@@ -196,8 +196,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     int stride_k = stride_j * (lj + 1);
     int nfij = nfi * nfj;
 
-    SHARED_ARRAY(int, gout_stride);
-    SHARED_ARRAY(int, nsp_per_block);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nsp_per_block);
     if (t_id == 0) {
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
         nsp_per_block = THREADS / gout_stride;

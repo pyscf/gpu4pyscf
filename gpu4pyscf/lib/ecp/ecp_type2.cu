@@ -321,8 +321,8 @@ void type2_cart(double * __restrict__ gctr,
     constexpr int BLKI = (LIC1+1)/2 * LCC1;
     constexpr int BLKJ = (LJC1+1)/2 * LCC1;
 
-    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
-    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
+    DECLARE_SHARED(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
+    DECLARE_SHARED(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
 
     type2_facs_omega<LI, LC>(omegai, rca);
     type2_facs_omega<LJ, LC>(omegaj, rcb);
@@ -343,7 +343,7 @@ void type2_cart(double * __restrict__ gctr,
     double radj[LJC1];
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
 
-    SHARED_ARRAY(double, rad_all, [(LI+LJ+1) * LIC1 * LJC1]);
+    DECLARE_SHARED(double, rad_all, [(LI+LJ+1) * LIC1 * LJC1]);
     set_shared_memory(rad_all, (LI+LJ+1)*LIC1*LJC1);
 
     double ur = 0.0;
@@ -369,8 +369,8 @@ void type2_cart(double * __restrict__ gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
 
-    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
-    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
+    DECLARE_SHARED(double, angi, [LI1*nfi*LIC1]);
+    DECLARE_SHARED(double, angj, [LJ1*nfj*LJC1]);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 

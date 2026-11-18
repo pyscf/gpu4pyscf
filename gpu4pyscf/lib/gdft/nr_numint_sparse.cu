@@ -54,8 +54,8 @@ static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
                          uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
     KERNEL_PROLOGUE_3D_DM();
-    SHARED_ARRAY(double, s_ao, [THREADSX*THREADSY]);
-    SHARED_ARRAY(double, s_dm, [THREADSX*THREADSY]);
+    DECLARE_SHARED(double, s_ao, [THREADSX*THREADSY]);
+    DECLARE_SHARED(double, s_dm, [THREADSX*THREADSY]);
 
     int jsh = jsh0 + shell_blk * THREADSY + ty;
     if (jsh >= jsh1) {
@@ -125,8 +125,8 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
                          uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
     KERNEL_PROLOGUE_3D_DM();
-    SHARED_ARRAY(double, s_ao, [THREADSX*THREADSY]);
-    SHARED_ARRAY(double, s_dm, [THREADSX*THREADSY]);
+    DECLARE_SHARED(double, s_ao, [THREADSX*THREADSY]);
+    DECLARE_SHARED(double, s_dm, [THREADSX*THREADSY]);
 
     int jsh = jsh0 + shell_blk * THREADSY + ty;
     if (jsh >= jsh1) {
@@ -196,8 +196,8 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                         int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
     KERNEL_PROLOGUE_3D_AOW();
-    SHARED_ARRAY(double, s_bra, [THREADSXY]);
-    SHARED_ARRAY(double, s_ket, [THREADSXY]);
+    DECLARE_SHARED(double, s_bra, [THREADSXY]);
+    DECLARE_SHARED(double, s_ket, [THREADSXY]);
 
     int txy = ty * DIVXY + tx;
     int tyz = tz * THREADSY + ty;
@@ -286,8 +286,8 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
                        int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
     KERNEL_PROLOGUE_3D_AOW();
-    SHARED_ARRAY(double, s_bra, [THREADSXY]);
-    SHARED_ARRAY(double, s_ket, [THREADSXY]);
+    DECLARE_SHARED(double, s_bra, [THREADSXY]);
+    DECLARE_SHARED(double, s_ket, [THREADSXY]);
 
     int txy = ty * DIVXY + tx;
     int tyz = tz * THREADSY + ty;

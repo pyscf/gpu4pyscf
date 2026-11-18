@@ -49,20 +49,20 @@ void orth_lda_mat_kernel(double *out, cuDoubleComplex *vxcG,
     int pair_id = blockIdx_x % npair;
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
-    SHARED_ARRAY(int, tile_batch);
+    DECLARE_SHARED(int, tile_batch);
     if (thread_id == 0) {
         tile_batch = blockIdx_x / npair;
     }
-    SHARED_ARRAY(double, gx, [NGV_PER_BLOCK*3*2*LMAX1*LMAX1]);
-    SHARED_ARRAY(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]);
-    SHARED_ARRAY(int, mesh_start, [3]);
-    SHARED_ARRAY(double, vjR, [NCART_MAX*NCART_MAX * WARPS]);
-    SHARED_ARRAY(int, ri);
-    SHARED_ARRAY(int, rj);
-    SHARED_ARRAY(int, li);
-    SHARED_ARRAY(int, lj);
-    SHARED_ARRAY(double, ai);
-    SHARED_ARRAY(double, aj);
+    DECLARE_SHARED(double, gx, [NGV_PER_BLOCK*3*2*LMAX1*LMAX1]);
+    DECLARE_SHARED(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+1)]);
+    DECLARE_SHARED(int, mesh_start, [3]);
+    DECLARE_SHARED(double, vjR, [NCART_MAX*NCART_MAX * WARPS]);
+    DECLARE_SHARED(int, ri);
+    DECLARE_SHARED(int, rj);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(double, ai);
+    DECLARE_SHARED(double, aj);
 
     int mesh_x = mesh_cum[1] - mesh_cum[0];
     int mesh_y = mesh_cum[2] - mesh_cum[1];

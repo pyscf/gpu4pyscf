@@ -45,14 +45,14 @@ void type2_cart_unrolled_kernel(double *gctr,
     constexpr int BLKI = (LIC1+1)/2 * LCC1;
     constexpr int BLKJ = (LJC1+1)/2 * LCC1;
 
-    SHARED_ARRAY(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
-    SHARED_ARRAY(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
+    DECLARE_SHARED(double, omegai, [LI1*(LI1+1)*(LI1+2)/6 * BLKI]);
+    DECLARE_SHARED(double, omegaj, [LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ]);
 
     type2_facs_omega<LI, LC>(omegai, rca);
     type2_facs_omega<LJ, LC>(omegaj, rcb);
     __syncthreads();
 
-    SHARED_ARRAY(double, rad_all, [(LI+LJ+1)*LIC1*LJC1]);
+    DECLARE_SHARED(double, rad_all, [(LI+LJ+1)*LIC1*LJC1]);
     set_shared_memory(rad_all, (LI+LJ+1)*LIC1*LJC1);
 
     const int npi = bas[NPRIM_OF+ish*BAS_SLOTS];
@@ -89,8 +89,8 @@ void type2_cart_unrolled_kernel(double *gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
 
-    SHARED_ARRAY(double, angi, [LI1*nfi*LIC1]);
-    SHARED_ARRAY(double, angj, [LJ1*nfj*LJC1]);
+    DECLARE_SHARED(double, angi, [LI1*nfi*LIC1]);
+    DECLARE_SHARED(double, angj, [LJ1*nfj*LJC1]);
 
     const double fac = 16.0 * M_PI * M_PI * _common_fac[LI] * _common_fac[LJ];
 
@@ -264,14 +264,14 @@ void type2_cart_ip1(double *gctr,
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-    SHARED_ARRAY(double, gctr_smem, [nfi*nfj*3]);
+    DECLARE_SHARED(double, gctr_smem, [nfi*nfj*3]);
     for (int ij = threadIdx_x; ij < nfi*nfj*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
     __syncthreads();
 
     constexpr int nfi1 = (LI+2) * (LI+3)/2;
-    SHARED_ARRAY(double, buf, [nfi1*nfj]);
+    DECLARE_SHARED(double, buf, [nfi1*nfj]);
     type2_cart_unrolled_kernel<1,0,LI+1,LJ,LC>(
         buf, ish, jsh, ksh, 
         ecpbas, ecploc, 
@@ -323,7 +323,7 @@ void type2_cart_ip1_general(double *gctr,
     const int ecp_id = ecpbas[ECP_ATOM_ID+ecploc[ksh]*BAS_SLOTS];
     gctr += 3*ecp_id*nao*nao + ioff*nao + joff;
 
-    SHARED_ARRAY(double, gctr_smem, [NF_MAX*NF_MAX*3]);
+    DECLARE_SHARED(double, gctr_smem, [NF_MAX*NF_MAX*3]);
     for (int ij = threadIdx_x; ij < NF_MAX*NF_MAX*3; ij+=blockDim_x){
         gctr_smem[ij] = 0.0;
     }
@@ -331,7 +331,7 @@ void type2_cart_ip1_general(double *gctr,
 
     constexpr int NFI_MAX = (AO_LMAX+2)*(AO_LMAX+3)/2;
     constexpr int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
-    SHARED_ARRAY(double, buf, [NFI_MAX*NFJ_MAX]);
+    DECLARE_SHARED(double, buf, [NFI_MAX*NFJ_MAX]);
     type2_cart_kernel<1,0>(
         buf, LI+1, LJ, LC, 
         ish, jsh, ksh, 
