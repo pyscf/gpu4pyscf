@@ -727,10 +727,11 @@ void eval_mat_tau_kernel(double *out, double *rho, MGridEnvVars envs,
 static size_t buflen_tau(int l, int tile)
 {
     int lj = MIN(l, LMAX);
-    size_t len1 = WARP_SIZE * tile * (l+1) * 2;
-    size_t len2 = WARP_SIZE * (lj+3)*(lj+3) * 3;
+    int warp = gpu4pyscf_effective_warp_size();
+    size_t len1 = warp * tile * (l+1) * 2;
+    size_t len2 = warp * (lj+3)*(lj+3) * 3;
     if (l < 4) {
-        len2 += WARP_SIZE * (l+1)*(l+2)/2*(l+3);
+        len2 += warp * (l+1)*(l+2)/2*(l+3);
     }
     return MAX(len1, len2) * sizeof(double);
 }

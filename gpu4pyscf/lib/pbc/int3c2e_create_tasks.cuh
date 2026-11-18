@@ -17,18 +17,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "../warp_size.h"
 
 #define THREADS         256
-// WARP_SIZE: compile-time constant used for shared-memory sizing.
-// `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
-// so we keep a literal here. Guarded so the build can override
-// it (e.g. -DWARP_SIZE=64) for future wider-wavefront targets.
-#ifndef WARP_SIZE
-#define WARP_SIZE       32
-#endif
-#define WARPS           8
 #define LMAX            4
 #define LMAX1           (LMAX+1)
 #define MAX_IMGS_PER_TASK  31
@@ -355,8 +349,10 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
 __device__ inline
 int warp_max(int val)
 {
-    for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
-        val = max(val, __shfl_down_sync(0xffffffff, val, offset));
+    for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1) {
+        // ~0 masks in all lanes of the wavefront (32 or 64). A 32-bit
+        // 0xffffffff would drop lanes 32-63 on wave64; on CUDA ~0 is 0xffffffff.
+        val = max(val, __shfl_down_sync(~0, val, offset, WARP_SIZE));
     }
     return val;
 }
@@ -366,22 +362,23 @@ void block_max(int val, int& out)
 {
     int thread_id = threadIdx.x;
     val = warp_max(val);
-    __shared__ int buf[WARPS];
-    int lane = thread_id % warpSize;
-    int warp_id = thread_id / warpSize;
+    constexpr int nwarps = THREADS / WARP_SIZE;
+    __shared__ int buf[nwarps];
+    int lane = thread_id % WARP_SIZE;
+    int warp_id = thread_id / WARP_SIZE;
     if (lane == 0) {
         buf[warp_id] = val;
     }
     __syncthreads();
-    if (thread_id < WARPS) {
+    if (thread_id < nwarps) {
         val = buf[thread_id];
-    }
-    for (int offset = WARPS / 2; offset > 0; offset >>= 1) {
-        val = max(val, __shfl_down_sync(0xff, val, offset));
-    }
-    if (thread_id == 0) {
-        out = val;
+        constexpr unsigned int mask = (1u << nwarps) - 1;
+        for (int offset = nwarps / 2; offset > 0; offset >>= 1) {
+            val = max(val, __shfl_down_sync(mask, val, offset, nwarps));
+        }
+        if (thread_id == 0) {
+            out = val;
+        }
     }
     __syncthreads();
 }
-

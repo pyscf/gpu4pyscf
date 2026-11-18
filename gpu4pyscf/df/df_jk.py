@@ -18,6 +18,7 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import cupy
+from gpu4pyscf.lib.cusolver import eigh_std
 import numpy
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
@@ -730,7 +731,7 @@ def decompose_rdm1_svd(dm, hermi=0):
             Contains orbol * eigenvalues (occupancies)
     '''
     if hermi == 1:
-        s, u = cp.linalg.eigh(dm)
+        s, u = eigh_std(dm)
         mask = abs(s) > 1e-8
         if dm.ndim == 2:
             c = u[:,mask]

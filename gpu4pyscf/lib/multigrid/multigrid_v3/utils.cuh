@@ -16,6 +16,11 @@
 
 #pragma once
 
+#include "../../warp_size.h"
+
+constexpr int MGRID_SUBGROUP_SIZE = WARP_SIZE;
+static_assert(MGRID_SUBGROUP_SIZE == 32 || MGRID_SUBGROUP_SIZE == 64);
+
 template <typename T>
 __host__ __device__ T distance_squared(const T x, const T y, const T z) {
   return x * x + y * y + z * z;
@@ -33,20 +38,20 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
 __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
-    constexpr int WARP_SIZE = 32;
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        val += __shfl_down_sync(0xffffffff, val, offset);
+    for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
+        val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);
     }
-    int lane = thread_id % WARP_SIZE;
-    int warp = thread_id / WARP_SIZE;
+    int lane = thread_id % MGRID_SUBGROUP_SIZE;
+    int warp = thread_id / MGRID_SUBGROUP_SIZE;
     if (lane == 0) {
         swap[warp] = val;
     }
     __syncthreads();
     if (warp == 0) {
-        val = (thread_id < 8) ? swap[lane] : 0.;
-        for (int offset = 4; offset > 0; offset >>= 1) {
-            val += __shfl_down_sync(0xffffffff, val, offset);
+        int nwarps = blockDim.x * blockDim.y * blockDim.z / MGRID_SUBGROUP_SIZE;
+        val = (lane < nwarps) ? swap[lane] : 0.;
+        for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
+            val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);
         }
     }
     // Without this barrier the other warps can enter the next reduce and

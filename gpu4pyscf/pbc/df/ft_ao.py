@@ -49,6 +49,11 @@ from gpu4pyscf.__config__ import props as gpu_specs
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
 libpbc.build_ft_aopair.restype = ctypes.c_int
+libpbc.PBC_warp_size.restype = ctypes.c_int
+# Effective wavefront width of the running GPU (32 on RDNA/NVIDIA, 64 on
+# GCN/CDNA). Used as the default nGv_per_block so the host-side shm_size matches
+# the per-arch device WARP_SIZE stride in a single multi-arch build.
+WARP_SIZE = libpbc.PBC_warp_size()
 
 LMAX = 4
 GOUT_WIDTH = 30
@@ -709,7 +714,10 @@ class FTOpt:
         return vj
 
 def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,
-                 nGv_per_block=32, cache_cart_idx=False):
+                 nGv_per_block=None, cache_cart_idx=False):
+    if nGv_per_block is None:
+        # Match the device kernel's nGv_per_block (= WARP_SIZE, per-arch).
+        nGv_per_block = WARP_SIZE
     if deriv is None:
         deriv = (0, 0)
     i_inc, j_inc = deriv

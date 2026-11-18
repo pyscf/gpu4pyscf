@@ -46,7 +46,7 @@ void eval_mgga_mat_kernel_v2(double *out, double *vrho_weights, double *vtau_wei
     __shared__ double xi, yi, zi;
     __shared__ double xj, yj, zj;
     __shared__ double xij, yij, zij, ai, aj, aij, theta_rr;
-    __shared__ double swap[8];
+    __shared__ double swap[256 / MGRID_SUBGROUP_SIZE];
 
     int *bas = envs.bas;
     double *env = envs.env;

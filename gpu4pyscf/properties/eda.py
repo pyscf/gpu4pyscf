@@ -17,6 +17,7 @@ from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import hf as rhf
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf.data import nist
 from pyscf.gto.mole import conc_mol
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -221,7 +222,7 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
     # D_frozen = 2 * mocc_sum @ cp.linalg.solve(CTSC, mocc_sum.T)
 
     ### Note: The (C^T S C)^-1/2 result must be near identity
-    CTSC_eigenvalues, CTSC_eigenvectors = cp.linalg.eigh(CTSC)
+    CTSC_eigenvalues, CTSC_eigenvectors = eigh_std(CTSC)
     assert cp.min(CTSC_eigenvalues) > 1e-6
     CTSC_minus_half = CTSC_eigenvectors @ cp.diag(CTSC_eigenvalues**-0.5) @ CTSC_eigenvectors.T
 
@@ -349,8 +350,8 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
                     preconditioner_ii = 2 * mocc_i.T @ (F_j - F_i) @ mocc_i
                     preconditioner_jj = 2 * mocc_j.T @ (F_i - F_j) @ mocc_j
 
-                    preconditioner_ii_eigenvalues, preconditioner_ii_eigenvectors = cp.linalg.eigh(preconditioner_ii)
-                    preconditioner_jj_eigenvalues, preconditioner_jj_eigenvectors = cp.linalg.eigh(preconditioner_jj)
+                    preconditioner_ii_eigenvalues, preconditioner_ii_eigenvectors = eigh_std(preconditioner_ii)
+                    preconditioner_jj_eigenvalues, preconditioner_jj_eigenvectors = eigh_std(preconditioner_jj)
 
                     preconditioner_ijij_diagonal = preconditioner_ii_eigenvalues[:, cp.newaxis] + preconditioner_jj_eigenvalues[cp.newaxis, :]
                     preconditioner_ijij_diagonal_inv = preconditioner_ijij_diagonal**-1

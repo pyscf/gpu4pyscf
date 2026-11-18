@@ -24,6 +24,7 @@ Ref:
 import ctypes
 import numpy as np
 import cupy as cp
+from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import lib
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.lib import logger
@@ -804,7 +805,7 @@ def _argsort_aux_by_atom(auxmol, aux_sorting=None):
 def _factorize_j2c(auxmol, aux_sorting=None, omega=None, lr_factor=None, sr_factor=None):
     original_auxmol = auxmol.mol
     j2c = int2c2e(auxmol, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
-    w, v = cp.linalg.eigh(j2c)
+    w, v = eigh_std(j2c)
     is_lr_coulomb = omega is not None and omega > 0
     if ((is_lr_coulomb or original_auxmol.cart) and
         w[0] < df.LINEAR_DEP_THR):
