@@ -132,6 +132,28 @@ class KnownValues(unittest.TestCase):
         h1_gpu = get_ecp_ipip(mol2, 'ipvip').sum(axis=0)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
 
+    @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
+    def test_ecp_ipip_per_atom_non_leading_ecp_atoms(self):
+        # The ECP atoms 2 and 9 iterate as {9, 2} in a Python set. Block n of get_ecp_ipip must
+        # belong to the n-th ECP atom in increasing index order, as hess_nuc_elec_ecp reads it.
+        atom = [f'H {1.6*i} 0 0' for i in range(10)]
+        atom[2] = 'Na 3.2 0.2 0'
+        atom[9] = 'Na 14.4 0 0.3'
+        mol = gto.M(atom='; '.join(atom), basis={'Na': cu1_basis, 'H': 'sto-3g'},
+                    ecp={'Na': mol2._ecp['Na']}, output='/dev/null')
+        ecp_atoms = [2, 9]
+        ipipv = get_ecp_ipip(mol, 'ipipv').get()
+        ipvip = get_ecp_ipip(mol, 'ipvip').get()
+        for n, ia in enumerate(ecp_atoms):
+            with mol.with_rinv_at_nucleus(ia):
+                assert abs(mol.intor('ECPscalar_ipiprinv', comp=9) - ipipv[n]).max() < 1e-8
+                assert abs(mol.intor('ECPscalar_iprinvip', comp=9) - ipvip[n]).max() < 1e-8
+        # An explicit ecp_atoms keeps its own order
+        ipipv_92 = get_ecp_ipip(mol, 'ipipv', ecp_atoms=[9, 2]).get()
+        assert abs(ipipv_92[0] - ipipv[1]).max() < 1e-8
+        assert abs(ipipv_92[1] - ipipv[0]).max() < 1e-8
+        mol.stdout.close()
+
 if __name__ == "__main__":
     print("Full Tests for ECP Integrals")
     unittest.main()
