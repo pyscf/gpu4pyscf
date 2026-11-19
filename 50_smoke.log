@@ -1,0 +1,6 @@
+dpctl 0.24.0dev0+53.gdd4f089d80
+<dpctl.SyclDevice [backend_type.opencl, device_type.cpu,  Intel(R) Xeon(R) 6975P-C] at 0x7f4762c26af0>
+dpnp 0.21.0 OK
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/cutensor.py:154: UserWarning: using cupy as the tensor contraction engine.
+  warnings.warn(f'using {contract_engine} as the tensor contraction engine.')
+gpu4pyscf import OK

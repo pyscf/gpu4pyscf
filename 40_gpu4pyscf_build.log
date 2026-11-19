@@ -1,0 +1,1200 @@
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:210:28: warning: unused parameter 'v2sigma2_ab_ab' [-Wunused-parameter]
+  210 |                    double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:210:52: warning: unused parameter 'v2sigma2_ab_bb' [-Wunused-parameter]
+  210 |                    double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:210:76: warning: unused parameter 'v2sigma2_bb_bb' [-Wunused-parameter]
+  210 |                    double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                                                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:211:28: warning: unused parameter 'v2sigmalapl_aa_a' [-Wunused-parameter]
+  211 |                    double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:211:54: warning: unused parameter 'v2sigmalapl_aa_b' [-Wunused-parameter]
+  211 |                    double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:211:80: warning: unused parameter 'v2sigmalapl_ab_a' [-Wunused-parameter]
+  211 |                    double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:212:28: warning: unused parameter 'v2sigmalapl_ab_b' [-Wunused-parameter]
+  212 |                    double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:212:54: warning: unused parameter 'v2sigmalapl_bb_a' [-Wunused-parameter]
+  212 |                    double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:212:80: warning: unused parameter 'v2sigmalapl_bb_b' [-Wunused-parameter]
+  212 |                    double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:213:28: warning: unused parameter 'v2sigmatau_aa_a' [-Wunused-parameter]
+  213 |                    double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:213:53: warning: unused parameter 'v2sigmatau_aa_b' [-Wunused-parameter]
+  213 |                    double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:213:78: warning: unused parameter 'v2sigmatau_ab_a' [-Wunused-parameter]
+  213 |                    double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:214:28: warning: unused parameter 'v2sigmatau_ab_b' [-Wunused-parameter]
+  214 |                    double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:214:53: warning: unused parameter 'v2sigmatau_bb_a' [-Wunused-parameter]
+  214 |                    double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:214:78: warning: unused parameter 'v2sigmatau_bb_b' [-Wunused-parameter]
+  214 |                    double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:215:28: warning: unused parameter 'v2lapl2_aa' [-Wunused-parameter]
+  215 |                    double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:215:48: warning: unused parameter 'v2lapl2_ab' [-Wunused-parameter]
+  215 |                    double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:215:68: warning: unused parameter 'v2lapl2_bb' [-Wunused-parameter]
+  215 |                    double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:28: warning: unused parameter 'v2lapltau_a_a' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:51: warning: unused parameter 'v2lapltau_a_b' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:74: warning: unused parameter 'v2lapltau_b_a' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:97: warning: unused parameter 'v2lapltau_b_b' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                                                                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:217:28: warning: unused parameter 'v2tau2_aa' [-Wunused-parameter]
+  217 |                    double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:217:47: warning: unused parameter 'v2tau2_ab' [-Wunused-parameter]
+  217 |                    double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                               ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:217:66: warning: unused parameter 'v2tau2_bb' [-Wunused-parameter]
+  217 |                    double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                                                  ^
+149 warnings generated.
+[ 66%] Building CXX object src/CMakeFiles/exchcxx.dir/builtin_kernel.cxx.o
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/src/builtin_kernel.cxx:54:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels.hpp:110:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/scanl_c.hpp:7:
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:34: warning: unused parameter 'rho' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:46: warning: unused parameter 'sigma' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:60: warning: unused parameter 'lapl' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:73: warning: unused parameter 'tau' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:86: warning: unused parameter 'vrho' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:100: warning: unused parameter 'vsigma' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                                                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:116: warning: unused parameter 'vlapl' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                                                                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:139:131: warning: unused parameter 'vtau' [-Wunused-parameter]
+  139 |     eval_vxc_fxc_unpolar( double rho, double sigma, double lapl, double tau, double& vrho, double& vsigma, double& vlapl, double& vtau,
+      |                                                                                                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:140:34: warning: unused parameter 'v2rho2' [-Wunused-parameter]
+  140 |                          double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau,
+      |                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:140:50: warning: unused parameter 'v2rhosigma' [-Wunused-parameter]
+  140 |                          double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau,
+      |                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:140:70: warning: unused parameter 'v2rholapl' [-Wunused-parameter]
+  140 |                          double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau,
+      |                                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:140:89: warning: unused parameter 'v2rhotau' [-Wunused-parameter]
+  140 |                          double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau,
+      |                                                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:141:34: warning: unused parameter 'v2sigma2' [-Wunused-parameter]
+  141 |                          double& v2sigma2, double& v2sigmalapl, double& v2sigmatau,
+      |                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:141:52: warning: unused parameter 'v2sigmalapl' [-Wunused-parameter]
+  141 |                          double& v2sigma2, double& v2sigmalapl, double& v2sigmatau,
+      |                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:141:73: warning: unused parameter 'v2sigmatau' [-Wunused-parameter]
+  141 |                          double& v2sigma2, double& v2sigmalapl, double& v2sigmatau,
+      |                                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:142:34: warning: unused parameter 'v2lapl2' [-Wunused-parameter]
+  142 |                          double& v2lapl2, double& v2lapltau, double& v2tau2 ) {
+      |                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:142:51: warning: unused parameter 'v2lapltau' [-Wunused-parameter]
+  142 |                          double& v2lapl2, double& v2lapltau, double& v2tau2 ) {
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:142:70: warning: unused parameter 'v2tau2' [-Wunused-parameter]
+  142 |                          double& v2lapl2, double& v2lapltau, double& v2tau2 ) {
+      |                                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:154:32: warning: unused parameter 'rho_a' [-Wunused-parameter]
+  154 |     eval_vxc_fxc_polar( double rho_a, double rho_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:154:46: warning: unused parameter 'rho_b' [-Wunused-parameter]
+  154 |     eval_vxc_fxc_polar( double rho_a, double rho_b,
+      |                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:155:31: warning: unused parameter 'sigma_aa' [-Wunused-parameter]
+  155 |                        double sigma_aa, double sigma_ab, double sigma_bb,
+      |                               ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:155:48: warning: unused parameter 'sigma_ab' [-Wunused-parameter]
+  155 |                        double sigma_aa, double sigma_ab, double sigma_bb,
+      |                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:155:65: warning: unused parameter 'sigma_bb' [-Wunused-parameter]
+  155 |                        double sigma_aa, double sigma_ab, double sigma_bb,
+      |                                                                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:156:31: warning: unused parameter 'lapl_a' [-Wunused-parameter]
+  156 |                        double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                               ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:156:46: warning: unused parameter 'lapl_b' [-Wunused-parameter]
+  156 |                        double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:156:61: warning: unused parameter 'tau_a' [-Wunused-parameter]
+  156 |                        double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                                                             ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:156:75: warning: unused parameter 'tau_b' [-Wunused-parameter]
+  156 |                        double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                                                                           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:157:32: warning: unused parameter 'vrho_a' [-Wunused-parameter]
+  157 |                        double& vrho_a, double& vrho_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:157:48: warning: unused parameter 'vrho_b' [-Wunused-parameter]
+  157 |                        double& vrho_a, double& vrho_b,
+      |                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:158:32: warning: unused parameter 'vsigma_aa' [-Wunused-parameter]
+  158 |                        double& vsigma_aa, double& vsigma_ab, double& vsigma_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:158:51: warning: unused parameter 'vsigma_ab' [-Wunused-parameter]
+  158 |                        double& vsigma_aa, double& vsigma_ab, double& vsigma_bb,
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:158:70: warning: unused parameter 'vsigma_bb' [-Wunused-parameter]
+  158 |                        double& vsigma_aa, double& vsigma_ab, double& vsigma_bb,
+      |                                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:159:32: warning: unused parameter 'vlapl_a' [-Wunused-parameter]
+  159 |                        double& vlapl_a, double& vlapl_b, double& vtau_a, double& vtau_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:159:49: warning: unused parameter 'vlapl_b' [-Wunused-parameter]
+  159 |                        double& vlapl_a, double& vlapl_b, double& vtau_a, double& vtau_b,
+      |                                                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:159:66: warning: unused parameter 'vtau_a' [-Wunused-parameter]
+  159 |                        double& vlapl_a, double& vlapl_b, double& vtau_a, double& vtau_b,
+      |                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:159:82: warning: unused parameter 'vtau_b' [-Wunused-parameter]
+  159 |                        double& vlapl_a, double& vlapl_b, double& vtau_a, double& vtau_b,
+      |                                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:160:32: warning: unused parameter 'v2rho2_aa' [-Wunused-parameter]
+  160 |                        double& v2rho2_aa, double& v2rho2_ab, double& v2rho2_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:160:51: warning: unused parameter 'v2rho2_ab' [-Wunused-parameter]
+  160 |                        double& v2rho2_aa, double& v2rho2_ab, double& v2rho2_bb,
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:160:70: warning: unused parameter 'v2rho2_bb' [-Wunused-parameter]
+  160 |                        double& v2rho2_aa, double& v2rho2_ab, double& v2rho2_bb,
+      |                                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:161:32: warning: unused parameter 'v2rhosigma_a_aa' [-Wunused-parameter]
+  161 |                        double& v2rhosigma_a_aa, double& v2rhosigma_a_ab, double& v2rhosigma_a_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:161:57: warning: unused parameter 'v2rhosigma_a_ab' [-Wunused-parameter]
+  161 |                        double& v2rhosigma_a_aa, double& v2rhosigma_a_ab, double& v2rhosigma_a_bb,
+      |                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:161:82: warning: unused parameter 'v2rhosigma_a_bb' [-Wunused-parameter]
+  161 |                        double& v2rhosigma_a_aa, double& v2rhosigma_a_ab, double& v2rhosigma_a_bb,
+      |                                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:162:32: warning: unused parameter 'v2rhosigma_b_aa' [-Wunused-parameter]
+  162 |                        double& v2rhosigma_b_aa, double& v2rhosigma_b_ab, double& v2rhosigma_b_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:162:57: warning: unused parameter 'v2rhosigma_b_ab' [-Wunused-parameter]
+  162 |                        double& v2rhosigma_b_aa, double& v2rhosigma_b_ab, double& v2rhosigma_b_bb,
+      |                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:162:82: warning: unused parameter 'v2rhosigma_b_bb' [-Wunused-parameter]
+  162 |                        double& v2rhosigma_b_aa, double& v2rhosigma_b_ab, double& v2rhosigma_b_bb,
+      |                                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:163:32: warning: unused parameter 'v2rholapl_a_a' [-Wunused-parameter]
+  163 |                        double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:163:55: warning: unused parameter 'v2rholapl_a_b' [-Wunused-parameter]
+  163 |                        double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                                       ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:163:78: warning: unused parameter 'v2rholapl_b_a' [-Wunused-parameter]
+  163 |                        double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:163:101: warning: unused parameter 'v2rholapl_b_b' [-Wunused-parameter]
+  163 |                        double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                                                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:164:32: warning: unused parameter 'v2rhotau_a_a' [-Wunused-parameter]
+  164 |                        double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:164:54: warning: unused parameter 'v2rhotau_a_b' [-Wunused-parameter]
+  164 |                        double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:164:76: warning: unused parameter 'v2rhotau_b_a' [-Wunused-parameter]
+  164 |                        double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                                                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:164:98: warning: unused parameter 'v2rhotau_b_b' [-Wunused-parameter]
+  164 |                        double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:165:32: warning: unused parameter 'v2sigma2_aa_aa' [-Wunused-parameter]
+  165 |                        double& v2sigma2_aa_aa, double& v2sigma2_aa_ab, double& v2sigma2_aa_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:165:56: warning: unused parameter 'v2sigma2_aa_ab' [-Wunused-parameter]
+  165 |                        double& v2sigma2_aa_aa, double& v2sigma2_aa_ab, double& v2sigma2_aa_bb,
+      |                                                        ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:165:80: warning: unused parameter 'v2sigma2_aa_bb' [-Wunused-parameter]
+  165 |                        double& v2sigma2_aa_aa, double& v2sigma2_aa_ab, double& v2sigma2_aa_bb,
+      |                                                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:166:32: warning: unused parameter 'v2sigma2_ab_ab' [-Wunused-parameter]
+  166 |                        double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:166:56: warning: unused parameter 'v2sigma2_ab_bb' [-Wunused-parameter]
+  166 |                        double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                                        ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:166:80: warning: unused parameter 'v2sigma2_bb_bb' [-Wunused-parameter]
+  166 |                        double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:167:32: warning: unused parameter 'v2sigmalapl_aa_a' [-Wunused-parameter]
+  167 |                        double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:167:58: warning: unused parameter 'v2sigmalapl_aa_b' [-Wunused-parameter]
+  167 |                        double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:167:84: warning: unused parameter 'v2sigmalapl_ab_a' [-Wunused-parameter]
+  167 |                        double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:168:32: warning: unused parameter 'v2sigmalapl_ab_b' [-Wunused-parameter]
+  168 |                        double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:168:58: warning: unused parameter 'v2sigmalapl_bb_a' [-Wunused-parameter]
+  168 |                        double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:168:84: warning: unused parameter 'v2sigmalapl_bb_b' [-Wunused-parameter]
+  168 |                        double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:169:32: warning: unused parameter 'v2sigmatau_aa_a' [-Wunused-parameter]
+  169 |                        double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:169:57: warning: unused parameter 'v2sigmatau_aa_b' [-Wunused-parameter]
+  169 |                        double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:169:82: warning: unused parameter 'v2sigmatau_ab_a' [-Wunused-parameter]
+  169 |                        double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:170:32: warning: unused parameter 'v2sigmatau_ab_b' [-Wunused-parameter]
+  170 |                        double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:170:57: warning: unused parameter 'v2sigmatau_bb_a' [-Wunused-parameter]
+  170 |                        double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:170:82: warning: unused parameter 'v2sigmatau_bb_b' [-Wunused-parameter]
+  170 |                        double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:171:32: warning: unused parameter 'v2lapl2_aa' [-Wunused-parameter]
+  171 |                        double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:171:52: warning: unused parameter 'v2lapl2_ab' [-Wunused-parameter]
+  171 |                        double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:171:72: warning: unused parameter 'v2lapl2_bb' [-Wunused-parameter]
+  171 |                        double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                                                        ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:172:32: warning: unused parameter 'v2lapltau_a_a' [-Wunused-parameter]
+  172 |                        double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:172:55: warning: unused parameter 'v2lapltau_a_b' [-Wunused-parameter]
+  172 |                        double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                       ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:172:78: warning: unused parameter 'v2lapltau_b_a' [-Wunused-parameter]
+  172 |                        double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:172:101: warning: unused parameter 'v2lapltau_b_b' [-Wunused-parameter]
+  172 |                        double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:173:32: warning: unused parameter 'v2tau2_aa' [-Wunused-parameter]
+  173 |                        double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:173:51: warning: unused parameter 'v2tau2_ab' [-Wunused-parameter]
+  173 |                        double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:173:70: warning: unused parameter 'v2tau2_bb' [-Wunused-parameter]
+  173 |                        double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:186:30: warning: unused parameter 'rho' [-Wunused-parameter]
+  186 |     eval_fxc_unpolar( double rho, double sigma, double lapl, double tau,
+      |                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:186:42: warning: unused parameter 'sigma' [-Wunused-parameter]
+  186 |     eval_fxc_unpolar( double rho, double sigma, double lapl, double tau,
+      |                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:186:56: warning: unused parameter 'lapl' [-Wunused-parameter]
+  186 |     eval_fxc_unpolar( double rho, double sigma, double lapl, double tau,
+      |                                                        ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:186:69: warning: unused parameter 'tau' [-Wunused-parameter]
+  186 |     eval_fxc_unpolar( double rho, double sigma, double lapl, double tau,
+      |                                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:187:30: warning: unused parameter 'v2rho2' [-Wunused-parameter]
+  187 |                      double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau, 
+      |                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:187:46: warning: unused parameter 'v2rhosigma' [-Wunused-parameter]
+  187 |                      double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau, 
+      |                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:187:66: warning: unused parameter 'v2rholapl' [-Wunused-parameter]
+  187 |                      double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau, 
+      |                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:187:85: warning: unused parameter 'v2rhotau' [-Wunused-parameter]
+  187 |                      double& v2rho2, double& v2rhosigma, double& v2rholapl, double& v2rhotau, 
+      |                                                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:188:30: warning: unused parameter 'v2sigma2' [-Wunused-parameter]
+  188 |                      double& v2sigma2, double& v2sigmalapl, double& v2sigmatau, 
+      |                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:188:48: warning: unused parameter 'v2sigmalapl' [-Wunused-parameter]
+  188 |                      double& v2sigma2, double& v2sigmalapl, double& v2sigmatau, 
+      |                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:188:69: warning: unused parameter 'v2sigmatau' [-Wunused-parameter]
+  188 |                      double& v2sigma2, double& v2sigmalapl, double& v2sigmatau, 
+      |                                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:189:30: warning: unused parameter 'v2lapl2' [-Wunused-parameter]
+  189 |                      double& v2lapl2, double& v2lapltau, double& v2tau2 ) {
+      |                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:189:47: warning: unused parameter 'v2lapltau' [-Wunused-parameter]
+  189 |                      double& v2lapl2, double& v2lapltau, double& v2tau2 ) {
+      |                                               ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:189:66: warning: unused parameter 'v2tau2' [-Wunused-parameter]
+  189 |                      double& v2lapl2, double& v2lapltau, double& v2tau2 ) {
+      |                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:201:28: warning: unused parameter 'rho_a' [-Wunused-parameter]
+  201 |     eval_fxc_polar( double rho_a, double rho_b, 
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:201:42: warning: unused parameter 'rho_b' [-Wunused-parameter]
+  201 |     eval_fxc_polar( double rho_a, double rho_b, 
+      |                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:202:27: warning: unused parameter 'sigma_aa' [-Wunused-parameter]
+  202 |                    double sigma_aa, double sigma_ab, double sigma_bb, 
+      |                           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:202:44: warning: unused parameter 'sigma_ab' [-Wunused-parameter]
+  202 |                    double sigma_aa, double sigma_ab, double sigma_bb, 
+      |                                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:202:61: warning: unused parameter 'sigma_bb' [-Wunused-parameter]
+  202 |                    double sigma_aa, double sigma_ab, double sigma_bb, 
+      |                                                             ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:203:27: warning: unused parameter 'lapl_a' [-Wunused-parameter]
+  203 |                    double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                           ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:203:42: warning: unused parameter 'lapl_b' [-Wunused-parameter]
+  203 |                    double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:203:57: warning: unused parameter 'tau_a' [-Wunused-parameter]
+  203 |                    double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                                                         ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:203:71: warning: unused parameter 'tau_b' [-Wunused-parameter]
+  203 |                    double lapl_a, double lapl_b, double tau_a, double tau_b,
+      |                                                                       ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:204:28: warning: unused parameter 'v2rho2_aa' [-Wunused-parameter]
+  204 |                    double& v2rho2_aa, double& v2rho2_ab, double& v2rho2_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:204:47: warning: unused parameter 'v2rho2_ab' [-Wunused-parameter]
+  204 |                    double& v2rho2_aa, double& v2rho2_ab, double& v2rho2_bb,
+      |                                               ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:204:66: warning: unused parameter 'v2rho2_bb' [-Wunused-parameter]
+  204 |                    double& v2rho2_aa, double& v2rho2_ab, double& v2rho2_bb,
+      |                                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:205:28: warning: unused parameter 'v2rhosigma_a_aa' [-Wunused-parameter]
+  205 |                    double& v2rhosigma_a_aa, double& v2rhosigma_a_ab, double& v2rhosigma_a_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:205:53: warning: unused parameter 'v2rhosigma_a_ab' [-Wunused-parameter]
+  205 |                    double& v2rhosigma_a_aa, double& v2rhosigma_a_ab, double& v2rhosigma_a_bb,
+      |                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:205:78: warning: unused parameter 'v2rhosigma_a_bb' [-Wunused-parameter]
+  205 |                    double& v2rhosigma_a_aa, double& v2rhosigma_a_ab, double& v2rhosigma_a_bb,
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:206:28: warning: unused parameter 'v2rhosigma_b_aa' [-Wunused-parameter]
+  206 |                    double& v2rhosigma_b_aa, double& v2rhosigma_b_ab, double& v2rhosigma_b_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:206:53: warning: unused parameter 'v2rhosigma_b_ab' [-Wunused-parameter]
+  206 |                    double& v2rhosigma_b_aa, double& v2rhosigma_b_ab, double& v2rhosigma_b_bb,
+      |                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:206:78: warning: unused parameter 'v2rhosigma_b_bb' [-Wunused-parameter]
+  206 |                    double& v2rhosigma_b_aa, double& v2rhosigma_b_ab, double& v2rhosigma_b_bb,
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:207:28: warning: unused parameter 'v2rholapl_a_a' [-Wunused-parameter]
+  207 |                    double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:207:51: warning: unused parameter 'v2rholapl_a_b' [-Wunused-parameter]
+  207 |                    double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:207:74: warning: unused parameter 'v2rholapl_b_a' [-Wunused-parameter]
+  207 |                    double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:207:97: warning: unused parameter 'v2rholapl_b_b' [-Wunused-parameter]
+  207 |                    double& v2rholapl_a_a, double& v2rholapl_a_b, double& v2rholapl_b_a, double& v2rholapl_b_b,
+      |                                                                                                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:208:28: warning: unused parameter 'v2rhotau_a_a' [-Wunused-parameter]
+  208 |                    double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:208:50: warning: unused parameter 'v2rhotau_a_b' [-Wunused-parameter]
+  208 |                    double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                                  ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:208:72: warning: unused parameter 'v2rhotau_b_a' [-Wunused-parameter]
+  208 |                    double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                                                        ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:208:94: warning: unused parameter 'v2rhotau_b_b' [-Wunused-parameter]
+  208 |                    double& v2rhotau_a_a, double& v2rhotau_a_b, double& v2rhotau_b_a, double& v2rhotau_b_b,
+      |                                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:209:28: warning: unused parameter 'v2sigma2_aa_aa' [-Wunused-parameter]
+  209 |                    double& v2sigma2_aa_aa, double& v2sigma2_aa_ab, double& v2sigma2_aa_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:209:52: warning: unused parameter 'v2sigma2_aa_ab' [-Wunused-parameter]
+  209 |                    double& v2sigma2_aa_aa, double& v2sigma2_aa_ab, double& v2sigma2_aa_bb,
+      |                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:209:76: warning: unused parameter 'v2sigma2_aa_bb' [-Wunused-parameter]
+  209 |                    double& v2sigma2_aa_aa, double& v2sigma2_aa_ab, double& v2sigma2_aa_bb,
+      |                                                                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:210:28: warning: unused parameter 'v2sigma2_ab_ab' [-Wunused-parameter]
+  210 |                    double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:210:52: warning: unused parameter 'v2sigma2_ab_bb' [-Wunused-parameter]
+  210 |                    double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:210:76: warning: unused parameter 'v2sigma2_bb_bb' [-Wunused-parameter]
+  210 |                    double& v2sigma2_ab_ab, double& v2sigma2_ab_bb, double& v2sigma2_bb_bb,
+      |                                                                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:211:28: warning: unused parameter 'v2sigmalapl_aa_a' [-Wunused-parameter]
+  211 |                    double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:211:54: warning: unused parameter 'v2sigmalapl_aa_b' [-Wunused-parameter]
+  211 |                    double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:211:80: warning: unused parameter 'v2sigmalapl_ab_a' [-Wunused-parameter]
+  211 |                    double& v2sigmalapl_aa_a, double& v2sigmalapl_aa_b, double& v2sigmalapl_ab_a, 
+      |                                                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:212:28: warning: unused parameter 'v2sigmalapl_ab_b' [-Wunused-parameter]
+  212 |                    double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:212:54: warning: unused parameter 'v2sigmalapl_bb_a' [-Wunused-parameter]
+  212 |                    double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                                      ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:212:80: warning: unused parameter 'v2sigmalapl_bb_b' [-Wunused-parameter]
+  212 |                    double& v2sigmalapl_ab_b, double& v2sigmalapl_bb_a, double& v2sigmalapl_bb_b,
+      |                                                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:213:28: warning: unused parameter 'v2sigmatau_aa_a' [-Wunused-parameter]
+  213 |                    double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:213:53: warning: unused parameter 'v2sigmatau_aa_b' [-Wunused-parameter]
+  213 |                    double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:213:78: warning: unused parameter 'v2sigmatau_ab_a' [-Wunused-parameter]
+  213 |                    double& v2sigmatau_aa_a, double& v2sigmatau_aa_b, double& v2sigmatau_ab_a, 
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:214:28: warning: unused parameter 'v2sigmatau_ab_b' [-Wunused-parameter]
+  214 |                    double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:214:53: warning: unused parameter 'v2sigmatau_bb_a' [-Wunused-parameter]
+  214 |                    double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                                     ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:214:78: warning: unused parameter 'v2sigmatau_bb_b' [-Wunused-parameter]
+  214 |                    double& v2sigmatau_ab_b, double& v2sigmatau_bb_a, double& v2sigmatau_bb_b,
+      |                                                                              ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:215:28: warning: unused parameter 'v2lapl2_aa' [-Wunused-parameter]
+  215 |                    double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:215:48: warning: unused parameter 'v2lapl2_ab' [-Wunused-parameter]
+  215 |                    double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                                ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:215:68: warning: unused parameter 'v2lapl2_bb' [-Wunused-parameter]
+  215 |                    double& v2lapl2_aa, double& v2lapl2_ab, double& v2lapl2_bb,
+      |                                                                    ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:28: warning: unused parameter 'v2lapltau_a_a' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:51: warning: unused parameter 'v2lapltau_a_b' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                   ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:74: warning: unused parameter 'v2lapltau_b_a' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                                          ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:216:97: warning: unused parameter 'v2lapltau_b_b' [-Wunused-parameter]
+  216 |                    double& v2lapltau_a_a, double& v2lapltau_a_b, double& v2lapltau_b_a, double& v2lapltau_b_b,
+      |                                                                                                 ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:217:28: warning: unused parameter 'v2tau2_aa' [-Wunused-parameter]
+  217 |                    double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                            ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:217:47: warning: unused parameter 'v2tau2_ab' [-Wunused-parameter]
+  217 |                    double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                               ^
+/home/runner/work/gpu4pyscf/gpu4pyscf/build/temp.linux-x86_64/gpu4pyscf/deps/src/ExchCXX/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp:217:66: warning: unused parameter 'v2tau2_bb' [-Wunused-parameter]
+  217 |                    double& v2tau2_aa, double& v2tau2_ab, double& v2tau2_bb ) {
+      |                                                                  ^
+149 warnings generated.
+[100%] Linking CXX shared library libexchcxx.so
+[100%] Built target exchcxx
+[ 94%] Performing install step for 'ExchCXX'
+[ 11%] Linking CXX shared library libexchcxx.so
+[100%] Built target exchcxx
+Install the project...
+-- Install configuration: "Release"
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/libexchcxx.so
+-- Up-to-date: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exceptions
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exceptions/exchcxx_exception.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/kernels.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/backend.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/spin.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/functionals.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/enums/enums.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/factory
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/factory/xc_kernel.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/unused.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/div_ceil.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/bidirectional_map.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/exchcxx_macros.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/param_macros.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/util/named_type.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exchcxx.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/xc_kernel.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/xc_functional.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/boilerplate.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/libxc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/fwd.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/constants.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/b97_d.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_hf_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lrcwpbeh_hjs_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc17_1.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/p86vwn_ft_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc18_2.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/n12_sx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/tpss_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pkzb_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/p86_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bmk_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/sogga11_x_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_2x_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_m06_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x_015.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/sogga11_x_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_d_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bmk_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_d3_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/slater_exchange.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn3.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn_rpa.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pc07opt_k.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/revtpss_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pkzb_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m11_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/revtpss_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_sol_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scanl_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scan_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/n12_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_hx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scanl_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scan_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/screening_interface.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_v_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc18_1.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_so_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mbeef_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scanl_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x_033.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rscan_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_2x_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wpbeh_x_default0.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mpw91_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_l_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pc07_k.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_m06_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/b88.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m11_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rpbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pz81.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_l_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_hf_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_hx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_sx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lcwpbe_wpbeh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc17_2.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lyp.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_sx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/cf22d_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rscan_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda_mod.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hse06_wpbeh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lrcwpbe_hjs_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda_rpa.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ft98_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scan_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_so_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bc95_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_sx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/tpss_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pz81_mod.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw86_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hse03_wpbeh_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scanl_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hjs_pbe_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/optx_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scan_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_xc.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_2x_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/cf22d_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_2x_x.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_sx_c.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/interface.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernel_type.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/util.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/xc_kernel.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/impl/xc_kernel_fwd.hpp
+-- Up-to-date: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include
+-- Up-to-date: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/include/exchcxx/exchcxx_config.hpp
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXTargets.cmake
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXTargets-release.cmake
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXConfig.cmake
+-- Installing: /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXConfigVersion.cmake
+[ 94%] Completed 'ExchCXX'
+[ 94%] Built target ExchCXX
+[ 95%] Building CXX object gdft/CMakeFiles/exchcxx_shim.dir/exchcxx.cpp.o
+[ 95%] Built target exchcxx_shim
+[ 96%] Building CXX object gdft/CMakeFiles/gdft.dir/contract_rho.cu.o
+[ 99%] Building CXX object gdft/CMakeFiles/gdft.dir/nr_numint_sparse.cu.o
+[ 95%] Building CXX object gdft/CMakeFiles/gdft.dir/nr_eval_gto.cu.o
+[ 98%] Building CXX object gdft/CMakeFiles/gdft.dir/vv10.cu.o
+[ 98%] Building CXX object gdft/CMakeFiles/gdft.dir/gen_grids.cu.o
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gdft/gen_grids.cu:20:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:32:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:137:9: warning: 'NAN' macro redefined [-Wmacro-redefined]
+  137 | #define NAN std::numeric_limits<float>::quiet_NaN()
+      |         ^
+/usr/include/math.h:98:11: note: previous definition is here
+   98 | #  define NAN (__builtin_nanf (""))
+      |           ^
+1 warning generated.
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gdft/gen_grids.cu:20:
+In file included from /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gpu_compat.h:32:
+/home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/gsycl/sycl_device.hpp:137:9: warning: 'NAN' macro redefined [-Wmacro-redefined]
+  137 | #define NAN std::numeric_limits<float>::quiet_NaN()
+      |         ^
+/usr/include/math.h:98:11: note: previous definition is here
+   98 | #  define NAN (__builtin_nanf (""))
+      |           ^
+1 warning generated.
+[ 97%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/deps/lib/libxc.so
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[100%] Built target xc
+[100%] Linking CXX shared library /home/runner/work/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/libgdft.so
+llvm-foreach: adjusted number of threads to 4 (max safe available).
+[100%] Built target gdft
+creating build/lib/gpu4pyscf
+copying gpu4pyscf/_patch_pyscf.py -> build/lib/gpu4pyscf
+copying gpu4pyscf/__init__.py -> build/lib/gpu4pyscf
+copying gpu4pyscf/__config__.py -> build/lib/gpu4pyscf
+creating build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/dftd3.py -> build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/gcp.py -> build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/dftd4.py -> build/lib/gpu4pyscf/dispersion
+copying gpu4pyscf/dispersion/__init__.py -> build/lib/gpu4pyscf/dispersion
+creating build/lib/gpu4pyscf/fci
+copying gpu4pyscf/fci/__init__.py -> build/lib/gpu4pyscf/fci
+copying gpu4pyscf/fci/direct_spin1.py -> build/lib/gpu4pyscf/fci
+creating build/lib/gpu4pyscf/pbc
+copying gpu4pyscf/pbc/__init__.py -> build/lib/gpu4pyscf/pbc
+creating build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/int3c2e_bdiv.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/df.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/df_jk.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/int3c2e.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/__init__.py -> build/lib/gpu4pyscf/df
+copying gpu4pyscf/df/j_engine_3c2e.py -> build/lib/gpu4pyscf/df
+creating build/lib/gpu4pyscf/cupyx
+copying gpu4pyscf/cupyx/__init__.py -> build/lib/gpu4pyscf/cupyx
+creating build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/dispersion.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/uhf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/soscf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/cphf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/uhf_symm.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/gcp.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/_response_functions.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/diis.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/jk.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/smearing.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/int4c2e.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/ucphf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/__init__.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/stability.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/gdm.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/hf_lowmem.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/ghf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/hf_symm.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/hf.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/j_engine.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/addons.py -> build/lib/gpu4pyscf/scf
+copying gpu4pyscf/scf/rohf.py -> build/lib/gpu4pyscf/scf
+creating build/lib/gpu4pyscf/tools
+copying gpu4pyscf/tools/ase_interface.py -> build/lib/gpu4pyscf/tools
+copying gpu4pyscf/tools/__init__.py -> build/lib/gpu4pyscf/tools
+copying gpu4pyscf/tools/method_config.py -> build/lib/gpu4pyscf/tools
+creating build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/uhf.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/parameter.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/spectralib.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/_uhf_resp_sf.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/ris.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/rks.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/__init__.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/_krylov_tools.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/rhf.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/_lr_eig.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/uks.py -> build/lib/gpu4pyscf/tdscf
+copying gpu4pyscf/tdscf/math_helper.py -> build/lib/gpu4pyscf/tdscf
+creating build/lib/gpu4pyscf/x2c
+copying gpu4pyscf/x2c/sfx2c1e.py -> build/lib/gpu4pyscf/x2c
+copying gpu4pyscf/x2c/__init__.py -> build/lib/gpu4pyscf/x2c
+copying gpu4pyscf/x2c/x2c.py -> build/lib/gpu4pyscf/x2c
+creating build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/dispersion.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/uhf.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/rks.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/__init__.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/rhf.py -> build/lib/gpu4pyscf/hessian
+copying gpu4pyscf/hessian/uks.py -> build/lib/gpu4pyscf/hessian
+creating build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/__init__.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2_addons.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/mp2.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2_drivers.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfmp2_old.py -> build/lib/gpu4pyscf/mp
+copying gpu4pyscf/mp/dfump2.py -> build/lib/gpu4pyscf/mp
+creating build/lib/gpu4pyscf/geomopt
+copying gpu4pyscf/geomopt/ase_solver.py -> build/lib/gpu4pyscf/geomopt
+copying gpu4pyscf/geomopt/__init__.py -> build/lib/gpu4pyscf/geomopt
+creating build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/casscf.py -> build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/df.py -> build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/casci.py -> build/lib/gpu4pyscf/mcscf
+copying gpu4pyscf/mcscf/__init__.py -> build/lib/gpu4pyscf/mcscf
+creating build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/__init__.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/ir.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/shielding.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/eda.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/raman.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/c6.py -> build/lib/gpu4pyscf/properties
+copying gpu4pyscf/properties/polarizability.py -> build/lib/gpu4pyscf/properties
+creating build/lib/gpu4pyscf/cupy
+copying gpu4pyscf/cupy/__init__.py -> build/lib/gpu4pyscf/cupy
+copying gpu4pyscf/cupy/rawkernel.py -> build/lib/gpu4pyscf/cupy
+copying gpu4pyscf/cupy/cuda.py -> build/lib/gpu4pyscf/cupy
+creating build/lib/gpu4pyscf/drivers
+copying gpu4pyscf/drivers/dft_3c_driver.py -> build/lib/gpu4pyscf/drivers
+copying gpu4pyscf/drivers/__init__.py -> build/lib/gpu4pyscf/drivers
+creating build/lib/gpu4pyscf/sem
+copying gpu4pyscf/sem/lib.py -> build/lib/gpu4pyscf/sem
+copying gpu4pyscf/sem/__init__.py -> build/lib/gpu4pyscf/sem
+creating build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/wigner_sampling.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/fssh_tully.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/__init__.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/fssh_tddft.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/distributions.py -> build/lib/gpu4pyscf/md
+copying gpu4pyscf/md/fssh.py -> build/lib/gpu4pyscf/md
+creating build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/pcm.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/__init__.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/_attach_solvent.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/smd.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/_solvent_data.py -> build/lib/gpu4pyscf/solvent
+copying gpu4pyscf/solvent/smd_experiment.py -> build/lib/gpu4pyscf/solvent
+creating build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/rks_lowmem.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/xc_deriv.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/rkspu.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/cdft_soscf.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/ukspu.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/cdft_soscf_full.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/rks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/numint2c.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/roks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/__init__.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/libxc.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/ucdft.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/radi.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/libxc_structs.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/xc_alias.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/mcfun_gpu.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/gen_grid.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/numint.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/gks.py -> build/lib/gpu4pyscf/dft
+copying gpu4pyscf/dft/uks.py -> build/lib/gpu4pyscf/dft
+creating build/lib/gpu4pyscf/cc
+copying gpu4pyscf/cc/ccsd_incore.py -> build/lib/gpu4pyscf/cc
+copying gpu4pyscf/cc/__init__.py -> build/lib/gpu4pyscf/cc
+creating build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cutensor.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cuest_wrapper.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/utils.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/multi_gpu.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/diis.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/logger.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/__init__.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/memcpy.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cupy_helper.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/dpnp_helper.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/onemkl_lapack.py -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/cusolver.py -> build/lib/gpu4pyscf/lib
+creating build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrhf_grad_nacv.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks_ris.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tduks_sf.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks_grad_nacv.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks_ris_grad_nacv.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/__init__.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrhf.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/finite_diff.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/tdrks.py -> build/lib/gpu4pyscf/nac
+copying gpu4pyscf/nac/mecp.py -> build/lib/gpu4pyscf/nac
+creating build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/int3c1e.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/__init__.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/mole.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/int3c1e_ip.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/int3c1e_ipip.py -> build/lib/gpu4pyscf/gto
+copying gpu4pyscf/gto/ecp.py -> build/lib/gpu4pyscf/gto
+creating build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/itrf.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/external_field.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/__init__.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/hirshfeld.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/chelpg.py -> build/lib/gpu4pyscf/qmmm
+copying gpu4pyscf/qmmm/mbis.py -> build/lib/gpu4pyscf/qmmm
+creating build/lib/gpu4pyscf/pop
+copying gpu4pyscf/pop/__init__.py -> build/lib/gpu4pyscf/pop
+copying gpu4pyscf/pop/esp.py -> build/lib/gpu4pyscf/pop
+creating build/lib/gpu4pyscf/gw
+copying gpu4pyscf/gw/gw_ac.py -> build/lib/gpu4pyscf/gw
+copying gpu4pyscf/gw/rpa.py -> build/lib/gpu4pyscf/gw
+copying gpu4pyscf/gw/__init__.py -> build/lib/gpu4pyscf/gw
+creating build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/dispersion.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/uhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/rkspu.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tdrks_ris.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/ukspu.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tduks_sf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/rks.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tduhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/__init__.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tduks.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tdrhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/rhf.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/ucdft.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/tdrks.py -> build/lib/gpu4pyscf/grad
+copying gpu4pyscf/grad/uks.py -> build/lib/gpu4pyscf/grad
+creating build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/rsdf_builder.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/df.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/fft.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/aft.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/df_jk.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/fft_jk.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/int3c2e.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/__init__.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/aft_jk.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/ft_ao.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/df_jk_real.py -> build/lib/gpu4pyscf/pbc/df
+copying gpu4pyscf/pbc/df/int2c2e.py -> build/lib/gpu4pyscf/pbc/df
+creating build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/slabdipole.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/uhf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/soscf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/kghf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/slabgate.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/rsjk.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/smearing.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/kuhf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/__init__.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/ghf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/khf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/hf.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/j_engine.py -> build/lib/gpu4pyscf/pbc/scf
+copying gpu4pyscf/pbc/scf/addons.py -> build/lib/gpu4pyscf/pbc/scf
+creating build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/k2gamma.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/__init__.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/discretization.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/pbc.py -> build/lib/gpu4pyscf/pbc/tools
+copying gpu4pyscf/pbc/tools/magmom.py -> build/lib/gpu4pyscf/pbc/tools
+creating build/lib/gpu4pyscf/pbc/x2c
+copying gpu4pyscf/pbc/x2c/x2c1e.py -> build/lib/gpu4pyscf/pbc/x2c
+copying gpu4pyscf/pbc/x2c/sfx2c1e.py -> build/lib/gpu4pyscf/pbc/x2c
+copying gpu4pyscf/pbc/x2c/__init__.py -> build/lib/gpu4pyscf/pbc/x2c
+creating build/lib/gpu4pyscf/pbc/hessian
+copying gpu4pyscf/pbc/hessian/__init__.py -> build/lib/gpu4pyscf/pbc/hessian
+copying gpu4pyscf/pbc/hessian/gamma_hessian.py -> build/lib/gpu4pyscf/pbc/hessian
+creating build/lib/gpu4pyscf/pbc/properties
+copying gpu4pyscf/pbc/properties/__init__.py -> build/lib/gpu4pyscf/pbc/properties
+creating build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kgks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kukspu.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/multigrid.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/krkspu.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/rks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/numint2c.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/multigrid_v3.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kuks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/__init__.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/multigrid_v2.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/gen_grid.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/numint.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/krks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/gks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/uks.py -> build/lib/gpu4pyscf/pbc/dft
+copying gpu4pyscf/pbc/dft/kucdft.py -> build/lib/gpu4pyscf/pbc/dft
+creating build/lib/gpu4pyscf/pbc/lib
+copying gpu4pyscf/pbc/lib/kpts_helper.py -> build/lib/gpu4pyscf/pbc/lib
+copying gpu4pyscf/pbc/lib/__init__.py -> build/lib/gpu4pyscf/pbc/lib
+creating build/lib/gpu4pyscf/pbc/gto
+copying gpu4pyscf/pbc/gto/int1e.py -> build/lib/gpu4pyscf/pbc/gto
+copying gpu4pyscf/pbc/gto/__init__.py -> build/lib/gpu4pyscf/pbc/gto
+copying gpu4pyscf/pbc/gto/cell.py -> build/lib/gpu4pyscf/pbc/gto
+creating build/lib/gpu4pyscf/pbc/gw
+copying gpu4pyscf/pbc/gw/krpa.py -> build/lib/gpu4pyscf/pbc/gw
+copying gpu4pyscf/pbc/gw/__init__.py -> build/lib/gpu4pyscf/pbc/gw
+copying gpu4pyscf/pbc/gw/krgw_ac.py -> build/lib/gpu4pyscf/pbc/gw
+creating build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/slabdipole.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/uhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kukspu.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/slabgate.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krkspu.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/rks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kuhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kuks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/__init__.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krks_stress.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/rhf.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/krks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/pp.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/uks.py -> build/lib/gpu4pyscf/pbc/grad
+copying gpu4pyscf/pbc/grad/kucdft.py -> build/lib/gpu4pyscf/pbc/grad
+creating build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/uhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/krhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/kuhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/__init__.py -> build/lib/gpu4pyscf/pbc/df/grad
+copying gpu4pyscf/pbc/df/grad/rhf.py -> build/lib/gpu4pyscf/pbc/df/grad
+creating build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/overlap.py -> build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/polarization.py -> build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/__init__.py -> build/lib/gpu4pyscf/pbc/properties/berry
+copying gpu4pyscf/pbc/properties/berry/berry_phase.py -> build/lib/gpu4pyscf/pbc/properties/berry
+creating build/lib/gpu4pyscf/pbc/gto/pseudo
+copying gpu4pyscf/pbc/gto/pseudo/pp_int.py -> build/lib/gpu4pyscf/pbc/gto/pseudo
+copying gpu4pyscf/pbc/gto/pseudo/__init__.py -> build/lib/gpu4pyscf/pbc/gto/pseudo
+creating build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/uhf.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/rks.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/__init__.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/rhf.py -> build/lib/gpu4pyscf/df/hessian
+copying gpu4pyscf/df/hessian/uks.py -> build/lib/gpu4pyscf/df/hessian
+creating build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrhf_grad_nacv.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks_ris.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tduks_sf.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks_grad_nacv.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks_ris_grad_nacv.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/__init__.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrhf.py -> build/lib/gpu4pyscf/df/nac
+copying gpu4pyscf/df/nac/tdrks.py -> build/lib/gpu4pyscf/df/nac
+creating build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/uhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tdrks_ris.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tduks_sf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/rks.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tduhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/__init__.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tduks.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tdrhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/rhf.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/ucdft.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/tdrks.py -> build/lib/gpu4pyscf/df/grad
+copying gpu4pyscf/df/grad/uks.py -> build/lib/gpu4pyscf/df/grad
+creating build/lib/gpu4pyscf/cupyx/scipy
+copying gpu4pyscf/cupyx/scipy/linalg.py -> build/lib/gpu4pyscf/cupyx/scipy
+copying gpu4pyscf/cupyx/scipy/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy
+copying gpu4pyscf/cupyx/scipy/cupyx_linalg.py -> build/lib/gpu4pyscf/cupyx/scipy
+creating build/lib/gpu4pyscf/cupyx/scipy/fft
+copying gpu4pyscf/cupyx/scipy/fft/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/fft
+creating build/lib/gpu4pyscf/cupyx/scipy/special
+copying gpu4pyscf/cupyx/scipy/special/linalg.py -> build/lib/gpu4pyscf/cupyx/scipy/special
+copying gpu4pyscf/cupyx/scipy/special/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/special
+creating build/lib/gpu4pyscf/cupyx/scipy/sparse
+copying gpu4pyscf/cupyx/scipy/sparse/linalg.py -> build/lib/gpu4pyscf/cupyx/scipy/sparse
+copying gpu4pyscf/cupyx/scipy/sparse/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/sparse
+creating build/lib/gpu4pyscf/cupyx/scipy/spatial
+copying gpu4pyscf/cupyx/scipy/spatial/distance.py -> build/lib/gpu4pyscf/cupyx/scipy/spatial
+copying gpu4pyscf/cupyx/scipy/spatial/__init__.py -> build/lib/gpu4pyscf/cupyx/scipy/spatial
+creating build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/electron_repulsion.py -> build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/corrections.py -> build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/__init__.py -> build/lib/gpu4pyscf/sem/data
+copying gpu4pyscf/sem/data/atomic.py -> build/lib/gpu4pyscf/sem/data
+creating build/lib/gpu4pyscf/sem/dmp
+copying gpu4pyscf/sem/dmp/sp2_purification.py -> build/lib/gpu4pyscf/sem/dmp
+copying gpu4pyscf/sem/dmp/__init__.py -> build/lib/gpu4pyscf/sem/dmp
+creating build/lib/gpu4pyscf/sem/scf
+copying gpu4pyscf/sem/scf/diis.py -> build/lib/gpu4pyscf/sem/scf
+copying gpu4pyscf/sem/scf/__init__.py -> build/lib/gpu4pyscf/sem/scf
+copying gpu4pyscf/sem/scf/hf.py -> build/lib/gpu4pyscf/sem/scf
+creating build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/fock.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/__init__.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/eri_2c2e.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/hcore2c1e.py -> build/lib/gpu4pyscf/sem/integral
+copying gpu4pyscf/sem/integral/eri_1c2e.py -> build/lib/gpu4pyscf/sem/integral
+creating build/lib/gpu4pyscf/sem/gto
+copying gpu4pyscf/sem/gto/params.py -> build/lib/gpu4pyscf/sem/gto
+copying gpu4pyscf/sem/gto/__init__.py -> build/lib/gpu4pyscf/sem/gto
+copying gpu4pyscf/sem/gto/mole.py -> build/lib/gpu4pyscf/sem/gto
+creating build/lib/gpu4pyscf/sem/grad
+copying gpu4pyscf/sem/grad/__init__.py -> build/lib/gpu4pyscf/sem/grad
+copying gpu4pyscf/sem/grad/rhf.py -> build/lib/gpu4pyscf/sem/grad
+creating build/lib/gpu4pyscf/solvent/tdscf
+copying gpu4pyscf/solvent/tdscf/pcm.py -> build/lib/gpu4pyscf/solvent/tdscf
+copying gpu4pyscf/solvent/tdscf/__init__.py -> build/lib/gpu4pyscf/solvent/tdscf
+creating build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/pcm.py -> build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/__init__.py -> build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/smd.py -> build/lib/gpu4pyscf/solvent/hessian
+copying gpu4pyscf/solvent/hessian/smd_experiment.py -> build/lib/gpu4pyscf/solvent/hessian
+creating build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/pcm.py -> build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/__init__.py -> build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/smd.py -> build/lib/gpu4pyscf/solvent/grad
+copying gpu4pyscf/solvent/grad/smd_experiment.py -> build/lib/gpu4pyscf/solvent/grad
+creating build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/itrf.py -> build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/__init__.py -> build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/mm_mole.py -> build/lib/gpu4pyscf/qmmm/pbc
+copying gpu4pyscf/qmmm/pbc/tools.py -> build/lib/gpu4pyscf/qmmm/pbc
+creating build/lib/gpu4pyscf/gw/utils
+copying gpu4pyscf/gw/utils/gw_cp_helper.py -> build/lib/gpu4pyscf/gw/utils
+copying gpu4pyscf/gw/utils/__init__.py -> build/lib/gpu4pyscf/gw/utils
+running egg_info
+creating gpu4pyscf_sycl2026.2.0.egg-info
+writing gpu4pyscf_sycl2026.2.0.egg-info/PKG-INFO
+writing dependency_links to gpu4pyscf_sycl2026.2.0.egg-info/dependency_links.txt
+writing requirements to gpu4pyscf_sycl2026.2.0.egg-info/requires.txt
+writing top-level names to gpu4pyscf_sycl2026.2.0.egg-info/top_level.txt
+writing manifest file 'gpu4pyscf_sycl2026.2.0.egg-info/SOURCES.txt'
+reading manifest file 'gpu4pyscf_sycl2026.2.0.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+warning: no files found matching 'AUTHORS'
+warning: no files found matching 'NOTICE'
+warning: no previously-included files matching '*.py[cod]' found anywhere in distribution
+warning: no previously-included files matching '*~' found anywhere in distribution
+no previously-included directories found matching '*/__pycache__'
+warning: no previously-included files matching '*' found under directory '*/__pycache__'
+no previously-included directories found matching 'gpu4pyscf/lib/build'
+no previously-included directories found matching 'bytedance'
+no previously-included directories found matching 'benchmarks'
+no previously-included directories found matching 'builder'
+no previously-included directories found matching 'dockerfiles'
+no previously-included directories found matching 'docker'
+no previously-included directories found matching 'examples'
+no previously-included directories found matching 'wheelhouse'
+warning: manifest_maker: MANIFEST.in, line 20: 'recursive-exclude' expects <dir> <pattern1> <pattern2> ...
+
+warning: no files found matching '*.dat' under directory 'gpu4pyscf'
+warning: no previously-included files found matching 'gpu4pyscf/lib.deps'
+warning: no previously-included files found matching '*.so.*'
+adding license file 'LICENSE'
+writing manifest file 'gpu4pyscf_sycl2026.2.0.egg-info/SOURCES.txt'
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.deps.lib' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.deps.lib' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.deps.lib' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.deps.lib' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.deps.lib' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+copying gpu4pyscf/lib/libcupy_helper.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgdft.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgecp.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgint.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgsycl.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf_md.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf_rys.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libmgrid_v3.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libonemkl_helper.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libpbc.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libsem.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libsolvent.so -> build/lib/gpu4pyscf/lib
+creating build/lib/gpu4pyscf/lib/deps/lib
+copying gpu4pyscf/lib/deps/lib/libexchcxx.so -> build/lib/gpu4pyscf/lib/deps/lib
+copying gpu4pyscf/lib/deps/lib/libxc.so -> build/lib/gpu4pyscf/lib/deps/lib
