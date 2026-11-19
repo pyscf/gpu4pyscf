@@ -1,5 +1,5 @@
 set(GPU_SRCS
-  rys_jk_driver.cu rys_roots_dat.cu
+  rys_jk_driver.cu
   nr_sr_estimator.c nr_sr_estimator.cu
   rys_contract_j.cu cart2xyz.c #unrolled_rys_j.cu
   rys_contract_k.cu unrolled_rys_k.cu
@@ -18,11 +18,6 @@ set(GPU_SRCS
 
 if (USE_SYCL)
   add_library(gvhf_rys SHARED ${GPU_SRCS})
-
-  # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
-  # also compile it as its own TU.
-  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
-    PROPERTIES HEADER_FILE_ONLY ON)
 
   # Per-TU SYCL kernel-name disambiguation.
   #
@@ -64,7 +59,7 @@ if (USE_SYCL)
   set_target_properties(gvhf_rys PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 else()
-  list(APPEND GPU_SRCS rys_constant.cu)
+  list(APPEND GPU_SRCS rys_constant.cu rys_roots_dat.cu)
   add_library(gvhf_rys SHARED ${GPU_SRCS})
 
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
