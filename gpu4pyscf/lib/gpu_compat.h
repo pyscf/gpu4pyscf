@@ -106,6 +106,13 @@ struct gpu4pyscf_dim3 {
 
 #endif
 
+// Lookup tables with fixed initial values. SYCL exposes the values in each
+// translation unit; CUDA/HIP retain separately compiled device globals.
+#ifdef USE_SYCL
+#define DEVICE_CONST inline constexpr
+#else
+#define DEVICE_CONST __device__
+#endif
 
 // Static shared / local memory declaration, arrays and scalars alike.
 // Usage: DECLARE_SHARED(double, tile, [16][16]);  DECLARE_SHARED(int, ntasks);

@@ -13,11 +13,8 @@ set_target_properties(gvhf_md PROPERTIES
 
 if (USE_SYCL)
 
-  # Under CUDA, md_indices.cu is a translation unit: it defines the
-  # __device__/__constant__ index tables that every other TU declares
-  # extern. SYCL has no cross-TU __device__ linkage, so md_j.cuh
-  # #includes md_indices.cu directly and the tables become
-  # `inline constexpr`. Compiling it as a TU as well would be redundant.
+  # SYCL includes these tables through md_j.cuh as inline constexpr values.
+  # Do not also compile the table definitions as a separate translation unit.
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/md_indices.cu
     PROPERTIES HEADER_FILE_ONLY ON)
 
