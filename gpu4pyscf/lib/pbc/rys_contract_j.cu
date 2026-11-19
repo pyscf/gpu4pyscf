@@ -20,9 +20,7 @@
 #include <type_traits>
 
 #include "gint/cuda_alloc.cuh"
-#ifndef USE_SYCL
 #include "gvhf-rys/gxyz_offset.cuh"
-#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -470,9 +468,6 @@ while (1) {
 }
 }
 
-#ifdef USE_SYCL
-extern void RYS_make_gxyz_offset(GXYZOffset *gxyz_offset, BoundsInfo &bounds);
-#endif
 
 extern void threads_scheme_for_k(int *scheme, BoundsInfo &bounds,
                                  int shm_size, int gout_stride_max);
@@ -531,12 +526,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
     cudaMemsetAsync(head, 0, sizeof(int)*3, stream);
 
     if (1) {
-#ifdef USE_SYCL
-        GXYZOffset gxyz_offset[256*3];
-        RYS_make_gxyz_offset(gxyz_offset, bounds);
-#else
         const GXYZOffset *gxyz_offset = RYS_get_gxyz_offset(li, lj, lk, ll);
-#endif
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         int gout_pattern = (((li == 0) << 3) |
                             ((lj == 0) << 2) |
