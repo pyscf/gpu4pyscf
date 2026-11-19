@@ -316,9 +316,12 @@ def eigh_std(a):
     its divide-and-conquer binding is unimplemented there; syevj is ~15-80x slower
     for large matrices and can even OOM. Route HIP through hipSOLVER's syevd/heevd
     (divide-and-conquer) instead. On NVIDIA/CUDA, cupy.linalg.eigh already uses the
-    fast syevd, so it is left byte-for-byte unchanged.
+    fast syevd, so it is left byte-for-byte unchanged. Batched (ndim > 2) and
+    single-precision inputs, which syevd does not take, also stay on
+    cupy.linalg.eigh.
     '''
-    if cupy.cuda.runtime.is_hip:
+    if (cupy.cuda.runtime.is_hip and a.ndim == 2 and
+            a.dtype in (np.float64, np.complex128)):
         return syevd(a)
     return cupy.linalg.eigh(a)
 
