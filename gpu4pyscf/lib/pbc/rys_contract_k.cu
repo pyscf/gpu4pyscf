@@ -494,12 +494,12 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             auto blocks = make_grid(workers, 1);
             auto threads = make_block(scheme[0], scheme[1]);
             int reserved_shm_size = scheme[3];
-            LAUNCH_KERNEL( rys_k_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_k_kernel, blocks, threads, buflen, stream,
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 dm_penalty, pool, head + offset/256,
-                gout_pattern, reserved_shm_size, stream);
+                gout_pattern, reserved_shm_size);
         };
 
         launch(0, 256);

@@ -905,9 +905,9 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 }
             }
             cudaMemsetAsync(head, 0, sizeof(int), stream);
-            LAUNCH_KERNEL( rys_j_with_gout_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_j_with_gout_kernel, blocks, threads, buflen, stream,
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size, stream);
+                s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
             int reserved_shm_size = buflen;
@@ -931,9 +931,9 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 jk1.dm = dm + (size_t)i_dm * nao_pairs;
                 jk1.vj = vj + (size_t)i_dm * nao_pairs;
                 cudaMemsetAsync(head, 0, sizeof(int), stream);
-                LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen,
+                LAUNCH_KERNEL( rys_j_kernel, blocks, threads, buflen, stream,
                     *envs, jk1, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-                    s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size, stream);
+                    s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
             }
         }
     }

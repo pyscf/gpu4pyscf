@@ -1802,25 +1802,25 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
     switch (deriv) {
     case 0:
         if (cart) {
-            LAUNCH_KERNEL(_cart_deriv0_kernel, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_cart_deriv0_kernel, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         } else {
-            LAUNCH_KERNEL(_sph_deriv0_kernel, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_sph_deriv0_kernel, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     case 1:
         if (cart) {
-            LAUNCH_KERNEL(_cart_deriv1_kernel, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_cart_deriv1_kernel, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         } else {
-            LAUNCH_KERNEL(_sph_deriv1_kernel, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_sph_deriv1_kernel, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     case 2:
         if (cart) {
-            LAUNCH_KERNEL(_cart_deriv1_kernel, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
-            LAUNCH_KERNEL(_cart_ip2_kernel, blocks, threads, 0, out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_cart_deriv1_kernel, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_cart_ip2_kernel, blocks, threads, 0, stream, out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
         } else {
-            LAUNCH_KERNEL(_sph_deriv1_kernel, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
-            LAUNCH_KERNEL(_sph_ip2_kernel, blocks, threads, 0, out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_sph_deriv1_kernel, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
+            LAUNCH_KERNEL(_sph_ip2_kernel, blocks, threads, 0, stream, out+4*nao*ngrids, *envs, grids, ngrids, nao, rcut);
         }
         break;
     default:
@@ -1845,16 +1845,16 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
     switch (deriv) {
     case 0:
         if (cart) {
-            LAUNCH_KERNEL(_deriv0_strain_tensor_kernel<true>, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_deriv0_strain_tensor_kernel<true>, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         } else {
-            LAUNCH_KERNEL(_deriv0_strain_tensor_kernel<false>, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_deriv0_strain_tensor_kernel<false>, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     case 1:
         if (cart) {
-            LAUNCH_KERNEL(_deriv1_strain_tensor_kernel<true>, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_deriv1_strain_tensor_kernel<true>, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         } else {
-            LAUNCH_KERNEL(_deriv1_strain_tensor_kernel<false>, blocks, threads, 0, out, *envs, grids, ngrids, nao, rcut, stream);
+            LAUNCH_KERNEL(_deriv1_strain_tensor_kernel<false>, blocks, threads, 0, stream, out, *envs, grids, ngrids, nao, rcut);
         }
         break;
     default:

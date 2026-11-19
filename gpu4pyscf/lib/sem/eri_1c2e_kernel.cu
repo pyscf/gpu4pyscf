@@ -127,10 +127,10 @@ int launch_rsc_kernel_c(
     int blocks = (n_tasks + threads - 1) / threads;
     auto block = make_block(threads);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL( rsc_kernel, grid, block, 0,
+    LAUNCH_KERNEL( rsc_kernel, grid, block, 0, stream,
         n_tasks, hartree2ev, k_vec,
         na, ea, nb, eb, nc, ec, nd, ed,
-        fx_table, b_table, out_val, stream);
+        fx_table, b_table, out_val);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

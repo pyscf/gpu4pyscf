@@ -513,10 +513,10 @@ int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
     cudaFuncSetAttribute(ejk_int3c2e_ipip_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( ejk_int3c2e_ipip_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ejk_int3c2e_ipip_kernel, blocks, threads, shm_size, stream,
         ejk, dm, density_auxvec, omega, lr_factor, sr_factor, *envs,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
-        gout_stride_lookup, ao_pair_loc, aux_offset, naux, stream);
+        gout_stride_lookup, ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip2: %s\n", cudaGetErrorString(err));

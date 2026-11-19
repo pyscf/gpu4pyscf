@@ -610,11 +610,11 @@ int PBC_jk_derivatives(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        LAUNCH_KERNEL( rys_ejk_deriv_kernel, blocks, threads, buflen,
+        LAUNCH_KERNEL( rys_ejk_deriv_kernel, blocks, threads, buflen, stream,
                 *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
                 bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                pool, dd_pool, head, reserved_shm_size, stream);
+                pool, dd_pool, head, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

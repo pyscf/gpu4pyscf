@@ -1312,8 +1312,8 @@ int launch_multipole_eval_kernel_c(
     int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
-    LAUNCH_KERNEL( multipole_eval_kernel, grid, block, 0,
-        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec, stream);
+    LAUNCH_KERNEL( multipole_eval_kernel, grid, block, 0, stream,
+        n_pairs, r_vec, l1_vec, l2_vec, m_vec, da_vec, db_vec, add_vec, out_vec);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1334,8 +1334,8 @@ int launch_solve_poij_kernel_c(
 
     auto block = make_block(threads_per_block);
     auto grid = make_grid(blocks_per_grid);
-    LAUNCH_KERNEL( solve_poij_kernel, grid, block, 0,
-        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev, stream);
+    LAUNCH_KERNEL( solve_poij_kernel, grid, block, 0, stream,
+        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1359,13 +1359,13 @@ int launch_test_rijkl_kernel_c(
     
     auto block = make_block(threads);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL( test_rijkl_kernel, grid, block, 0,
+    LAUNCH_KERNEL( test_rijkl_kernel, grid, block, 0, stream,
         n_tasks, n_atom,
         ni_vec, nj_vec, ij_vec, kl_vec,
         li_vec, lj_vec, lk_vec, ll_vec,
         ic_vec, r_vec,
         po_tensor, ddp_tensor, core_rho, ch,
-        out_val, stream);
+        out_val);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1393,7 +1393,7 @@ int launch_calc_local_rep_core_kernel_c(
     
     auto block = make_block(threads);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL( calc_local_rep_core_kernel, grid, block, 0,
+    LAUNCH_KERNEL( calc_local_rep_core_kernel, grid, block, 0, stream,
         n_pairs, pair_i_vec, pair_j_vec, ele_id, r_vec, n_atom,
         am, ad, aq, dd, qq,
         po_tensor, ddp_tensor, core_rho, ch,
@@ -1401,7 +1401,7 @@ int launch_calc_local_rep_core_kernel_c(
         task_action, task_target, task_ij, task_kl,
         task_li, task_lj, task_lk, task_ll,
         HATREE2EV,
-        rep_out, core_out, gab_out, stream);
+        rep_out, core_out, gab_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -1424,11 +1424,11 @@ int launch_global_transform_kernel_c(
     
     auto block = make_block(threads);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL( global_transform_kernel, grid, block, 0,
+    LAUNCH_KERNEL( global_transform_kernel, grid, block, 0, stream,
         n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
         rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
         tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,
-        w_out, e1b_out, e2a_out, enuc_out, stream);
+        w_out, e1b_out, e2a_out, enuc_out);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

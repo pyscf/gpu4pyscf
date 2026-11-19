@@ -497,11 +497,11 @@ int fill_int3c2e_ip1(double *out, RysIntEnvVars *envs,
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    LAUNCH_KERNEL( int3c2e_ip1_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int3c2e_ip1_kernel, blocks, threads, shm_size, stream,
         out, *envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
-        nao_pairs, naux, stream);
+        nao_pairs, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
@@ -520,11 +520,11 @@ int fill_int3c2e_ipaux(double *out, RysIntEnvVars *envs,
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(int3c2e_ipaux_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    LAUNCH_KERNEL( int3c2e_ipaux_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int3c2e_ipaux_kernel, blocks, threads, shm_size, stream,
         out, *envs, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset,
-        nao_pairs, naux, stream);
+        nao_pairs, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));

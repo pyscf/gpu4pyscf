@@ -55,7 +55,7 @@
 #define LAUNCH_OVERLAP_KERNEL(KERNEL, nbatches_, out_, ...) { \
     auto blocks = make_grid(nbatches_); \
     auto threads = make_block(THREADS); \
-    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, out_, *envs, __VA_ARGS__, stream); \
+    LAUNCH_KERNEL( KERNEL, blocks, threads, shm_size, stream, out_, *envs, __VA_ARGS__); \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA Error in " #KERNEL ": %s\n", cudaGetErrorString(err)); \
@@ -1227,8 +1227,8 @@ int PBCovlp_derivatives(double *grad, double *sigma, double *dm,
     cudaFuncSetAttribute(ovlp_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( ovlp_derivatives_kernel, blocks, threads, shm_size,
-            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
+    LAUNCH_KERNEL( ovlp_derivatives_kernel, blocks, threads, shm_size, stream,
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ovlp_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1244,8 +1244,8 @@ int PBCkin_derivatives(double *grad, double *sigma, double *dm,
     cudaFuncSetAttribute(kin_derivatives_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( kin_derivatives_kernel, blocks, threads, shm_size,
-            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
+    LAUNCH_KERNEL( kin_derivatives_kernel, blocks, threads, shm_size, stream,
+            grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in kin_derivatives kernel: %s\n", cudaGetErrorString(err));
@@ -1269,8 +1269,8 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
     int nbatches = (npairs + 255) / 256;
     auto blocks = make_grid(nbatches);
     auto threads = make_block(256);
-    LAUNCH_KERNEL( ovlp_mask_estimation_kernel, blocks, threads, 0,
+    LAUNCH_KERNEL( ovlp_mask_estimation_kernel, blocks, threads, 0, stream,
             ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff, bvkmesh_Ls,
-            ish0, ish1, jsh0, jsh1, stream);
+            ish0, ish1, jsh0, jsh1);
 }
 }

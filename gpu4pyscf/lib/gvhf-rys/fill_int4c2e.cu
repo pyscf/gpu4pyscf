@@ -435,9 +435,9 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
         return 1;
     }
 
-    LAUNCH_KERNEL( int4c2e_kernel, blocks, threads, buflen,
+    LAUNCH_KERNEL( int4c2e_kernel, blocks, threads, buflen, stream,
         out, *envs, bounds, q_cond_ij, q_cond_kl, ij_pair_loc, kl_pair_loc,
-        pool, head, nf, nao_pairs, reserved_shm_size, omega, lr_factor, sr_factor, stream);
+        pool, head, nf, nao_pairs, reserved_shm_size, omega, lr_factor, sr_factor);
 
     err = cudaGetLastError();
     if (err != cudaSuccess) {

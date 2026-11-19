@@ -92,9 +92,9 @@ int launch_calc_pair_e2e_c(
     int blocks = (n_pairs + threads - 1) / threads;
     auto block = make_block(threads);
     auto grid = make_grid(blocks);
-    LAUNCH_KERNEL( calc_pair_e2e_kernel, grid, block, 0,
+    LAUNCH_KERNEL( calc_pair_e2e_kernel, grid, block, 0, stream,
         w_1d, P_AA, P_BB, P_AB,
-        pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs, stream);
+        pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) return 1;
     return 0;

@@ -301,10 +301,10 @@ int orth_aft_mgga_mat(double *out, cuDoubleComplex *vrhoG, cuDoubleComplex *vtau
     int ntile_batch = (ntiles + TILES_PER_BATCH-1) / TILES_PER_BATCH;
     auto threads = make_block(THREADS);
     auto grids = make_grid(ntile_batch*npair);
-    LAUNCH_KERNEL( orth_mgga_mat_kernel, grids, threads, 0,
+    LAUNCH_KERNEL( orth_mgga_mat_kernel, grids, threads, 0, stream,
                     out, vrhoG, vtauG, bas_ij_idx, G_bases, L_bases,
                     mesh_cum, nimgs_cum, npair, ntiles_x, ntiles_y,
-                    ntiles_z, *envs, stream);
+                    ntiles_z, *envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_mgga_mat_kernel: %s\n", cudaGetErrorString(err));

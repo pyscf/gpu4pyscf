@@ -27,12 +27,7 @@
 #define DM_BLOCK        7
 #define GOUT_WIDTH      54
 
-// The generated file defines its own (device-side) LAUNCH_KERNEL; restore
-// gpu_compat.h's launcher after the include, as fill_int3c2e.cu does.
-#pragma push_macro("LAUNCH_KERNEL")
-#undef LAUNCH_KERNEL
 #include "unrolled_ejk_int3c2e_ip1.cu"
-#pragma pop_macro("LAUNCH_KERNEL")
 
 __global__ static
 void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
@@ -778,11 +773,11 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    LAUNCH_KERNEL( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size, stream,
         ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
         omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-        ao_pair_loc, aux_offset, naux, stream);
+        ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
@@ -806,12 +801,12 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
     auto threads = make_block(THREADS);
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
-        LAUNCH_KERNEL( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size,
+        LAUNCH_KERNEL( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size, stream,
             ejk+n*natm*3, ejk_aux ? ejk_aux+n*natm*3 : (double *)NULL,
             dm, density_auxvec, n_dm-n,
             omega, lr_factor, sr_factor, *envs,
             shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offset, npairs, naux, stream);
+            ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange
             dm += DM_BLOCK * (size_t)npairs * naux;
         } else {

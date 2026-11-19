@@ -624,8 +624,8 @@ int PBC_ft_ao_deriv(double *grad, double *sigma, double *auxvec, double2 *dm_aux
     int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
     auto threads = make_block(NG_PER_BLOCK, nsh_per_block);
     auto blocks = make_grid(nbatches_grids, nbatches_shls);
-    LAUNCH_KERNEL( ft_ao_deriv_kernel, blocks, threads, 0,
-            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids, stream);
+    LAUNCH_KERNEL( ft_ao_deriv_kernel, blocks, threads, 0, stream,
+            grad, sigma, auxvec, dm_auxG, GvT, *envs, ngrids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_deriv: %s\n", cudaGetErrorString(err));
@@ -647,9 +647,9 @@ int PBC_ft_aopair_ej_deriv(double *out, double *sigma, double *dm,
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
-    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size, stream,
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry, stream);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_deriv: %s\n", cudaGetErrorString(err));
@@ -671,9 +671,9 @@ int PBC_ft_aopair_ek_deriv(double *out, double *sigma,
     int Gv_batches = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     auto threads = make_block(NG_PER_BLOCK, NSP_PER_BLOCK);
     auto blocks = make_grid(nbatches_shl_pair, Gv_batches);
-    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_deriv_kernel, blocks, threads, shm_size, stream,
             out, sigma, nullptr, dm_vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry, stream);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_deriv: %s\n", cudaGetErrorString(err));

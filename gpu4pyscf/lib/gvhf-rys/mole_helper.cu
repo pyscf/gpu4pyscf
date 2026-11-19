@@ -49,13 +49,13 @@
 #define LAUNCH_BRA_KERNEL(KERNEL, counts_, nbas_, nbatch_col_, ...) { \
     auto _blocks = make_grid(nbatch_col_, nbas_, counts_); \
     auto _threads = make_block(THREADS); \
-    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__, stream); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, stream, __VA_ARGS__); \
 }
 
 #define LAUNCH_KET_KERNEL(KERNEL, nbas_, nrow_, ...) { \
     auto _blocks = make_grid((nrow_+ROW_BLKSIZE-1)/ROW_BLKSIZE, (nbas_+TILE_X-1)/TILE_X); \
     auto _threads = make_block(TILE_X, TILE_Y); \
-    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, __VA_ARGS__, stream); \
+    LAUNCH_KERNEL( KERNEL, _blocks, _threads, 0, stream, __VA_ARGS__); \
 }
 
 static __global__

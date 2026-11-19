@@ -50,9 +50,9 @@
     auto _rys_blocks = make_grid(workers, 1); \
     auto _rys_threads = make_block(nsq_per_block, gout_stride); \
     LAUNCH_KERNEL( KERNEL, _rys_blocks, _rys_threads, \
-        (buflen)*sizeof(double), \
+        (buflen)*sizeof(double), stream, \
         _rys_envs, _rys_kmat, _rys_bounds, \
         pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
         nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
-        s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head, stream); \
+        s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); \
   }

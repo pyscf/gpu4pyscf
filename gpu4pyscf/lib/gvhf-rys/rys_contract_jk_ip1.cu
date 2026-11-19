@@ -1748,10 +1748,10 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
                 return 1;
             }
         }
-        LAUNCH_KERNEL( rys_vjk_ip1_kernel, blocks, threads, buflen,
+        LAUNCH_KERNEL( rys_vjk_ip1_kernel, blocks, threads, buflen, stream,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, nf,
-            reserved_shm_size, stream);
+            reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1844,10 +1844,10 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                 return 1;
             }
         }
-        LAUNCH_KERNEL( rys_ejk_ip1_kernel, blocks, threads, buflen,
+        LAUNCH_KERNEL( rys_ejk_ip1_kernel, blocks, threads, buflen, stream,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head, dd_pool, nf,
-            reserved_shm_size, stream);
+            reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1946,10 +1946,10 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
                 jk.k_factor = 1.; // ensure not dropping by schwarz screening
             }
         }
-        LAUNCH_KERNEL( rys_ejk_ip1_multidm_kernel, blocks, threads, buflen,
+        LAUNCH_KERNEL( rys_ejk_ip1_multidm_kernel, blocks, threads, buflen, stream,
             envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
             q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
-            pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size, stream);
+            pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);
         head++;
     }
     cudaError_t err = cudaGetLastError();
@@ -2040,10 +2040,10 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
             jk.k_factor = 1.; // ensure not dropping by schwarz screening
         }
     }
-    LAUNCH_KERNEL( rys_ejk_ip1_sum_kernel, blocks, threads, buflen,
+    LAUNCH_KERNEL( rys_ejk_ip1_sum_kernel, blocks, threads, buflen, stream,
         envs, jk, bounds, j_factor, k_factor, dm1, dm2,
         q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
-        pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size, stream);
+        pool, head, dd_pool, dd_cache_size, nf, reserved_shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip1_sum, li,lj,lk,ll = %d,%d,%d,%d, error message = %s\n",

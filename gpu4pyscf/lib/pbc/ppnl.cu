@@ -910,9 +910,9 @@ static int ppnl_derivatives(double *grad, double *sigma, double *dm,
     if (err == cudaSuccess) {
         auto blocks = make_grid(nbatches_shl_pair);
         auto threads = make_block(THREADS);
-        LAUNCH_KERNEL( ppnl_derivatives_kernel<RADIAL>, blocks, threads, shm_size,
+        LAUNCH_KERNEL( ppnl_derivatives_kernel<RADIAL>, blocks, threads, shm_size, stream,
             grad, sigma, dm, *envs, shl_pair_offsets, bas_ij_idx,
-            gout_stride_lookup, naoi, naoj, stream);
+            gout_stride_lookup, naoi, naoj);
         err = cudaGetLastError();
     }
     if (err != cudaSuccess) {
@@ -932,9 +932,9 @@ int PBCint1e_r2_origi(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r2_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( int1e_r2_origi_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r2_origi_kernel, blocks, threads, shm_size, stream,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset, stream);
+            naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r2_origi kernel: %s\n", cudaGetErrorString(err));
@@ -951,9 +951,9 @@ int PBCint1e_r4_origi(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r4_origi_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( int1e_r4_origi_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r4_origi_kernel, blocks, threads, shm_size, stream,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset, stream);
+            naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r4_origi kernel: %s\n", cudaGetErrorString(err));
@@ -970,9 +970,9 @@ int PBCint1e_r2_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r2_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( int1e_r2_origi_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r2_origi_ip2_kernel, blocks, threads, shm_size, stream,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset, stream);
+            naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r2_origi_ip2 kernel: %s\n", cudaGetErrorString(err));
@@ -989,9 +989,9 @@ int PBCint1e_r4_origi_ip2(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaFuncSetAttribute(int1e_r4_origi_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( int1e_r4_origi_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int1e_r4_origi_ip2_kernel, blocks, threads, shm_size, stream,
             out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-            naoi, naoj, ij_offset, stream);
+            naoi, naoj, ij_offset);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_r4_origi_ip2 kernel: %s\n", cudaGetErrorString(err));

@@ -22,10 +22,7 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/build_rys_gxyz.cuh"
 #include "int3c2e_create_tasks.cuh"
-#pragma push_macro("LAUNCH_KERNEL")
-#undef LAUNCH_KERNEL
 #include "unrolled_int3c2e.cu"
-#pragma pop_macro("LAUNCH_KERNEL")
 
 #define REMOTE_THRESHOLD 50
 #define GOUT_WIDTH      54
@@ -1132,13 +1129,13 @@ int PBCsr_int3c2e_latsum23(double *out, double omega, PBCIntEnvVars *envs, uint3
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( pbc_int3c2e_latsum23_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( pbc_int3c2e_latsum23_kernel, blocks, threads, shm_size, stream,
             out, omega, *envs, pool, task_pool, c2s_pool, shm_size,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, sp_img_offsets,
             gout_stride_lookup, ao_pair_loc,
             ao_pair_offset, aux_offset, nauxbas, naux, to_sph,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, nbatches_shl_pair, nbatches_ksh, stream);
+            head, nbatches_shl_pair, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
@@ -1156,8 +1153,8 @@ int bvk_ovlp_img_counts(int *img_counts, PBCIntEnvVars *envs,
     int nbatches = (envs->nbas * bvk_nbas + threads-1) / threads;
     auto blocks = make_grid(nbatches);
     auto thread_block = make_block(threads);
-    LAUNCH_KERNEL( ovlp_img_counts_kernel, blocks, thread_block, 0,
-            img_counts, *envs, exps, log_coef, log_cutoff, permutation_symmetry, stream);
+    LAUNCH_KERNEL( ovlp_img_counts_kernel, blocks, thread_block, 0, stream,
+            img_counts, *envs, exps, log_coef, log_cutoff, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_img_counts: %s\n", cudaGetErrorString(err));
@@ -1173,8 +1170,8 @@ int bvk_ovlp_img_idx(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx, 
     int blocks = (npairs + threads-1) / threads;
     auto grid = make_grid(blocks);
     auto thread_block = make_block(threads);
-    LAUNCH_KERNEL( ovlp_img_idx_kernel, grid, thread_block, 0,
-        img_idx, img_offsets, bas_ij_idx, npairs, *envs, exps, log_coef, log_cutoff, stream);
+    LAUNCH_KERNEL( ovlp_img_idx_kernel, grid, thread_block, 0, stream,
+        img_idx, img_offsets, bas_ij_idx, npairs, *envs, exps, log_coef, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_img_idx: %s\n", cudaGetErrorString(err));

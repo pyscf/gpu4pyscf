@@ -591,11 +591,11 @@ int PBCcontract_int3c2e_dm(double *out, double *dm, double omega, PBCIntEnvVars 
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_dm_kernel, blocks, threads, shm_size, stream,
             out, dm, omega, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, nbatches_shl_pair, stream);
+            head, nbatches_shl_pair);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
@@ -618,11 +618,11 @@ int PBCcontract_int3c2e_auxvec(double *out, double *auxvec, double omega, PBCInt
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_auxvec_kernel, blocks, threads, shm_size, stream,
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, npairs, nbatches_ksh, stream);
+            head, npairs, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_auxvec: %s\n", cudaGetErrorString(err));

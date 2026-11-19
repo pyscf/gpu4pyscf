@@ -35,8 +35,8 @@
 
 #define GINT_CAT_(a, b) a##b
 #define GINT_CAT(a, b)  GINT_CAT_(a, b)
-#define GINT_LAUNCH_KERNEL(KERNEL, ...) \
-    LAUNCH_KERNEL(KERNEL, blocks, threads, 0, __VA_ARGS__, *envs, *eri, *offsets);
+#define GINT_LAUNCH_KERNEL(KERNEL, STREAM) \
+    LAUNCH_KERNEL(KERNEL, blocks, threads, 0, STREAM, *envs, *eri, *offsets);
 
 static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTEnvVars *envs, cudaStream_t stream)
 {
@@ -96,8 +96,8 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
             }
             auto threads = make_block(THREADSX*THREADSY);
             auto blocks = make_grid(ntasks_ij, ntasks_kl);
-            LAUNCH_KERNEL( GINTfill_int3c2e_kernel, blocks, threads, shm_size,
-                *envs, *eri, *offsets, stream);
+            LAUNCH_KERNEL( GINTfill_int3c2e_kernel, blocks, threads, shm_size, stream,
+                *envs, *eri, *offsets);
         }
     }
 

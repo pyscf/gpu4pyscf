@@ -1187,8 +1187,8 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, cud
 
     auto threads = make_block(NG_PER_BLOCK, nsh_per_block);
     auto blocks = make_grid(nbatches_grids, nbatches_shls);
-    LAUNCH_KERNEL( ft_ao_bdiv_kernel, blocks, threads, 0,
-            out, *envs, ngrids, grids, stream);
+    LAUNCH_KERNEL( ft_ao_bdiv_kernel, blocks, threads, 0, stream,
+            out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_bdiv_kernel: %s\n", cudaGetErrorString(err));
@@ -1216,10 +1216,10 @@ int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size, stream,
         out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
-        ao_loc, compressing, to_sph, head, nbatches_shl_pair, stream);
+        ao_loc, compressing, to_sph, head, nbatches_shl_pair);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));

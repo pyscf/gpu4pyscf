@@ -20,10 +20,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#pragma push_macro("LAUNCH_KERNEL")
-#undef LAUNCH_KERNEL
 #include "unrolled_int3c2e.cu"
-#pragma pop_macro("LAUNCH_KERNEL")
 #include "build_rys_gxyz.cuh"
 
 #define THREADS         256
@@ -1606,11 +1603,11 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( int3c2e_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int3c2e_kernel, blocks, threads, shm_size, stream,
         out, *envs, pool, omega, lr_factor, sr_factor,
         shl_pair_offsets, bas_ij_idx, ksh_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh, stream);
+        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
@@ -1627,9 +1624,9 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
     int aux_batches = (naux + threads - 1) / threads;
     auto blocks = make_grid(nshl_pair, aux_batches);
     auto thread_block = make_block(threads);
-    LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0,
+    LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0, stream,
         out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
-        naux, nao_sph, pair_compressed, stream);
+        naux, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));

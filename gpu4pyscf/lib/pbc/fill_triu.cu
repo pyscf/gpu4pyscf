@@ -138,8 +138,8 @@ int fill_indexed_triu(double *out, int *tril_idx, int *ki_idx,
 {
     auto threads = make_block(32, BLOCK_SIZE);
     auto blocks = make_grid((npairs+BLOCK_SIZE-1)/BLOCK_SIZE, nkpts);
-    LAUNCH_KERNEL(fill_indexed_triu_kernel, blocks, threads, 0,
-        out, tril_idx, ki_idx, npairs, nao, naux, stream);
+    LAUNCH_KERNEL(fill_indexed_triu_kernel, blocks, threads, 0, stream,
+        out, tril_idx, ki_idx, npairs, nao, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_indexed_triu: %s\n", cudaGetErrorString(err));
@@ -154,12 +154,12 @@ int fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
     auto threads = make_block(256);
     if (naux == 1) {
         auto blocks = make_grid((npairs+255)/256);
-        LAUNCH_KERNEL(fill_bvk_triu_naux1_kernel, blocks, threads, 0,
-            out, pair_address, conj_mapping, npairs, bvk_ncells, nao, stream);
+        LAUNCH_KERNEL(fill_bvk_triu_naux1_kernel, blocks, threads, 0, stream,
+            out, pair_address, conj_mapping, npairs, bvk_ncells, nao);
     } else {
         auto blocks = make_grid(npairs);
-        LAUNCH_KERNEL(fill_bvk_triu_kernel, blocks, threads, 0,
-            out, pair_address, conj_mapping, bvk_ncells, nao, naux, stream);
+        LAUNCH_KERNEL(fill_bvk_triu_kernel, blocks, threads, 0, stream,
+            out, pair_address, conj_mapping, bvk_ncells, nao, naux);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -174,8 +174,8 @@ int fill_bvk_triu_axis0(double *out, int *conj_mapping, int nao, int bvk_ncells,
     int nao_b = (nao + BLOCK_SIZE-1) / BLOCK_SIZE;
     auto threads = make_block(BLOCK_SIZE, BLOCK_SIZE);
     auto blocks = make_grid(nao_b, nao_b);
-    LAUNCH_KERNEL(fill_bvk_triu_axis0_kernel, blocks, threads, 0,
-        out, conj_mapping, bvk_ncells, nao, stream);
+    LAUNCH_KERNEL(fill_bvk_triu_axis0_kernel, blocks, threads, 0, stream,
+        out, conj_mapping, bvk_ncells, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_bvk_triu_axis0: %s\n", cudaGetErrorString(err));

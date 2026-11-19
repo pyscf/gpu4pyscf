@@ -1290,9 +1290,9 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
             }
         }
 
-        LAUNCH_KERNEL( rys_ejk_ip2_type12_kernel, blocks, threads, buflen,
+        LAUNCH_KERNEL( rys_ejk_ip2_type12_kernel, blocks, threads, buflen, stream,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf, stream);
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1383,9 +1383,9 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
             }
         }
 
-        LAUNCH_KERNEL( rys_ejk_ip2_type3_kernel, blocks, threads, buflen,
+        LAUNCH_KERNEL( rys_ejk_ip2_type3_kernel, blocks, threads, buflen, stream,
             envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf, stream);
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, nf);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

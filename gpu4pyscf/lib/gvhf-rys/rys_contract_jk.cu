@@ -427,10 +427,10 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                     return;
                 }
             }
-            LAUNCH_KERNEL( rys_jk_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( rys_jk_kernel, blocks, threads, buflen, stream,
                 *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
                 s_cond_ij, s_cond_kl, diffuse_exps, pool,
-                head + offset/256, gout_pattern, reserved_shm_size, stream);
+                head + offset/256, gout_pattern, reserved_shm_size);
         };
 
         launch(0, 256);

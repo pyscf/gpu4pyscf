@@ -500,10 +500,10 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( fill_s_estimator, blocks, threads, buflen,
+    LAUNCH_KERNEL( fill_s_estimator, blocks, threads, buflen, stream,
         s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
         diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
-        npairs, omega, tril_symmetry, Ecut_mask, stream);
+        npairs, omega, tril_symmetry, Ecut_mask);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -521,8 +521,8 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( q_cond_kernel, blocks, threads, shm_size,
-        q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega, stream);
+    LAUNCH_KERNEL( q_cond_kernel, blocks, threads, shm_size, stream,
+        q_cond, *envs, bas_ij_idx, gout_stride_lookup, npairs, omega);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -539,8 +539,8 @@ int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
     int ntile = (nish + tile - 1) / tile;
     auto blocks = make_grid(ntile);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( sort_pair_ij_kernel, blocks, threads, 0,
-        pair_ij, ish, jsh, nish, njsh, nbas, tile, stream);
+    LAUNCH_KERNEL( sort_pair_ij_kernel, blocks, threads, 0, stream,
+        pair_ij, ish, jsh, nish, njsh, nbas, tile);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCsort_pair_ij %s\n",

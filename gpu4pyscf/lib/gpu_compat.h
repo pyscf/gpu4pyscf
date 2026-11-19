@@ -30,19 +30,6 @@
 #ifdef USE_SYCL
 #include <optional>
 #include "gsycl/sycl_device.hpp"
-// CUDA's __forceinline__ implies `inline`, so upstream's
-// `__device__ __forceinline__` helpers can sit in headers/.cu files that
-// several TUs include. sycl_device.hpp's __forceinline__ is only the
-// always_inline attribute (external linkage, multiple definitions at link).
-#undef __forceinline__
-#define __forceinline__ inline __attribute__((always_inline))
-// CUDA's __syncthreads() needs no kernel-local state. sycl_device.hpp's
-// version reads a local `item`, which auto-generated kernels (kept
-// byte-identical to upstream) and helper functions do not declare. All
-// launches are 3-D nd_range, so get_nd_item<3>() is always well-formed.
-#undef __syncthreads
-#define __syncthreads() \
-    (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
 #else
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -182,45 +169,28 @@ inline sycl::range<3> make_block(
     return sycl::range<3>(z, y, x);
 }
 
+
+inline void dim3_set_x(sycl::range<3>& range, std::size_t value)
+{
+    range[2] = value;
+}
+
+inline void dim3_set_y(sycl::range<3>& range, std::size_t value)
+{
+    range[1] = value;
+}
+
+inline void dim3_set_z(sycl::range<3>& range, std::size_t value)
+{
+    range[0] = value;
+}
+
 namespace gpu4pyscf_detail {
 
 // LAUNCH_KERNEL helper machinery. The kernel name arrives as a non-type
 // template parameter (C++20): it is a constant expression, so the device
 // lambda invokes it directly and SYCL never sees a function pointer.
-// Argument handling:
-//  * every argument is copied by value into a std::tuple on the host (so
-//    `*envs`-style dereferences are evaluated at the call site);
-//  * a stream/queue argument (`sycl::queue*` / `sycl::queue&`) anywhere in
-//    the pack selects the launch stream and is removed from the kernel call.
-//    No ON_STREAM() marker needed; kernels never legitimately take a
-//    queue as a parameter.
-template <typename T>
-struct _is_stream
-    : std::bool_constant<
-          std::is_same_v<std::decay_t<T>, sycl::queue> ||
-          std::is_same_v<std::decay_t<T>, sycl::queue*>> {};
-
-inline sycl::queue* _stream_ptr(sycl::queue& r) { return &r; }
-inline sycl::queue* _stream_ptr(sycl::queue* p) { return p; }
-
-template <typename... Args>
-inline sycl::queue* _pick_stream(Args&&... args) {
-    sycl::queue* q = sycl_get_queue();
-    auto scan = [&](auto&& v) { if constexpr (_is_stream<decltype(v)>::value) q = _stream_ptr(v); };
-    (scan(args), ...);
-    return q;
-}
-
-template <class Tuple, std::size_t... I>
-inline auto _filter_streams(const Tuple& t, std::index_sequence<I...>) {
-    return std::tuple_cat(
-        [ ] (const auto& v) {
-            using E = std::remove_cv_t<std::remove_reference_t<decltype(v)>>;
-            if constexpr (_is_stream<E>::value) return std::tuple{};
-            else return std::tuple{v};
-        }(std::get<I>(t)) ... );
-}
-
+// Kernel arguments are copied on the host before capture by the device lambda.
 template <class Tuple, auto Kernel, std::size_t... I>
 inline void _apply_call(const Tuple& t, std::index_sequence<I...>) {
     Kernel(std::get<I>(t)...);
@@ -258,7 +228,7 @@ inline bool _shm_bytes_ok(sycl::queue &q, std::size_t shm_bytes, const char *ker
 template <auto Kernel, typename ShmT, typename... Args>
 inline void launch_kernel(sycl::range<3> grid,
                           sycl::range<3> block, ShmT shm_arg,
-                          Args... args) {
+                          cudaStream_t stream, Args... args) {
     static_assert(std::is_integral_v<ShmT>,
                   "LAUNCH_KERNEL: shm_size must be an integer byte count");
     if constexpr (std::is_signed_v<ShmT>) {
@@ -269,10 +239,9 @@ inline void launch_kernel(sycl::range<3> grid,
     }
     const std::size_t shm_size = static_cast<std::size_t>(shm_arg);
     namespace syclexp = sycl::ext::oneapi::experimental;
-    sycl::queue* q = _pick_stream(args...);
+    sycl::queue* q = &stream;
     if (!_shm_bytes_ok(*q, shm_size, __PRETTY_FUNCTION__)) return;
-    auto tup_all = std::make_tuple(args...);
-    auto tup = _filter_streams(tup_all, std::index_sequence_for<Args...>{});
+    auto tup = std::make_tuple(args...);
     try {
         const sycl::nd_range<3> ndr(grid * block, block);
         if (shm_size == 0) {
@@ -297,8 +266,8 @@ inline void launch_kernel(sycl::range<3> grid,
 
 } // namespace gpu4pyscf_detail
 
-#define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
-    { gpu4pyscf_detail::launch_kernel<kernel>(grid, block, shm_size, __VA_ARGS__); }
+#define LAUNCH_KERNEL(kernel, grid, block, shm_size, stream, ...) \
+    { gpu4pyscf_detail::launch_kernel<kernel>(grid, block, shm_size, stream, __VA_ARGS__); }
 
 #else
 // CUDA
@@ -318,58 +287,24 @@ inline dim3 make_block(
     return dim3(x, y, z);
 }
 
-namespace gpu4pyscf_detail {
 
-// Auto-detect stream argument anywhere in the pack (kernel args never carry
-// a real stream, so the trait-vs-value match is unambiguous).
-template <typename T>
-struct _is_stream
-    : std::bool_constant<std::is_same_v<std::decay_t<T>, cudaStream_t>> {};
-
-inline cudaStream_t _stream_ptr(cudaStream_t s) { return s; }
-
-template <typename... Args>
-inline cudaStream_t _pick_stream(Args&&... args) {
-    cudaStream_t s = 0;
-    auto scan = [&](auto&& v) { if constexpr (_is_stream<decltype(v)>::value) s = _stream_ptr(v); };
-    (scan(args), ...);
-    return s;
+inline void dim3_set_x(dim3& range, unsigned int value)
+{
+    range.x = value;
 }
 
-template <class Tuple, std::size_t... I>
-inline auto _filter_streams(const Tuple& t, std::index_sequence<I...>) {
-    return std::tuple_cat(
-        [ ] (const auto& v) {
-            using E = std::remove_cv_t<std::remove_reference_t<decltype(v)>>;
-            if constexpr (_is_stream<E>::value) return std::tuple{};
-            else return std::tuple{v};
-        }(std::get<I>(t)) ... );
+inline void dim3_set_y(dim3& range, unsigned int value)
+{
+    range.y = value;
 }
 
-// shm_size is the dynamic shared memory in BYTES: pass n * sizeof(T).
-template <class Kernel, typename ShmT, typename... Args>
-inline void launch_kernel(Kernel kernel, dim3 grid, dim3 block,
-                          ShmT shm_arg, Args... args) {
-    static_assert(std::is_integral_v<ShmT>,
-                  "LAUNCH_KERNEL: shm_size must be an integer byte count");
-    if constexpr (std::is_signed_v<ShmT>) {
-        if (shm_arg < 0) {
-            fprintf(stderr, "LAUNCH_KERNEL error: negative dynamic shared memory size [%s]\n",
-                    __PRETTY_FUNCTION__);
-            return;
-        }
-    }
-    const std::size_t shm_size = static_cast<std::size_t>(shm_arg);
-    cudaStream_t s = _pick_stream(args...);
-    auto tup = _filter_streams(std::make_tuple(args...), std::index_sequence_for<Args...>{});
-    std::apply([&](auto... a) {
-        kernel<<<grid, block, shm_size, s>>>(a...);
-    }, tup);
+inline void dim3_set_z(dim3& range, unsigned int value)
+{
+    range.z = value;
 }
 
-} // namespace gpu4pyscf_detail
-
-#define LAUNCH_KERNEL(kernel, grid, block, shm_size, ...) \
-    { gpu4pyscf_detail::launch_kernel(kernel, grid, block, shm_size, __VA_ARGS__); }
+// shm_size is the dynamic shared memory in bytes.
+#define LAUNCH_KERNEL(kernel, grid, block, shm_size, stream, ...) \
+    { (kernel)<<<grid, block, shm_size, stream>>>(__VA_ARGS__); }
 
 #endif

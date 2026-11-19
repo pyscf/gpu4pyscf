@@ -263,10 +263,10 @@ extern "C" {
     case (li * LMAX1 + lj): { \
         auto _threads = make_block(threads); \
         auto _grids = make_grid(ntasks); \
-        LAUNCH_KERNEL( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, \
+        LAUNCH_KERNEL( (eval_density_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, stream, \
             rho_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
                         atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
-                        da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible, stream); \
+                        da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
     } \
     break
 

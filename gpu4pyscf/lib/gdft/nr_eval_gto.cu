@@ -24,21 +24,6 @@
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-// Abstracts 2D kernel launch/setup syntax. blocks/threads/stream/gto_envs
-// must be in scope. The envs struct is materialized on the host in both
-// backends (its SYCL lambda capture would otherwise dereference a host
-// pointer on device).
-#define LAUNCH_KERNEL_ENV(KERNEL, ...) \
-    { \
-        auto _hostarg = (*gto_envs); \
-        LAUNCH_KERNEL(KERNEL, blocks, threads, 0, stream, __VA_ARGS__, _hostarg); \
-    }
-
-#define KERNEL_PROLOGUE_BAS_GRID() \
-    setup_context(); \
-    const int grid_id = global_x; \
-    int bas_id = blockIdx_y;
-
 #define NG_PER_BLOCK      256
 #define LMAX            8
 
@@ -387,11 +372,13 @@ template <int ANG> __global__
 static void _cart_kernel_deriv0(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
 
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
@@ -486,10 +473,13 @@ template <int ANG> __global__
 static void _cart_kernel_deriv1(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -735,10 +725,13 @@ template <int ANG> __global__
 static void _cart_kernel_deriv2(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -811,10 +804,13 @@ template <int ANG> __global__
 static void _cart_kernel_deriv3(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -909,10 +905,13 @@ template <int ANG> __global__
 static void _cart_kernel_deriv4(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -1037,10 +1036,12 @@ template <int ANG> __global__
 static void _sph_kernel_deriv0(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
@@ -1172,10 +1173,13 @@ template <int ANG> __global__
 static void _sph_kernel_deriv1(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -1492,10 +1496,13 @@ template <int ANG> __global__
 static void _sph_kernel_deriv2(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -1563,10 +1570,13 @@ template <int ANG> __global__
 static void _sph_kernel_deriv3(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -1656,10 +1666,13 @@ template <int ANG> __global__
 static void _sph_kernel_deriv4(BasOffsets offsets, GTOValEnvVars gto_envs)
 {
     int ngrids = offsets.ngrids;
-    KERNEL_PROLOGUE_BAS_GRID();
+    setup_context();
+    const int grid_id = global_x;
     if (grid_id >= ngrids) {
         return;
     }
+
+    int bas_id = blockIdx_y;
     int natm = gto_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
@@ -1803,8 +1816,8 @@ int GDFTeval_gto(double *ao, int deriv, int cart,
     offsets.bas_indices = bas_indices;
     offsets.nbas = local_ctr_offsets[nctr];
     offsets.nao = nao;
-    auto threads = MAKE_RANGE_2D(NG_PER_BLOCK, 1);
-    auto blocks  = MAKE_RANGE_2D((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK, 1);
+    auto threads = make_block(NG_PER_BLOCK, 1);
+    auto blocks  = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK, 1);
 
     for (int ictr = 0; ictr < nctr; ++ictr) {
         int local_ish = local_ctr_offsets[ictr];
@@ -1814,144 +1827,145 @@ int GDFTeval_gto(double *ao, int deriv, int cart,
         offsets.nprim = bas[NPRIM_OF+glob_ish*BAS_SLOTS];
         offsets.fac = CINTcommon_fac_sp(l);
 
-        BLOCKS_SET_Y(local_ctr_offsets[ictr+1] - local_ctr_offsets[ictr]);
-        if (BLOCKS_GET_Y() == 0){
+        int nbas = local_ctr_offsets[ictr+1] - local_ctr_offsets[ictr];
+        if (nbas == 0){
             continue;
         }
+        dim3_set_y(blocks, nbas);
 
         switch (deriv) {
         case 0:
             if (cart == 1) {
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv0<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv0<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv0<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv0<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv0<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv0<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv0<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv0<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv0<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default:fprintf(stderr, "l = %d not supported\n", l); }
             } else {
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv0<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_sph_kernel_deriv0 <8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv0<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv0<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv0 <2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv0 <3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv0 <4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv0 <5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv0 <6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv0 <7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv0 <8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             }
             break;
         case 1:
             if (cart == 1) {
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv1<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv1<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv1<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv1<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv1<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv1<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv1<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv1<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv1<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             } else {
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv1<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_sph_kernel_deriv1 <8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv1<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv1<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv1 <2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv1 <3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv1 <4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv1 <5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv1 <6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv1 <7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv1 <8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); }
             }
             break;
         case 2:
             if (cart == 1){
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv2<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv2<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv2<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv2<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv2<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv2<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv2<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv2<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv2<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break;}
             } else {
                 switch(l){
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv2<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_sph_kernel_deriv2<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv2<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv2<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv2<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv2<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv2<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv2<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv2<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv2<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv2<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
         case 3:
             if (cart == 1){
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv3<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv3<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv3<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv3<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv3<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv3<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv3<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv3<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv3<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
                 switch(l){
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv3<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_sph_kernel_deriv3<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv3<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv3<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv3<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv3<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv3<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv3<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv3<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv3<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv3<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
         case 4:
             if (cart == 1){
                 switch (l) {
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv4<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv4<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_cart_kernel_deriv4<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_cart_kernel_deriv4<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_cart_kernel_deriv4<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_cart_kernel_deriv4<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_cart_kernel_deriv4<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_cart_kernel_deriv4<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_cart_kernel_deriv4<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
                 switch(l){
-                case 0: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<0>, offsets) break;
-                case 1: LAUNCH_KERNEL_ENV(_cart_kernel_deriv4<1>, offsets) break;
-                case 2: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<2>, offsets) break;
-                case 3: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<3>, offsets) break;
-                case 4: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<4>, offsets) break;
-                case 5: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<5>, offsets) break;
-                case 6: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<6>, offsets) break;
-                case 7: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<7>, offsets) break;
-                case 8: LAUNCH_KERNEL_ENV(_sph_kernel_deriv4<8>, offsets) break;
+                case 0: LAUNCH_KERNEL(_cart_kernel_deriv4<0>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 1: LAUNCH_KERNEL(_cart_kernel_deriv4<1>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 2: LAUNCH_KERNEL(_sph_kernel_deriv4<2>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 3: LAUNCH_KERNEL(_sph_kernel_deriv4<3>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 4: LAUNCH_KERNEL(_sph_kernel_deriv4<4>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 5: LAUNCH_KERNEL(_sph_kernel_deriv4<5>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 6: LAUNCH_KERNEL(_sph_kernel_deriv4<6>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 7: LAUNCH_KERNEL(_sph_kernel_deriv4<7>, blocks, threads, 0, stream, offsets, *gto_envs) break;
+                case 8: LAUNCH_KERNEL(_sph_kernel_deriv4<8>, blocks, threads, 0, stream, offsets, *gto_envs) break;
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             }
             break;
@@ -1974,13 +1988,12 @@ int GDFTscreen_index(int8_t *non0shl_mask, double log_cutoff,
                  double *grids, int ngrids, int block_size,
                  int *atm, int natm, int *bas, int nbas, double *env, cudaStream_t stream)
 {
-    auto threads = MAKE_RANGE_2D(NG_PER_BLOCK, 1);
-    auto blocks  = MAKE_RANGE_2D((ngrids+block_size-1)/block_size,
+    auto threads = make_block(NG_PER_BLOCK, 1);
+    auto blocks  = make_grid((ngrids+block_size-1)/block_size,
                                   (nbas+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    // _screen_index takes no gto_envs; launch directly (LAUNCH_KERNEL appends envs).
     LAUNCH_KERNEL(_screen_index, blocks, threads, 0, stream,
-                      non0shl_mask, log_cutoff, grids, ngrids, block_size,
-                      atm, natm, bas, nbas, env);
+            non0shl_mask, log_cutoff, grids, ngrids, block_size,
+            atm, natm, bas, nbas, env);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
@@ -1993,25 +2006,26 @@ int GDFTscreen_index_legacy(int *non0shl_idx, double cutoff,
                  double *grids, int ngrids, int *ctr_offsets, int nctr, int *bas,
                  GTOValEnvVars *gto_envs, cudaStream_t stream)
 {
-    auto threads = MAKE_RANGE_2D(NG_PER_BLOCK, 1);
-    auto blocks  = MAKE_RANGE_2D((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK, 1);
+    auto threads = make_block(NG_PER_BLOCK, 1);
+    auto blocks  = make_grid((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK, 1);
 
     for (int ictr = 0; ictr < nctr; ictr++){
         int ish = ctr_offsets[ictr];
         const int l =  bas[ANG_OF+ish*BAS_SLOTS];
         int nprim = bas[NPRIM_OF+ish*BAS_SLOTS];
         int bas_offset = ctr_offsets[ictr];
-        BLOCKS_SET_Y(ctr_offsets[ictr+1] - bas_offset);
-        if (BLOCKS_GET_Y() == 0){
+        int nbas = ctr_offsets[ictr+1] - bas_offset;
+        dim3_set_y(blocks, nbas);
+        if (nbas == 0){
             continue;
         }
         if (l > 8){
             fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
-        LAUNCH_KERNEL_ENV(_screen_index_legacy,
+        LAUNCH_KERNEL(_screen_index_legacy, blocks, threads, 0, stream,
                 non0shl_idx, cutoff, l, nprim,
-                grids, ngrids, bas_offset);
+                grids, ngrids, bas_offset, *gto_envs);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -2022,6 +2036,3 @@ int GDFTscreen_index_legacy(int *non0shl_idx, double cutoff,
 }
 
 } // end extern "C"
-
-#undef LAUNCH_KERNEL
-#undef KERNEL_PROLOGUE_BAS_GRID

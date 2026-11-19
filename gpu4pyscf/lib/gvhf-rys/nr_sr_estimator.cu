@@ -413,8 +413,8 @@ int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     auto blocks = make_grid(sp_blocks);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( fill_s_estimator_kernel, blocks, threads, 0,
-        s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega, stream);
+    LAUNCH_KERNEL( fill_s_estimator_kernel, blocks, threads, 0, stream,
+        s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_s_estimator_kernel %s\n", cudaGetErrorString(err));
@@ -433,9 +433,9 @@ int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
     // uniform 3D launch serves both backends (x = THREADS, 1 batch/group).
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( int2e_qcond_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( int2e_qcond_kernel, blocks, threads, shm_size, stream,
         q_out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-        omega, lr_factor, sr_factor, stream);
+        omega, lr_factor, sr_factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2e_qcond_kernel: %s\n", cudaGetErrorString(err));

@@ -89,8 +89,8 @@ int estimate_aft_Ecut1(float *Ecut, int64_t *bas_ij_idx, PBCIntEnvVars *envs,
 {
     auto blocks = make_grid((npairs + THREADS-1)/THREADS);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL(estimate_aft_Ecut_kernel, blocks, threads, 0,
-        Ecut, bas_ij_idx, *envs, exps, coef, npairs, log_cutoff, stream);
+    LAUNCH_KERNEL(estimate_aft_Ecut_kernel, blocks, threads, 0, stream,
+        Ecut, bas_ij_idx, *envs, exps, coef, npairs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in estimate_aft_Ecut_kernel: %s\n", cudaGetErrorString(err));

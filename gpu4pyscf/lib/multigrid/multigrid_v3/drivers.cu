@@ -103,8 +103,8 @@ int fft_take(double2 *out, double2 *in, int *out_shape, int *in_shape, int count
     int nx = in_shape[0], ny = in_shape[1], nz = in_shape[2];
     auto threads = make_block(32, 16);
     auto grids = make_grid(mx, (my+15)/16);
-    LAUNCH_KERNEL( fft_take_kernel, grids, threads, 0,
-                    out, in, mx, my, mz, nx, ny, nz, counts, stream);
+    LAUNCH_KERNEL( fft_take_kernel, grids, threads, 0, stream,
+                    out, in, mx, my, mz, nx, ny, nz, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_take kernel: %s\n", cudaGetErrorString(err));
@@ -121,8 +121,8 @@ int fft_takebak(double2 *out, double2 *in, int *out_shape, int *in_shape, int co
     int nx = out_shape[0], ny = out_shape[1], nz = out_shape[2];
     auto threads = make_block(32, 16);
     auto grids = make_grid(mx, (my+15)/16);
-    LAUNCH_KERNEL( fft_takebak_kernel, grids, threads, 0,
-                    out, in, mx, my, mz, nx, ny, nz, counts, stream);
+    LAUNCH_KERNEL( fft_takebak_kernel, grids, threads, 0, stream,
+                    out, in, mx, my, mz, nx, ny, nz, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fft_takebak kernel: %s\n", cudaGetErrorString(err));

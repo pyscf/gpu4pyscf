@@ -383,10 +383,10 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
         if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
-            LAUNCH_KERNEL( pbc_md_j_kernel, blocks, threads, buflen,
+            LAUNCH_KERNEL( pbc_md_j_kernel, blocks, threads, buflen, stream,
                                 *envs, jmat, bounds, q_cond_ij, q_cond_kl,
                                 threads_ij, threads_kl, tilex, tiley,
-                                rt2_off, efg_off, stream);
+                                rt2_off, efg_off);
         }
     }
     cudaError_t err = cudaGetLastError();

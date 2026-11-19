@@ -23,8 +23,8 @@
     cudaFuncSetAttribute(KERNEL, cudaFuncAttributeMaxDynamicSharedMemorySize, \
                          ((SHM)+addition_buf)*sizeof(double)); \
     LAUNCH_KERNEL( KERNEL, _blocks, _threads, \
-        ((SHM)+addition_buf)*sizeof(double), \
-        *envs, *jk, *bounds, q_cond_ij, q_cond_kl, stream); \
+        ((SHM)+addition_buf)*sizeof(double), stream, \
+        *envs, *jk, *bounds, q_cond_ij, q_cond_kl); \
 }
 
 
@@ -4703,6 +4703,6 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
     return 1;
 }
 
-#undef LAUNCH_KERNEL
+#undef LAUNCH_MD_KERNEL
 #undef KERNEL_SETUP
 #undef KERNEL_ARGS

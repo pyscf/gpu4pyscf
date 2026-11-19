@@ -106,7 +106,10 @@ using double2 = sycl::double2;
 
 #define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3((d1), (d2), (d3))))
 #define norm3d(d1,d2,d3) (sycl::length(sycl::double3((d1), (d2), (d3))))
-#define __syncthreads() (sycl::group_barrier(item.get_group()))
+// Kernel launches use 3D nd_ranges. Retrieve the current work-item so device
+// helpers can call the barrier without declaring a local variable named item.
+#define __syncthreads() \
+    (sycl::group_barrier(syclex::this_work_item::get_nd_item<3>().get_group()))
 #define __syncwarps() (sycl::group_barrier(item.get_sub_group()))
 #define __threadfence_block() (sycl::atomic_fence(sycl::memory_order::seq_cst, sycl::memory_scope::work_group))
 // Optional 4th arg (width) is accepted for CUDA parity; callers pass warpSize,

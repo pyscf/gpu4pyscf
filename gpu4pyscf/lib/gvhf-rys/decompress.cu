@@ -106,8 +106,8 @@ int store_col_segment(double *out_cpu, double *inp, int nrow, int ncol, int col0
         fprintf(stderr, "store_col_segment address mapping error %s\n", cudaGetErrorString(err));
         return 1;
     }
-    LAUNCH_KERNEL(write_kernel, make_grid(nrow), make_block(512), 0,
-                  out_gpu, inp, (size_t)ncol, col0, col1, stream);
+    LAUNCH_KERNEL(write_kernel, make_grid(nrow), make_block(512), 0, stream,
+                  out_gpu, inp, (size_t)ncol, col0, col1);
     err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "store_col_segment error %s\n", cudaGetErrorString(err));

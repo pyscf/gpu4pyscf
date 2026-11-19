@@ -348,11 +348,11 @@ int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, double omega, PB
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto blocks = make_grid(workers);
     auto threads = make_block(THREADS);
-    LAUNCH_KERNEL( contract_int3c2e_pvp_auxvec_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( contract_int3c2e_pvp_auxvec_kernel, blocks, threads, shm_size, stream,
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,
-            head, npairs, nbatches_ksh, stream);
+            head, npairs, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_pvp_auxvec: %s\n", cudaGetErrorString(err));

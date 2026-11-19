@@ -351,11 +351,11 @@ extern "C" {
         
         auto block = make_block(threads);
         auto grid = make_grid(blocks);
-        LAUNCH_KERNEL( build_jk_2c2e_kernel, grid, block, 0,
+        LAUNCH_KERNEL( build_jk_2c2e_kernel, grid, block, 0, stream,
             w_1d, P, J, K,
             pair_i, pair_j, kr_offsets,
             aoslice, natorb, loc_row, loc_col,
-            npairs, nao, stream);
+            npairs, nao);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;
@@ -394,12 +394,12 @@ extern "C" {
         
         auto block = make_block(threads);
         auto grid = make_grid(blocks);
-        LAUNCH_KERNEL( build_jk_1c2e_kernel, grid, block, 0,
+        LAUNCH_KERNEL( build_jk_1c2e_kernel, grid, block, 0, stream,
             P, J, K,
             gss, gsp, hsp, gpp, gp2, repd,
             intij, intkl, intrep,
             aoslice, natorb, loc_row, loc_col,
-            natm, nao, num_d_pairs, stream);
+            natm, nao, num_d_pairs);
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             return 1;

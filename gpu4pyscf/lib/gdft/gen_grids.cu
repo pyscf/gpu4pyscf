@@ -848,19 +848,19 @@ int GDFTbecke_partition_weights(double *weights, const double *coords, const dou
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         } else {
-            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         } else {
-            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                            weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
         }
     }
     else {
@@ -891,19 +891,19 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
         } else {
-            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
         } else {
-            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                            dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
         }
     }
     else {
@@ -937,19 +937,19 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
                                 (natm   + n_atom_per_block - 1) / n_atom_per_block);
         if (scheme == GridPartitionScheme::original_becke) {
             if (if_radii_adjust) {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             } else {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             }
         } else if (scheme == GridPartitionScheme::stratmann) {
             if (if_radii_adjust) {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             } else {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             }
         }
         else {
@@ -967,19 +967,19 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
 
         if (scheme == GridPartitionScheme::original_becke) {
             if (if_radii_adjust) {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             } else {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             }
         } else if (scheme == GridPartitionScheme::stratmann) {
             if (if_radii_adjust) {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             } else {
-                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm, stream);
+                LAUNCH_KERNEL( (GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                                d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm);
             }
         }
         else {
@@ -1013,19 +1013,19 @@ int GDFTbecke_eval_PB(double *PB,
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<true, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         } else {
-            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0,
-                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke>), blocks, threads, 0, stream,
+                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<true, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         } else {
-            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0,
-                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm, stream);
+            LAUNCH_KERNEL( (GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann>), blocks, threads, 0, stream,
+                            PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         }
     }
     else {
@@ -1052,7 +1052,7 @@ int GDFTgroup_grids(int* group_ids, const double* atom_coords, const double* coo
     auto threads = make_block(NATOM_PER_BLOCK);
     auto blocks = make_grid((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
     LAUNCH_KERNEL(GDFTgroup_grids_kernel, blocks, threads, 0, stream,
-                  group_ids, atom_coords, coords, natm, ngrids, stream);
+                  group_ids, atom_coords, coords, natm, ngrids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of group grids: %s\n", cudaGetErrorString(err));

@@ -383,11 +383,11 @@ int GDFTscale_ao(double *out, double *ket, double *wv,
     auto threads = make_block(BLKSIZEX, BLKSIZEY);
     auto blocks = make_grid((ngrids+BLKSIZEX-1)/BLKSIZEX, (nao+BLKSIZEY-1)/BLKSIZEY);
     if (is_real) {
-        LAUNCH_KERNEL( dscale_ao_kernel, blocks, threads, 0,
-                        out, ket, wv, ngrids, nao, nvar, stream);
+        LAUNCH_KERNEL( dscale_ao_kernel, blocks, threads, 0, stream,
+                        out, ket, wv, ngrids, nao, nvar);
     } else {
-        LAUNCH_KERNEL( zscale_ao_kernel, blocks, threads, 0,
-                        out, ket, wv, ngrids, nao, nvar, stream);
+        LAUNCH_KERNEL( zscale_ao_kernel, blocks, threads, 0, stream,
+                        out, ket, wv, ngrids, nao, nvar);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

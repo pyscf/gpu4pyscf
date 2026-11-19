@@ -307,9 +307,9 @@ int e_int2c2e_ip2(double *out, double *dm, PBCIntEnvVars *envs,
     auto blocks = make_grid(nbatches_shl_pair);
     auto threads = make_block(THREADS);
     cudaFuncSetAttribute(e_int2c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    LAUNCH_KERNEL( e_int2c2e_ip2_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( e_int2c2e_ip2_kernel, blocks, threads, shm_size, stream,
         out, dm, *envs, omega, lr_factor, sr_factor,
-        shl_pair_offsets, bas_ij_idx, gout_stride_lookup, stream);
+        shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e_ip2 kernel: %s\n", cudaGetErrorString(err));

@@ -51,9 +51,9 @@
     auto _rys_blocks = make_grid(workers, 1); \
     auto _rys_threads = make_block(nsq_per_block, gout_stride); \
     LAUNCH_KERNEL( KERNEL, _rys_blocks, _rys_threads, \
-        (buflen)*sizeof(double), \
+        (buflen)*sizeof(double), stream, \
         _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
-        dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head, stream); \
+        dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); \
   }
 
 #define JKENERGY_KERNEL_ARGS \
@@ -84,8 +84,8 @@
     auto _rys_blocks = make_grid(workers, 1); \
     auto _rys_threads = make_block(nsq_per_block, gout_stride); \
     LAUNCH_KERNEL( KERNEL, _rys_blocks, _rys_threads, \
-        (buflen)*sizeof(double), \
+        (buflen)*sizeof(double), stream, \
         _rys_envs, _rys_jk, _rys_bounds, q_cond_ij, q_cond_kl, \
         dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, \
-        dd_pool, head, stream); \
+        dd_pool, head); \
   }

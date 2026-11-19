@@ -14,7 +14,7 @@
     int nauxbas, int naux, int to_sph, \
     int thread_id, int worker_id, double *shared_memory
 
-#define LAUNCH_KERNEL(KERNEL) \
+#define CALL_UNROLLED_KERNEL(KERNEL) \
     KERNEL(out, envs, img_pool, rem_task_idx, num_ijk_tasks, img_tile_size, \
     ijk_tasks_info, c2s_pool, omega, shm_size, iprim, jprim, kprim, bas_ij_idx, ao_pair_loc, \
     ao_pair_offset, aux_offset, nauxbas, naux, to_sph, thread_id, worker_id, shared_memory)
@@ -609,16 +609,18 @@ int int3c2e_unrolled(double *out, double omega, PBCIntEnvVars& envs, uint32_t *i
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_000); break;
+        CALL_UNROLLED_KERNEL(int3c2e_000); break;
     case 5: // li=1 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_100); break;
+        CALL_UNROLLED_KERNEL(int3c2e_100); break;
     case 6: // li=1 lj=1 lk=0
-        LAUNCH_KERNEL(int3c2e_110); break;
+        CALL_UNROLLED_KERNEL(int3c2e_110); break;
     case 25: // li=0 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_001); break;
+        CALL_UNROLLED_KERNEL(int3c2e_001); break;
     case 30: // li=1 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_101); break;
+        CALL_UNROLLED_KERNEL(int3c2e_101); break;
     default: return 0;
     }
     return 1;
 }
+
+#undef CALL_UNROLLED_KERNEL

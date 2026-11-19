@@ -708,9 +708,9 @@ int contract_ft_aopair(double *out, double *vG, PBCIntEnvVars *envs, int *head,
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
-    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size, stream,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head, stream);
+        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));
@@ -732,9 +732,9 @@ int contract_ft_pdotp(double *out, double *vG, PBCIntEnvVars *envs, int *head,
     cudaMemsetAsync(head, 0, sizeof(int), stream);
     auto threads = make_block(THREADS);
     auto blocks = make_grid(workers);
-    LAUNCH_KERNEL( ft_pdotp_kernel, blocks, threads, shm_size,
+    LAUNCH_KERNEL( ft_pdotp_kernel, blocks, threads, shm_size, stream,
         out, vG, *envs, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
-        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head, stream);
+        gout_stride_lookup, grids, ngrids, nbatches_shl_pair, compressing, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_pdotp_kernel: %s\n", cudaGetErrorString(err));
