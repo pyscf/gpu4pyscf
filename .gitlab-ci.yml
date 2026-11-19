@@ -15,7 +15,7 @@
 #         filesystem, keyed by pipeline id.
 # test  : the SCF suite (gpu4pyscf/scf) only, on one chiatta node.
 #
-# CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_AOT, CI_ROOT,
+# CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_ARCHITECTURES, CI_ROOT,
 # ZE_DRIVER_DIR, PYTEST_WORKERS; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
 # GITLAB_TRIGGER_TOKEN, GITHUB_GIST_TOKEN, GITHUB_STATUS_TOKEN, GITHUB_READ_TOKEN.
 # See .github/jlse/ci_sycl.sh, poll_prs.py and report_pr.py.

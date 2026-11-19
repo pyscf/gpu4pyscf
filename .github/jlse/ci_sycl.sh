@@ -8,7 +8,7 @@
 #
 # Optional environment (GitLab CI/CD variables):
 #   CI_ROOT        shared dir for envs, caches, builds  (default $HOME/gitlab-sycl-ci)
-#   SYCL_AOT       ON | OFF | auto                      (default auto: PVC -> ON)
+#   SYCL_ARCHITECTURES  generic | pvc                   (default generic)
 #   ZE_DRIVER_DIR  dir with libze_intel_gpu             (default /soft intel-gpu-umd 821.36)
 #   PYTEST_WORKERS                                      (default 4)
 #   PR_NUMBER, PR_REPO   set by the PR poller: build that GitHub PR's merge
@@ -142,22 +142,16 @@ do_build() {
   export PYTHONPATH="$SRC_DIR:$SRC_DIR/gpu4pyscf"
   toolchain_check || exit 1
 
-  # AOT only makes sense on PVC; elsewhere use generic spir64 JIT.
-  local AOT="${SYCL_AOT:-auto}"
-  if [ "$AOT" = auto ]; then
-    if python -c "import dpctl,sys; sys.exit(0 if any('Max' in d.name or 'Ponte' in d.name for d in dpctl.get_devices(device_type='gpu')) else 1)"; then
-      AOT=ON
-    else
-      AOT=OFF
-    fi
-  fi
-  echo "GPU4PYSCF_SYCL_AOT=$AOT" | tee "$LOG_DIR/20_aot.log"
+  export GPU4PYSCF_BACKEND=sycl
+  # Set SYCL_ARCHITECTURES=pvc for AOT compilation targeting PVC GPUs.
+  # Otherwise, use generic spir64 JIT so device code is compiled at runtime.
+  export SYCL_ARCHITECTURES="${SYCL_ARCHITECTURES:-generic}"
+  echo "SYCL_ARCHITECTURES=$SYCL_ARCHITECTURES" | tee "$LOG_DIR/20_architecture.log"
 
   export CMAKE_CONFIGURE_ARGS="-DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx \
-    -DCMAKE_Fortran_COMPILER=ifx -DUSE_SYCL=ON -DCMAKE_BUILD_TYPE=Release \
-    -DGPU4PYSCF_SYCL_AOT=$AOT \
+    -DCMAKE_Fortran_COMPILER=ifx -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-  python setup.py --sycl build 2>&1 | tee "$LOG_DIR/40_build.log"
+  python setup.py build 2>&1 | tee "$LOG_DIR/40_build.log"
   [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "build failed"; exit 1; }
   ccache -s || true
 
