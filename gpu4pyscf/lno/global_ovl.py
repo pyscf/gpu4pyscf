@@ -8,33 +8,11 @@ Only real molecular RHF is supported; other systems raise explicitly.
 from __future__ import annotations
 import time
 import numpy as np
-
-
-def _backend(name):
-    if name == 'numpy':
-        return np
-    if name == 'gpu':
-        try:
-            import cupy as cp
-        except ImportError as exc:
-            raise RuntimeError('04 global GPU AO2MO requires CuPy') from exc
-        if cp.cuda.runtime.getDeviceCount() < 1:
-            raise RuntimeError('04 global GPU AO2MO requires an NVIDIA GPU')
-        return cp
-    raise ValueError('Expected gpu or numpy backend')
-
-
-def _as_host(x, xp):
-    return x if xp is np else xp.asnumpy(x)
-
-
-def _sync(xp):
-    if xp is not np:
-        xp.cuda.get_current_stream().synchronize()
+import cupy as cp
 
 
 def transform_ovl(
-    with_df, coeff_occ, coeff_vir, out, *, backend='gpu',
+    with_df, coeff_occ, coeff_vir, out, *,
     workspace_mib=256, host_scratch_mib=256,
 ):
     """Stream DF factors and write the (ov|P) matrix into NumPy or HDF5.
@@ -44,7 +22,6 @@ def transform_ovl(
     supported as well.  `out` is NumPy array or h5py dataset.  Avoid any
     persistent O(nAO^4) or O(nAux*nAO^2) intermediates.
     """
-    xp = _backend(backend)
     co = np.asarray(coeff_occ)
     cv = np.asarray(coeff_vir)
     if co.dtype != np.float64 or cv.dtype != np.float64:
@@ -67,7 +44,7 @@ def transform_ovl(
     aux_block = min(naux, max(1, int(gpu_budget // (2*bytes_per_aux))))
     if 2*bytes_per_aux > gpu_budget:
         raise MemoryError('04 GPU workspace cannot hold a single unpacked AO factor; '
-                          'increase --global-ovl-workspace-mib or use CPU backend')
+                          'increase global_ovl_workspace_mib')
     # With HDF5, write complete occupied slabs, not millions of thin HDF5
     # hyperslabs.  Full NumPy storage can be written auxiliary-slab-wise.
     is_hdf5 = not isinstance(out, np.ndarray)
@@ -78,12 +55,12 @@ def transform_ovl(
     else:
         occ_block = no
     ti, tj = np.tril_indices(nao)
-    ii = xp.asarray(ti)
-    jj = xp.asarray(tj)
-    cvir = xp.asarray(cv, order='C')
+    ii = cp.asarray(ti)
+    jj = cp.asarray(tj)
+    cvir = cp.asarray(cv, order='C')
     # Keep occupied coefficients on the device and index only the current
     # occupied slab; this limits transferred coefficient data and GPU memory.
-    cocc = xp.asarray(co, order='C')
+    cocc = cp.asarray(co, order='C')
     max_block_seen = 0
     n_df_passes = 0
     n_df_chunks = 0
@@ -107,10 +84,10 @@ def transform_ovl(
                 b = slab.shape[0]
                 if p+b > naux:
                     raise RuntimeError('DF loop returned more auxiliary functions than get_naoaux')
-                src = xp.asarray(slab)
+                src = cp.asarray(slab)
                 if src.shape[1] == nao*(nao+1)//2:
                     # Expand the real symmetric packed AO factor on device.
-                    aofac = xp.empty((b,nao,nao),dtype=xp.float64)
+                    aofac = cp.empty((b,nao,nao),dtype=cp.float64)
                     aofac[:,ii,jj] = src
                     aofac[:,jj,ii] = src
                 elif src.shape[1] == nao*nao:
@@ -119,9 +96,9 @@ def transform_ovl(
                     raise ValueError(f'Unexpected DF AO factor width {src.shape[1]}')
                 # Two GEMMs: L^P_{mu,nu} C_{nu,a}, then C_{mu,i} L^P_{mu,a}
                 # -> (naux_block, nocc_block, nvir).  Real RHF, no conjugation.
-                partial = xp.matmul(aofac,cvir)
-                transformed = xp.matmul(cocc[:,i0:i1].T[None,:,:],partial)
-                block_host = _as_host(transformed.transpose(1,2,0),xp)
+                partial = cp.matmul(aofac,cvir)
+                transformed = cp.matmul(cocc[:,i0:i1].T[None,:,:],partial)
+                block_host = cp.asnumpy(transformed.transpose(1,2,0))
                 if is_hdf5:
                     host_slab[:,:,p:p+b] = block_host
                 else:
@@ -135,9 +112,9 @@ def transform_ovl(
         if is_hdf5:
             out[i0:i1,:,:] = host_slab
             del host_slab
-    _sync(xp)
+    cp.cuda.get_current_stream().synchronize()
     return {
-        'backend':backend,
+        'backend':'gpu',
         'nao':int(nao),'nocc':int(no),'nvir':int(nv),'naux':int(naux),
         'output_storage':'hdf5' if is_hdf5 else 'ram',
         'aux_block_requested':int(aux_block),
@@ -152,7 +129,7 @@ def transform_ovl(
     }
 
 
-def build_global_eris(mylno, *, backend='gpu', workspace_mib=256,
+def build_global_eris(mylno, *, workspace_mib=256,
                       host_scratch_mib=256):
     """Build PySCF-forge's original global LNO ERI interface with GPU ovL.
 
@@ -208,7 +185,7 @@ def build_global_eris(mylno, *, backend='gpu', workspace_mib=256,
         obj.ovL=np.empty((nocc,nvir,naux),dtype=np.float64)
     try:
         info=transform_ovl(mylno.with_df,occ,vir,obj.ovL,
-                           backend=backend,workspace_mib=workspace_mib,
+                           workspace_mib=workspace_mib,
                            host_scratch_mib=host_scratch_mib)
     except BaseException:
         if outcore:

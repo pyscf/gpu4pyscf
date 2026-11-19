@@ -14,43 +14,22 @@ Algorithm
    output to PySCF-compatible HDF5 datasets.  Full creates packed vvvv;
    DF writes only vvL and NEVER assembles full vvvv.
 
-The ``numpy`` backend is available for deterministic equation tests but
-is NOT a CUDA performance path.  The bridge selects the GPU backend.
 """
 from __future__ import annotations
 
 import time
 import numpy as np
+import cupy as cp
 
 
-def _arrays(backend):
-    if backend == 'numpy':
-        return np
-    if backend == 'gpu':
-        import cupy as cp
-        if cp.cuda.runtime.getDeviceCount() < 1:
-            raise RuntimeError('No CUDA device detected for fragment AO2MO')
-        return cp
-    raise ValueError("ao2mo backend must be 'numpy' or 'gpu'")
-
-
-def _synchronize(xp):
-    if xp is not np:
-        xp.cuda.get_current_stream().synchronize()
-
-
-def _to_cpu(xp, a):
-    return np.asarray(a) if xp is np else xp.asnumpy(a)
-
-
-def transform_ao_df_block(ao_factors, mo_coeff, *, xp=np, packed=True):
+def transform_ao_df_block(ao_factors, mo_coeff, *, packed=True):
     """Return (P,nmo,nmo) real DF 3-center integrals in an AO->MO basis.
 
     PySCF's AO `s2` order is lower-triangular row-major order.
     The same function is used by synthetic tests on NumPy and by CUDA.
     """
-    c = xp.asarray(mo_coeff, dtype=xp.float64)
-    z = xp.asarray(ao_factors, dtype=xp.float64)
+    c = cp.asarray(mo_coeff, dtype=cp.float64)
+    z = cp.asarray(ao_factors, dtype=cp.float64)
     if c.ndim != 2 or z.ndim != 2 and z.ndim != 3:
         raise ValueError('Expected MO matrix (nao,nmo) and AO factors')
     nao, _ = c.shape
@@ -58,8 +37,8 @@ def transform_ao_df_block(ao_factors, mo_coeff, *, xp=np, packed=True):
     if packed:
         if z.ndim != 2 or z.shape[1] != npair:
             raise ValueError(f'Expected AO s2 shape (naux_block,{npair}), got {z.shape}')
-        ind = xp.tril_indices(nao)
-        full = xp.zeros((z.shape[0],nao,nao),dtype=xp.float64)
+        ind = cp.tril_indices(nao)
+        full = cp.zeros((z.shape[0],nao,nao),dtype=cp.float64)
         full[:,ind[0],ind[1]] = z
         full[:,ind[1],ind[0]] = z
     else:
@@ -68,14 +47,14 @@ def transform_ao_df_block(ao_factors, mo_coeff, *, xp=np, packed=True):
         full = z
     # CuPy batched DGEMM; neither the AO nor the MO pair dimensions are
     # collapsed to create a four-index intermediate.
-    intermediate = xp.matmul(full,c)
-    result = xp.matmul(c.T[None,:,:],intermediate)
+    intermediate = cp.matmul(full,c)
+    result = cp.matmul(c.T[None,:,:],intermediate)
     return result
 
 
-def _packed_virtual(xp, transformed, no):
+def _packed_virtual(transformed, no):
     nv = transformed.shape[1]-no
-    ind = xp.tril_indices(nv)
+    ind = cp.tril_indices(nv)
     return transformed[:,no+ind[0],no+ind[1]]
 
 
@@ -93,7 +72,7 @@ def _allocate_factor_scratch(naux,no,nv,host_scratch_mib):
     return out,scratch,nbytes
 
 
-def _contract_rows(xp,A,B,destination,*,workspace_bytes, aux_block_cap=None):
+def _contract_rows(A,B,destination,*,workspace_bytes, aux_block_cap=None):
     """Stream (A.T @ B) in output-row / auxiliary blocks to a host dataset.
 
     A,B shapes: (naux,nleft), (naux,nright). Both may be HDF5 datasets.
@@ -108,7 +87,7 @@ def _contract_rows(xp,A,B,destination,*,workspace_bytes, aux_block_cap=None):
     row_block=max(1,min(nleft,int((budget//2)//max(8,8*nright))))
     for i0 in range(0,nleft,row_block):
         i1=min(nleft,i0+row_block)
-        out=xp.zeros((i1-i0,nright),dtype=xp.float64)
+        out=cp.zeros((i1-i0,nright),dtype=cp.float64)
         # Remaining budget shared by A(aux,row_block) and B(aux,nright).
         pcap=max(1,int((budget-out.nbytes)//max(8,8*((i1-i0)+nright))))
         if aux_block_cap is not None:
@@ -116,14 +95,14 @@ def _contract_rows(xp,A,B,destination,*,workspace_bytes, aux_block_cap=None):
         for p0 in range(0,naux,pcap):
             p1=min(naux,p0+pcap)
             # Slice is read on CPU, where HDF5 may be the scratch backend.
-            aa=xp.asarray(np.asarray(A[p0:p1,i0:i1]),dtype=xp.float64)
-            bb=xp.asarray(np.asarray(B[p0:p1,:]),dtype=xp.float64)
-            out += xp.matmul(aa.T,bb)
-        destination[i0:i1,:]=_to_cpu(xp,out)
-    _synchronize(xp)
+            aa=cp.asarray(np.asarray(A[p0:p1,i0:i1]),dtype=cp.float64)
+            bb=cp.asarray(np.asarray(B[p0:p1,:]),dtype=cp.float64)
+            out += cp.matmul(aa.T,bb)
+        destination[i0:i1,:]=cp.asnumpy(out)
+    cp.cuda.get_current_stream().synchronize()
 
 
-def _write_mo_eris(eris,fac,*,xp,mode,workspace_bytes,max_full_gib):
+def _write_mo_eris(eris,fac,*,mode,workspace_bytes,max_full_gib):
     from pyscf import lib
     no=eris.nocc
     nv=eris.fock.shape[0]-no
@@ -140,7 +119,7 @@ def _write_mo_eris(eris,fac,*,xp,mode,workspace_bytes,max_full_gib):
         full_bytes=8*p*p
         if full_bytes>float(max_full_gib)*2**30:
             raise MemoryError(f'Packed vvvv would require {full_bytes/2**30:.2f} GiB of scratch; '
-                              'use --eri-mode df or explicitly increase --ao2mo-max-full-gib')
+                              'select eri_mode=df or increase max_full_gib')
         eris.vvvv=file_obj.create_dataset('vvvv',(p,p),'f8')
     else:
         naux=fac['vv'].shape[0]
@@ -166,14 +145,14 @@ def _write_mo_eris(eris,fac,*,xp,mode,workspace_bytes,max_full_gib):
         inner=shape[2:]
         for r0 in range(0,left,flatrow):
             r1=min(left,r0+flatrow)
-            out=xp.zeros((r1-r0,right),dtype=xp.float64)
+            out=cp.zeros((r1-r0,right),dtype=cp.float64)
             pcap=max(1,int((workspace_bytes-out.nbytes)//max(8,8*((r1-r0)+right))))
             for k0 in range(0,A.shape[0],pcap):
                 k1=min(A.shape[0],k0+pcap)
-                ag=xp.asarray(np.asarray(A[k0:k1,r0:r1]))
-                bg=xp.asarray(np.asarray(B[k0:k1,:]))
+                ag=cp.asarray(np.asarray(A[k0:k1,r0:r1]))
+                bg=cp.asarray(np.asarray(B[k0:k1,:]))
                 out += ag.T @ bg
-            slab=_to_cpu(xp,out)
+            slab=cp.asnumpy(out)
             pos=r0
             while pos<r1:
                 first,second=divmod(pos,stride)
@@ -191,7 +170,7 @@ def _write_mo_eris(eris,fac,*,xp,mode,workspace_bytes,max_full_gib):
     else:
         temp=file_obj.create_dataset('_oovv_tril_scratch',(nocc_pair_rows,p),'f8')
         tmp_on_disk=True
-    _contract_rows(xp,fac['oo'],fac['vv'],temp,workspace_bytes=workspace_bytes)
+    _contract_rows(fac['oo'],fac['vv'],temp,workspace_bytes=workspace_bytes)
     tri=np.tril_indices(nv)
     for i in range(no):
         for j in range(no):
@@ -204,12 +183,12 @@ def _write_mo_eris(eris,fac,*,xp,mode,workspace_bytes,max_full_gib):
     if tmp_on_disk:
         del file_obj['_oovv_tril_scratch']
     if mode=='full':
-        _contract_rows(xp,fac['vv'],fac['vv'],eris.vvvv,workspace_bytes=workspace_bytes)
-    _synchronize(xp)
+        _contract_rows(fac['vv'],fac['vv'],eris.vvvv,workspace_bytes=workspace_bytes)
+    cp.cuda.get_current_stream().synchronize()
     return eris
 
 
-def fragment_ao2mo(mcc,mo_coeff=None,*,eri_mode='full',backend='gpu',
+def fragment_ao2mo(mcc,mo_coeff=None,*,eri_mode='full',
                     workspace_mib=256,ao_block_mib=96,
                     host_scratch_mib=1024,max_full_gib=16):
     """Construct PySCF-forge-compatible LAS ERIs using GPU GEMMs.
@@ -228,7 +207,6 @@ def fragment_ao2mo(mcc,mo_coeff=None,*,eri_mode='full',backend='gpu',
     df=getattr(mcc._scf,'with_df',None)
     if df is None:
         raise ValueError('02 requires DF-RHF AO factors (mf.with_df)')
-    xp=_arrays(backend)
     if eri_mode=='df':
         eris=impl._DFChemistsERIs()
     else:
@@ -250,14 +228,14 @@ def fragment_ao2mo(mcc,mo_coeff=None,*,eri_mode='full',backend='gpu',
         if (8*npair*npair)>float(max_full_gib)*2**30:
             raise MemoryError(
                 f'Packed vvvv exceeds {max_full_gib:g} GiB storage budget; '
-                'request --eri-mode df or raise --ao2mo-max-full-gib explicitly')
+                'use eri_mode="df" or increase max_full_gib')
     factors,scratch,host_bytes=_allocate_factor_scratch(naux,no,nv,host_scratch_mib)
     t0=time.perf_counter()
     # Determine number of AO factors by workspace. PySCF may choose a larger
     # default with_df.loop() block; split the yielded block without copy.
     bytes_per_factor=8*(nao*nao + nao*nmo + nmo*nmo + nao*(nao+1)//2)
     block_cap=max(1,int(ao_block_mib*2**20)//bytes_per_factor)
-    tri=xp.tril_indices(nv)
+    tri=cp.tril_indices(nv)
     aux_offset=0
     for ao_block in df.loop():
         raw=np.asarray(ao_block)
@@ -266,22 +244,22 @@ def fragment_ao2mo(mcc,mo_coeff=None,*,eri_mode='full',backend='gpu',
         for start in range(0,raw.shape[0],block_cap):
             stop=min(raw.shape[0],start+block_cap)
             npart=stop-start
-            mo=transform_ao_df_block(raw[start:stop],coeff,xp=xp,packed=True)
-            factors['oo'][aux_offset:aux_offset+npart,:]=_to_cpu(xp,mo[:,:no,:no].reshape(npart,-1))
-            factors['ov'][aux_offset:aux_offset+npart,:]=_to_cpu(xp,mo[:,:no,no:].reshape(npart,-1))
-            factors['vo'][aux_offset:aux_offset+npart,:]=_to_cpu(xp,mo[:,no:,:no].reshape(npart,-1))
-            factors['vv'][aux_offset:aux_offset+npart,:]=_to_cpu(xp,mo[:,no+tri[0],no+tri[1]])
+            mo=transform_ao_df_block(raw[start:stop],coeff,packed=True)
+            factors['oo'][aux_offset:aux_offset+npart,:]=cp.asnumpy(mo[:,:no,:no].reshape(npart,-1))
+            factors['ov'][aux_offset:aux_offset+npart,:]=cp.asnumpy(mo[:,:no,no:].reshape(npart,-1))
+            factors['vo'][aux_offset:aux_offset+npart,:]=cp.asnumpy(mo[:,no:,:no].reshape(npart,-1))
+            factors['vv'][aux_offset:aux_offset+npart,:]=cp.asnumpy(mo[:,no+tri[0],no+tri[1]])
             aux_offset+=npart
             del mo
     if aux_offset!=naux:
         raise RuntimeError(f'DF loop produced {aux_offset} aux vectors; with_df reports {naux}')
     ao2mo_s=time.perf_counter()-t0
-    result=_write_mo_eris(eris,factors,xp=xp,mode=eri_mode,
+    result=_write_mo_eris(eris,factors,mode=eri_mode,
                          workspace_bytes=int(workspace_mib)*2**20,
                          max_full_gib=max_full_gib)
-    _synchronize(xp)
+    cp.cuda.get_current_stream().synchronize()
     result._gpu_ao2mo_info={
-        'backend':backend,'eri_mode':eri_mode,'nao':nao,'nmo':nmo,
+        'backend':'gpu','eri_mode':eri_mode,'nao':nao,'nmo':nmo,
         'naux':naux,'ao_df_mo_transform_s':ao2mo_s,
         'total_gpu_ao2mo_s':time.perf_counter()-t0,
         'factor_scratch_bytes':host_bytes,

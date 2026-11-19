@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 """GPU LNO-CCSD for C50H102 using PySCF-forge."""
 
-from pathlib import Path
-import sys
 import time
 
 start_wall = time.perf_counter()
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-
 from pyscf import gto, scf, lo, lib
+import cupy as cp
 from pyscf.data.elements import chemcore
-from pyscf.lno import LNOCCSD
-from gpu_lno.bridge import LNOCCSDGPUBridge
+from gpu4pyscf.lno import LNOCCSD
 
 # Calculation settings
 BASIS = 'cc-pvdz'
-USE_GPU = True
-ERI_MODE = 'df'              # 'full' or 'df'; selected explicitly
+ERI_MODE = 'full'              # 'full' or 'df'; selected explicitly
 LNO_THRESH = [1e-5, 1e-6]
 
 mol = gto.M(
@@ -186,8 +180,8 @@ mol = gto.M(
 
 # The PySCF RAM budget is inherited from ~/.pyscf_conf.py,
 # PYSCF_MAX_MEMORY, or the library default.
-lib.logger.note(mol, 'PySCF max_memory: %.0f MB', mol.max_memory)
-lib.logger.note(mol, 'PySCF OpenMP threads: %d', lib.num_threads())
+print(f'PySCF max_memory: {mol.max_memory:.0f} MB')
+print(f'PySCF OpenMP threads: {lib.num_threads()}')
 
 # RHF and occupied-orbital localization (CPU)
 mf = scf.RHF(mol).density_fit()
@@ -201,30 +195,22 @@ nocc = int((mf.mo_occ > 0).sum())
 localized = lo.PipekMezey(mol, mf.mo_coeff[:, frozen:nocc]).kernel()
 fragments = [[i] for i in range(localized.shape[1])]
 
-# LNO-CCSD: GPU stages 01-04, or the original CPU path
-lno = LNOCCSD(mf, localized, fragments, frozen=frozen)
-lno.lno_thresh = LNO_THRESH
-device = 'gpu' if USE_GPU else 'cpu'
-bridge = LNOCCSDGPUBridge(
-    lno, backend=device, eri_mode=ERI_MODE,
-    global_ovl_backend=device, mp2_rdm_backend=device,
-    ao2mo_backend=device, min_gpu_nmo=0,
-    allow_memory_fallback=False, strict_convergence=True,
+# GPU LNO-CCSD stages 04, 03, 02 and 01.
+free_bytes, _ = cp.cuda.runtime.memGetInfo()
+rdm_budget_mib = int(free_bytes * 0.90 / 1024**2)
+lno = LNOCCSD(
+    mf, localized, fragments, frozen=frozen,
+    lno_thresh=LNO_THRESH, eri_mode=ERI_MODE,
+    mp2_rdm_workspace_mib=rdm_budget_mib,
+    strict_convergence=True,
 )
-with bridge:
-    lno.kernel()
+lno.kernel()
 
-# Report the same four stage wall times for CPU and GPU.
-lib.logger.note(mol, '\n%s', bridge.timing_report())
-
-lib.logger.note(mol, 'LNO-CCSD correlation energy: %+.12f Ha', lno.e_corr_ccsd)
-lib.logger.note(mol, 'LNO-MP2  correlation energy: %+.12f Ha', lno.e_corr_pt2)
+print(lno.timing_report())
+print(f'LNO-CCSD correlation energy: {lno.e_corr_ccsd:+.12f} Ha')
+print(f'LNO-MP2 correlation energy:  {lno.e_corr_pt2:+.12f} Ha')
 
 elapsed = time.perf_counter() - start_wall
 hours, remainder = divmod(elapsed, 3600)
 minutes, seconds = divmod(remainder, 60)
-lib.logger.note(mol, 'Total wall time: %.2f s (%02d:%02d:%05.2f)',
-                elapsed, int(hours), int(minutes), seconds)
-mol.stdout.flush()
-print(f'Calculation finished. Total wall time: {elapsed:.2f} s; see testout.out')
-
+print(f'Total wall time: {elapsed:.2f} s ({int(hours):02d}:{int(minutes):02d}:{seconds:05.2f})')

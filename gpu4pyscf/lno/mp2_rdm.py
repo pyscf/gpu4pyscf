@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 
 import numpy as np
+import cupy as cp
 
 
 @dataclass
@@ -44,18 +45,7 @@ def _subspace_eigh_occ(moeocc, u):
     return eps, u@rot
 
 
-def _get_backend(backend):
-    if backend=='numpy':
-        return np
-    if backend=='gpu':
-        import cupy as cp
-        if cp.cuda.runtime.getDeviceCount()<1:
-            raise RuntimeError('03 GPU RDM: no CUDA device available')
-        return cp
-    raise ValueError('MP2 RDM backend must be gpu or numpy')
-
-
-def make_one_hole_density_pair(eris, moeocc, moevir, uocc, *, backend='gpu',
+def make_one_hole_density_pair(eris, moeocc, moevir, uocc, *,
                                workspace_mib=512, occupied_block=None):
     """Compute BOTH 1h MP2 LNO densities from the same MP2 amplitudes.
 
@@ -84,8 +74,6 @@ def make_one_hole_density_pair(eris, moeocc, moevir, uocc, *, backend='gpu',
     nocc,nvir,naux=int(eris.nocc),int(eris.nvir),int(eris.naux)
     eps_k,u=_subspace_eigh_occ(eo,uocc)
     nk=len(eps_k)
-    xp=_get_backend(backend)
-    to_host=(xp.asnumpy if backend=='gpu' else np.asarray)
     t0=time.perf_counter()
 
     # At most one K at a time; T(i,K,a,b) occupies nocc*nvir**2 entries.
@@ -99,36 +87,33 @@ def make_one_hole_density_pair(eris, moeocc, moevir, uocc, *, backend='gpu',
     if estimate>int(workspace_mib)*2**20:
         raise MemoryError(
             f'03 MP2 RDM estimated workspace {estimate/2**20:.1f} MiB exceeds '
-            f'--mp2-rdm-workspace-mib={workspace_mib}. Increase the budget; '
+            f'workspace_mib={workspace_mib}. Increase the budget; '
             'this path never silently falls back to CPU.')
 
     # Forge eris are either RAM or HDF5 backed. get_occ_blk handles both.
-    # Original MP2 RDM reads these CPU-hosted global DF factors; Task 04
-    # will address the global DF integral construction.
+    # The global DF factors are held by the PySCF-forge integral interface.
     all_factors=np.asarray(eris.get_occ_blk(0,nocc))
     if all_factors.shape!=(nocc,nvir,naux):
         raise ValueError(f'Expected global ovL[{nocc},{nvir},{naux}], '
                          f'got {all_factors.shape}')
     if not np.isrealobj(all_factors) or not np.all(np.isfinite(all_factors)):
         raise NotImplementedError('Only real finite DF ovL factors supported')
-    fac=xp.asarray(np.ascontiguousarray(all_factors,dtype=np.float64))
+    fac=cp.asarray(np.ascontiguousarray(all_factors,dtype=np.float64))
     del all_factors
-    udev=xp.asarray(np.asarray(u,dtype=np.float64))
-    eov=xp.asarray(eo[:,None]-ev[None,:],dtype=xp.float64)
-    ekv=xp.asarray(eps_k[:,None]-ev[None,:],dtype=xp.float64)
-    occ=xp.zeros((nocc,nocc),dtype=xp.float64)
-    vir=xp.zeros((nvir,nvir),dtype=xp.float64)
+    udev=cp.asarray(np.asarray(u,dtype=np.float64))
+    eov=cp.asarray(eo[:,None]-ev[None,:],dtype=cp.float64)
+    ekv=cp.asarray(eps_k[:,None]-ev[None,:],dtype=cp.float64)
+    occ=cp.zeros((nocc,nocc),dtype=cp.float64)
+    vir=cp.zeros((nvir,nvir),dtype=cp.float64)
 
     # Factor contraction is BLAS-3, no nocc**2*nvir**2 amplitude array.
     # L[i,a,P] and K-factor L_K[b,P] share the same DF auxiliary index.
     flat_fac=fac.reshape(nocc*nvir,naux)
     for k in range(nk):
         # K[b,P] = sum_j U[j,K] L[j,b,P]
-        loc=xp.tensordot(udev[:,k],fac,axes=(0,0))
+        loc=cp.tensordot(udev[:,k],fac,axes=(0,0))
         numerator=(flat_fac @ loc.T).reshape(nocc,nvir,nvir)
         denom=eov[:,:,None]+ekv[k][None,None,:]
-        if backend=='numpy' and np.any(np.abs(denom)<1e-12):
-            raise ZeroDivisionError('Near-zero MP2 denominator in 03')
         t=numerator/denom     # [i,a,b], identical to forge t2iKvv[:,K]
         # Occupied 1h: -4 <iKab|jKab> + 2 <iKab|jKba>.
         a=t.reshape(nocc,-1)
@@ -144,14 +129,13 @@ def make_one_hole_density_pair(eris, moeocc, moevir, uocc, *, backend='gpu',
         vir+=2*(A @ A.T) - (A @ B.T) - (B @ A.T) + 2*(B @ B.T)
         del loc,numerator,denom,t,a,b,tv,A,B
 
-    if backend=='gpu':
-        xp.cuda.get_current_stream().synchronize()
+    cp.cuda.get_current_stream().synchronize()
     elapsed=time.perf_counter()-t0
-    dmo=np.array(to_host(occ),copy=True)
-    dmv=np.array(to_host(vir),copy=True)
+    dmo=np.array(cp.asnumpy(occ),copy=True)
+    dmv=np.array(cp.asnumpy(vir),copy=True)
     # Numerical hermiticity: forge's result is real symmetric to roundoff.
     # Do not symmetrize: verification should observe raw differences.
-    info=dict(backend=backend,algorithm='shared-1h-gemm',
+    info=dict(backend="gpu",algorithm='shared-1h-gemm',
               nocc=nocc,nvir=nvir,naux=naux,n_local_holes=nk,
               elapsed_s=float(elapsed),estimated_workspace_bytes=estimate,
               amplitude_tensor_peak_bytes=tbytes,
