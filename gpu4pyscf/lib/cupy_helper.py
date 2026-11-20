@@ -21,6 +21,7 @@ import numpy as np
 import scipy.linalg
 import cupy
 from pyscf import lib
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib import cusolver
@@ -61,7 +62,7 @@ def release_gpu_stack():
     # Shrinks the per-thread device stack (cudaLimitStackSize) to reclaim memory.
     # HIP/ROCm does not support this limit the same way (hipErrorUnknown), so it
     # is a no-op there; skipping it only forgoes a memory optimization.
-    if cupy.cuda.runtime.is_hip:
+    if BACKEND != 'cuda':
         return
     cupy.cuda.runtime.deviceSetLimit(0x00, 128)
 
@@ -1299,7 +1300,7 @@ def vec_dot(vec1, vec2):
     vec2 = cupy.asarray(vec2)
     assert vec1.dtype == vec2.dtype == cupy.float64
     assert vec1.shape == vec2.shape
-    if cupy.cuda.runtime.is_hip:
+    if BACKEND != 'cuda':
         # The CUDA JIT reduction assumes 32-lane warps and a 32-bit mask.
         return cupy.dot(vec1.ravel(), vec2.ravel())
     n = vec1.size

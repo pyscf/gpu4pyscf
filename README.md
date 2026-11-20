@@ -1,10 +1,8 @@
-GPU plugin for PySCF
-====================
+# GPU plugin for PySCF
 ![nightly](https://github.com/pyscf/gpu4pyscf/actions/workflows/nightly_build.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/gpu4pyscf-cuda11x.svg)](https://badge.fury.io/py/gpu4pyscf-cuda11x)
 
-Installation
---------
+## Installation
 
 > [!NOTE]
 > The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later).
@@ -33,8 +31,8 @@ pip3 install --no-cache-dir -r requirements.txt
 ```
 This ensures compatibility and reproducibility, especially since this configuration is used in our nightly benchmarks.
 
-Compilation
---------
+## Compilation
+
 To compile the package, run the following commands:
 ```sh
 git clone https://github.com/pyscf/gpu4pyscf.git
@@ -53,10 +51,48 @@ There shouldn't be cupy or cutensor compilation during pip install process. If y
 <repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
 
-Building for AMD GPUs (ROCm)
---------
+To compile the package for different GPU backends, set the `GPU4PYSCF_BACKEND`
+environment variable to `cuda`, `hip`, or `sycl` (case-insensitive). **CUDA**
+is used by default, even if other toolkits are installed. For example:
+
+```sh
+python setup.py build                         # CUDA (default)
+GPU4PYSCF_BACKEND=hip pip install .           # HIP/ROCm
+GPU4PYSCF_BACKEND=sycl python setup.py build  # SYCL
+```
+
+After installation, `gpu4pyscf.BACKEND` reports the backend selected at build time
+(`"cuda"`, `"hip"`, or `"sycl"`).
+
+### Target GPU Architectures
+
+You can narrow the target architectures for each backend using environment variables:
+
+| Environment Variable | Default | Example |
+|---|---|---|
+| `CUDA_ARCHITECTURES` | `70-real;80-real;90-real` | `80-real;90-real` |
+| `HIP_ARCHITECTURES` | Auto-detected AMD GPUs | `gfx90a;gfx942` |
+| `SYCL_ARCHITECTURES` | `generic` (runtime JIT compilation) | `pvc` (ahead-of-time for Intel Data Center GPU Max) |
+
+For example, to build only for SM 80 and SM 90 CUDA GPUs:
+
+```sh
+CUDA_ARCHITECTURES="80-real;90-real" pip install .
+```
+
+If you need custom CMake configuration flags, you can still pass them via `CMAKE_CONFIGURE_ARGS`.
+
+### Direct CMake Builds
+
+If you invoke CMake directly instead of `setup.py`, pass the options as `-D` flags rather than environment variables:
+
+* `-DGPU4PYSCF_BACKEND=cuda|hip|sycl` (defaults to `cuda`)
+* `-DCUDA_ARCHITECTURES=...`, `-DHIP_ARCHITECTURES=...`, or `-DSYCL_ARCHITECTURES=...`
+
+### Building for AMD GPUs (ROCm)
+
 gpu4pyscf also runs on AMD GPUs through ROCm/HIP. It is built from source with
-the standard `pip`/`setup.py` path (`USE_HIP=1` selects the HIP backend). The HIP
+the standard `pip`/`setup.py` path (`GPU4PYSCF_BACKEND=hip` selects the HIP backend). The HIP
 kernels are compiled for each GPU's native wavefront automatically — 32-wide on
 RDNA (Radeon) and 64-wide on CDNA (Instinct) — so the same source produces a
 correct binary for one GPU, or a single "fat" binary for many.
@@ -69,14 +105,14 @@ Build and install:
 ```sh
 git clone https://github.com/pyscf/gpu4pyscf.git
 cd gpu4pyscf
-USE_HIP=1 pip install .        # autodetect this machine's GPU
+GPU4PYSCF_BACKEND=hip pip install .        # autodetect this machine's GPU
 # add -e for an editable/development install
 ```
 
-Use `GPU_TARGET` to choose what hardware to build for (an explicit
-`GPU_ARCHITECTURES="gfx...;..."` list overrides it):
+Use `HIP_ARCHITECTURES` to specify a `;`-separated list of target GPUs
+(including when building on a machine without an AMD GPU).
 
-| `GPU_TARGET`             | Builds for                                                    |
+| `HIP_ARCHITECTURES`      | Builds for                                                    |
 |--------------------------|---------------------------------------------------------------|
 | `native` (default)       | the GPU(s) installed in this machine (auto-detected)          |
 | `gfx942`, `gfx1100;...`  | one specific GPU, or an explicit `;`-separated list           |
@@ -85,18 +121,20 @@ Use `GPU_TARGET` to choose what hardware to build for (an explicit
 | `all`                    | all of the above, in a single binary (CDNA + RDNA)            |
 
 ```sh
-USE_HIP=1 GPU_TARGET=all  pip install .          # one binary for all AMD GPUs
-USE_HIP=1 GPU_TARGET=cdna pip wheel . -w dist/    # redistributable wheel
+GPU4PYSCF_BACKEND=hip HIP_ARCHITECTURES="gfx90a;gfx942" pip install .
+GPU4PYSCF_BACKEND=hip HIP_ARCHITECTURES=all pip wheel . -w dist/
+GPU4PYSCF_BACKEND=hip HIP_ARCHITECTURES="gfx908;gfx90a;gfx942;gfx950" pip wheel
+. -w dist/
 ```
 
 When working against an editable install, recompile the libraries in place with
-`USE_HIP=1 python setup.py build_py` (it accepts the same `GPU_TARGET`).
+`GPU4PYSCF_BACKEND=hip python setup.py build_py`.
 
 > [!NOTE]
 > AMD has no portable-IR fallback (unlike CUDA's PTX), so device code is emitted
 > per architecture: each one adds ~40 MB. A single-GPU build is ~40 MB; an `all`
 > binary is a few hundred MB. Build one family (`rdna`/`cdna`) or a specific
-> `GPU_TARGET` to keep it small.
+> `HIP_ARCHITECTURES` to keep it small.
 
 > [!NOTE]
 > cuTENSOR and the CUDA build of libXC are not available on ROCm. Tensor
@@ -109,12 +147,40 @@ gpu4pyscf before torch. If torch is imported first, CuPy may be unable to compil
 GPU kernels; gpu4pyscf then raises an `ImportError` explaining how to fix it.
 
 The [HIP build CI](.github/workflows/hip_build.yml) compiles and links the native
-libraries on GitHub-hosted CPU runners using `USE_HIP=1 GPU_TARGET=all` in a
+libraries on GitHub-hosted CPU runners using `GPU4PYSCF_BACKEND=hip HIP_ARCHITECTURES=all` in a
 pinned ROCm development container. This compiles all supported CDNA and RDNA
 targets in a single build and requires no AMD GPU or CuPy installation.
 
-Features
---------
+### Building with SYCL
+
+With the Intel oneAPI toolchain available, select the SYCL backend and compilers:
+
+```sh
+CC=icx CXX=icpx FC=ifx GPU4PYSCF_BACKEND=sycl python setup.py build
+```
+
+By default, `SYCL_ARCHITECTURES=generic` emits generic SPIR-V device code that
+is compiled at runtime for the target device. For ahead-of-time compilation on
+Intel Data Center GPU Max (Ponte Vecchio), set `SYCL_ARCHITECTURES=pvc`:
+
+```sh
+CC=icx CXX=icpx FC=ifx GPU4PYSCF_BACKEND=sycl SYCL_ARCHITECTURES=pvc python setup.py build
+```
+
+For an equivalent direct CMake build:
+
+```sh
+CC=icx CXX=icpx FC=ifx cmake -S gpu4pyscf/lib -B build/sycl \
+  -DGPU4PYSCF_BACKEND=sycl -DSYCL_ARCHITECTURES=pvc
+cmake --build build/sycl -j 4
+```
+
+> [!NOTE]
+> Import `gpu4pyscf` before importing `cupy` or `cupyx` in a SYCL application.
+> GPU4PySCF registers its dpnp-backed compatibility modules during import.
+
+
+## Features
 
 GPU4PySCF supports molecular and periodic Hartree-Fock and DFT, analytical
 derivatives, excited states, solvent models, properties, geometry optimization,
@@ -123,8 +189,8 @@ and non-adiabatic dynamics.
 See [FEATURES](FEATURES) for the detailed list of supported methods and
 experimental capabilities.
 
-Limitations
---------
+## Limitations
+
 - Atomic basis up to g orbitals;
 - Auxiliary basis up to i orbitals;
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
@@ -132,8 +198,8 @@ Limitations
 - Double hybrid functionals are not supported;
 - Hessian of TDDFT is not supported;
 
-Examples
---------
+## Examples
+
 ```python
 import pyscf
 
@@ -158,8 +224,8 @@ h_dft = h.kernel()   # compute analytical Hessian
 
 Find more examples in [gpu4pyscf/examples](https://github.com/pyscf/gpu4pyscf/tree/master/examples)
 
-Benchmarks
---------
+## Benchmarks
+
 Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (density fitting, SCF, def2-tzvpp, def2-universal-jkfit, B3LYP, (99,590))
 
 | mol               |   natm |    LDA |    PBE |   B3LYP |    M06 |   wB97m-v |
@@ -179,8 +245,8 @@ Speedup with GPU4PySCF v0.6.0 on A100-80G over Q-Chem 6.1 on 32-cores CPU (densi
 
 Find more benchmarks in [gpu4pyscf/benchmarks](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks)
 
-References
----------
+## References
+
 ```
 @misc{li2024introducting,
       title={Introducing GPU-acceleration into the Python-based Simulations of Chemistry Framework},

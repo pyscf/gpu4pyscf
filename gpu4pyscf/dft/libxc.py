@@ -16,11 +16,11 @@ import numpy as np
 import ctypes
 import cupy
 import copy
-import sys
 from ctypes import POINTER
 # Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
 from pyscf.dft import libxc as libxc_cpu
+from gpu4pyscf import BACKEND
 from gpu4pyscf.dft.libxc_structs import xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.dft import libxc_structs
@@ -39,7 +39,7 @@ except OSError:
     # ROCm/HIP builds do not include the CUDA libXC fork. Keep libXC optional
     # there so XC is evaluated on CPU via PySCF's libXC (see below); a missing
     # libXC remains a hard error on CUDA.
-    if not cupy.cuda.runtime.is_hip:
+    if BACKEND != 'hip':
         raise
     _libxc = None
 
@@ -241,7 +241,7 @@ class XCfun:
                 raise RuntimeError('failed to initialize xc fun')
             if omega != 0:
                 default_omega = libxc_cpu.rsh_coeff(self.func_id)[0]
-                if ('dpnp' in sys.modules and default_omega != 0
+                if (BACKEND == 'sycl' and default_omega != 0
                         and abs(omega - default_omega) > 1e-14
                         and not _can_set_omega(self.xc_func)):
                     # SYCL only: the device library (ExchCXX) fixes omega at
@@ -280,7 +280,7 @@ class XCfun:
         assert not do_lxc
         assert self.on_gpu
         stream = cupy.cuda.get_current_stream().ptr
-        if 'dpnp' not in sys.modules:
+        if BACKEND != 'sycl':
             # SYCL: the shim's single in-order master queue is the default stream.
             assert stream == 0, 'libxc CUDA evaluation requires the default stream'
 
