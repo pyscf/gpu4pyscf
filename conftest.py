@@ -1,6 +1,6 @@
 # Known failures of the SYCL (dpnp/dpctl) backend, marked xfail.
 #
-# Active only when `cupy` resolves to gpu4pyscf's dpnp shim, so CUDA runs
+# Active only for a SYCL build, so CUDA runs
 # are unaffected and the upstream test files stay unmodified. The marks are
 # non-strict: a test that starts passing shows up as XPASS. Set
 # GPU4PYSCF_SYCL_XFAIL=0 to run these tests normally.
@@ -217,13 +217,8 @@ KNOWN_FAILURES = {
 
 
 def _sycl_backend():
-    # gpu4pyscf's cupy shim is built on dpnp and imports it; CuPy never does.
-    import sys
-    try:
-        import cupy  # noqa: F401
-    except ImportError:
-        return False
-    return 'dpnp' in sys.modules
+    from gpu4pyscf import BACKEND
+    return BACKEND == 'sycl'
 
 
 def pytest_collection_modifyitems(config, items):

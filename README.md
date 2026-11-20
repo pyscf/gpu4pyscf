@@ -61,6 +61,9 @@ GPU4PYSCF_BACKEND=hip pip install .           # HIP/ROCm
 GPU4PYSCF_BACKEND=sycl python setup.py build  # SYCL
 ```
 
+After installation, `gpu4pyscf.BACKEND` reports the backend selected at build time
+(`"cuda"`, `"hip"`, or `"sycl"`).
+
 ### Target GPU Architectures
 
 You can narrow the target architectures for each backend using environment variables:

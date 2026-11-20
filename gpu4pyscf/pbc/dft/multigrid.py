@@ -24,6 +24,7 @@ from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PT
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.gto import pseudo
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -1459,7 +1460,7 @@ class MultiGridNumInt(MultiGridNumIntBase):
     device = utils.device
 
     def to_cpu(self):
-        if not cp.cuda.runtime.is_hip:
+        if BACKEND != 'hip':
             raise RuntimeError('Not available')
         # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
         # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU

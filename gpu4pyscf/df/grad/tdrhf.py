@@ -14,11 +14,11 @@
 
 import warnings
 import ctypes
-import sys
 import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib.cupy_helper import (
@@ -446,7 +446,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         # gives the same DM different rounding depending on how many DMs
         # share the call, and the aux metric amplifies that difference
         # (batched vs single-pair NAC). CUDA keeps the plain einsum.
-        if 'dpnp' in sys.modules:
+        if BACKEND == 'sycl':
             n_pad = n_dm + (-n_dm) % J_DM_CHUNK
             dm1T = cp.zeros((n_pad, nao*nao))
             dm2T = cp.zeros((n_pad, nao*nao))
@@ -496,7 +496,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
                 contract('pqr,pi->iqr', j3c, dm1_factor_r[i], out=tmp)
                 contract('iqr,qj->rij', tmp, dm2_factor_l[i], out=j3c_o1o2[i][aux0:aux1])
             if j_factor is not None:
-                if 'dpnp' in sys.modules:
+                if BACKEND == 'sycl':
                     j3c_2d = j3c_full.reshape(nao*nao, -1)
                     for c0 in range(0, n_dm, J_DM_CHUNK):
                         c1 = min(c0 + J_DM_CHUNK, n_dm)

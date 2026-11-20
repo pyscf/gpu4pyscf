@@ -14,6 +14,8 @@
 
 __version__ = '1.9.1'
 
+from ._build_config import BACKEND
+
 
 def _check_rocm_import_order():
     '''Fail early, with instructions, when CuPy cannot compile GPU kernels on
@@ -24,11 +26,9 @@ def _check_rocm_import_order():
     CuPy's kernels. Only runs on ROCm, when torch has already been imported.
     '''
     import sys
-    if 'torch' not in sys.modules:
+    if BACKEND != 'hip' or 'torch' not in sys.modules:
         return
     import cupy
-    if not cupy.cuda.runtime.is_hip:
-        return
     try:
         with open('/proc/self/maps') as f:
             hiprtc = sorted({line.split()[-1] for line in f if 'libhiprtc' in line})

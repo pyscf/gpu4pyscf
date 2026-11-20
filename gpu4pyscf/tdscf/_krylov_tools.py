@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import cupy as cp
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib.cusolver import eigh_std
 import sys
 import numpy as np
@@ -187,7 +188,7 @@ def _align_eigh_phase_SYCL(a, v):
     SYCL results consistent with CUDA references. SYCL-only; CUDA path
     untouched.
     '''
-    if 'dpnp' not in sys.modules:
+    if BACKEND != 'sycl':
         return v
     v_ref = scipy.linalg.eigh(cp.asnumpy(a))[1]
     m = min(v.shape[1], v_ref.shape[1])
