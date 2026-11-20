@@ -139,7 +139,7 @@ do_build() {
   cd "$SRC_DIR"
   # A CMake cache left by an earlier job would point at that job's conda env.
   rm -rf "$SRC_DIR/build"
-  export PYTHONPATH="$SRC_DIR:$SRC_DIR/gpu4pyscf"
+  export PYTHONPATH="$SRC_DIR"
   toolchain_check || exit 1
 
   export GPU4PYSCF_BACKEND=sycl
@@ -175,7 +175,7 @@ do_test() {
   [ -d "$ENV_PREFIX" ] || { echo "env $ENV_PREFIX from the build is gone"; exit 1; }
   setup_env || { echo "environment setup failed"; exit 1; }
   cd "$BUILD_DIR"
-  export PYTHONPATH="$BUILD_DIR:$BUILD_DIR/gpu4pyscf"
+  export PYTHONPATH="$BUILD_DIR"
   toolchain_check || exit 1
   # Same pytest invocation as upstream unittest.yml.
   pytest -n "${PYTEST_WORKERS:-4}" --dist loadfile -m 'not slow and not benchmark and not special' \

@@ -175,6 +175,10 @@ CC=icx CXX=icpx FC=ifx cmake -S gpu4pyscf/lib -B build/sycl \
 cmake --build build/sycl -j 4
 ```
 
+> [!NOTE]
+> Import `gpu4pyscf` before importing `cupy` or `cupyx` in a SYCL application.
+> GPU4PySCF registers its dpnp-backed compatibility modules during import.
+
 
 ## Features
 

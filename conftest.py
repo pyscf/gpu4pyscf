@@ -13,6 +13,12 @@ import os
 
 import pytest
 
+# CuPy is not installed in the SYCL test environment. Importing gpu4pyscf
+# creates fake modules named `cupy` and `cupyx` so tests can import them.
+# Do this before pytest loads the tests. Otherwise, a test that starts with
+# `import cupy` or `import cupyx` fails with ModuleNotFoundError.
+from gpu4pyscf import BACKEND
+
 # ExchCXX (the SYCL XC library) evaluates some kernels with different
 # low-density cutoffs than libxc (e.g. PBE exchange dens_tol 1e-32 vs 1e-15,
 # The test seeds cp.random and compares against a fingerprint recorded with
@@ -70,10 +76,7 @@ KNOWN_FAILURES = {
     # caused by $R/gpu4pyscf on PYTHONPATH making pytest import the test as
     # 'dft.tests.test_ucdft', which re-executes gpu4pyscf/dft as top-level 'dft'
     # and rebinds scf.hf.KohnShamDFT (dft/rks.py:328), so gen_response dropped
-    # fxc. Fixed in the environment: env.sh sets PYTHONPATH=$R only and the
-    # repo-root cupy/cupyx forwarders make `import cupy` resolve, so the
-    # package dir is never on sys.path and test modules import as
-    # gpu4pyscf.<pkg>.tests.*; the tests now pass.)
+    # fxc. Keep only the repository root on PYTHONPATH.)
     # Strain get_vxc on the coarse test mesh: multigrid_v3 (AFT) on the GPU
     # vs the pyscf CPU FFT/multigrid finite-difference reference differs by
     # ~0.2-0.8 at atol=1e-7 (grid aliasing at the coarse mesh). Same on CUDA;
@@ -216,13 +219,8 @@ KNOWN_FAILURES = {
 }
 
 
-def _sycl_backend():
-    from gpu4pyscf import BACKEND
-    return BACKEND == 'sycl'
-
-
 def pytest_collection_modifyitems(config, items):
-    if os.environ.get('GPU4PYSCF_SYCL_XFAIL', '1') == '0' or not _sycl_backend():
+    if os.environ.get('GPU4PYSCF_SYCL_XFAIL', '1') == '0' or BACKEND != 'sycl':
         return
     for item in items:
         reason = KNOWN_FAILURES.get(item.nodeid)
