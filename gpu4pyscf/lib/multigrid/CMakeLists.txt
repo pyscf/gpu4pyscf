@@ -12,6 +12,9 @@
 #  CUDA_SEPARABLE_COMPILATION ON)
 
 if (ENABLE_MULTIGRID_V2)
+if(USE_SYCL)
+  message(FATAL_ERROR "mgrid_v2 does not support SYCL. Configure with -DENABLE_MULTIGRID_V2=OFF.")
+endif()
 add_library(mgrid_v2 SHARED
         multigrid_v2/drivers.cu
         multigrid_v2/screen.cu
@@ -53,4 +56,5 @@ set_target_properties(mgrid_v3 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
   CUDA_SEPARABLE_COMPILATION ON
 )
+
 gpu4pyscf_configure_gpu_target(mgrid_v3)

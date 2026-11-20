@@ -32,21 +32,26 @@
 
 __global__ static
 void orth_ft_tau_dm_kernel(double *densityR, double *densityI, double *tauR, double *tauI,
-                           double *dm, PBCIntEnvVars envs, int *shl_pair_offsets,
+                           double *dm, int *shl_pair_offsets,
                            int64_t *bas_ij_idx, double *G_bases, double *L_bases,
-                           int *mesh_cum, int *nimgs_cum, int ntiles, double factor)
+                           int *mesh_cum, int *nimgs_cum, int ntiles, double factor,
+                           PBCIntEnvVars envs)
 {
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
+    int sp_block_id = blockIdx_x / ntiles;
+    int tile_id = blockIdx_x % ntiles;
     int x_id = thread_id / NGV_PER_BLOCK;
     int Gv_id = thread_id % NGV_PER_BLOCK;
-    int sp_block_id = blockIdx.x / ntiles;
-    int tile_id = blockIdx.x % ntiles;
-    __shared__ double gx[NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)];
-    __shared__ double swap[NGV_PER_BLOCK*3*2*(LMAX+LMAX+3)];
-    __shared__ int mesh_start[3];
-    __shared__ int ri, rj;
-    __shared__ size_t ij_offset;
-    __shared__ double fac, ai, aj;
+    DECLARE_SHARED(double, gx, [NGV_PER_BLOCK*3*2*(LMAX1+1)*(LMAX1+1)]);
+    DECLARE_SHARED(double, swap, [NGV_PER_BLOCK*3*2*(LMAX+LMAX+3)]);
+    DECLARE_SHARED(int, mesh_start, [3]);
+    DECLARE_SHARED(int, ri);
+    DECLARE_SHARED(int, rj);
+    DECLARE_SHARED(size_t, ij_offset);
+    DECLARE_SHARED(double, fac);
+    DECLARE_SHARED(double, ai);
+    DECLARE_SHARED(double, aj);
 
     int *bas = envs.bas;
     int nbas = envs.nbas;
@@ -247,9 +252,12 @@ int orth_contract_ft_tau_dm(double *densityR, double *densityI,
     int ntiles_y = (mesh_y + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles_z = (mesh_z + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     int ntiles = ntiles_x * ntiles_y * ntiles_z;
-    orth_ft_tau_dm_kernel<<<ntiles*nbatches_shl_pair, THREADS, 0, stream>>>(
-        densityR, densityI, tauR, tauI, dm, *envs, shl_pair_offsets, bas_ij_idx, G_bases, L_bases,
-        mesh_cum, nimgs_cum, ntiles, factor);
+    auto threads = make_block(THREADS);
+    auto grids = make_grid(ntiles*nbatches_shl_pair);
+    LAUNCH_KERNEL( orth_ft_tau_dm_kernel, grids, threads, 0, stream,
+                    densityR, densityI, tauR, tauI, dm, shl_pair_offsets,
+                    bas_ij_idx, G_bases, L_bases, mesh_cum, nimgs_cum,
+                    ntiles, factor, *envs);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in orth_ft_tau_dm_kernel: %s\n", cudaGetErrorString(err));

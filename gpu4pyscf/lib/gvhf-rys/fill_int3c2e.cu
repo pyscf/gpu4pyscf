@@ -36,17 +36,30 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
                     int reorder_aux, int to_sph,
                     int *head, int nbatches_shl_pair, int nbatches_ksh)
 {
-    int thread_id = threadIdx.x;
-    int worker_id = blockIdx.x;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1, nksp;
-    __shared__ int ksh0, ksh1;
-    __shared__ int li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int nf, aux_start;
-    __shared__ int g_size;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int sp_block_id, ksh_block_id;
+    setup_context();
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, nksp);
+    DECLARE_SHARED(int, ksh0);
+    DECLARE_SHARED(int, ksh1);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, lk);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, nf);
+    DECLARE_SHARED(int, aux_start);
+    DECLARE_SHARED(int, g_size);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nst_per_block);
+    DECLARE_SHARED(int, sp_block_id);
+    DECLARE_SHARED(int, ksh_block_id);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    int thread_id = threadIdx_x;
+    int worker_id = blockIdx_x;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -910,9 +923,11 @@ void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
                      int naux, int nao_sph, int pair_compressed)
 
 {
-    int pair_ij = blockIdx.x;
-    int thread_id = threadIdx.x;
-    int aux_id = blockIdx.y * blockDim.x + thread_id;
+    setup_context();
+    int pair_ij = blockIdx_x;
+    int thread_id = threadIdx_x;
+    int aux_id = blockIdx_y * blockDim_x + thread_id;
+
     if (aux_id >= naux) {
         return;
     }
@@ -1586,11 +1601,13 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, double *pool,
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * POOL_SIZE);
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    int3c2e_kernel<<<workers, THREADS, shm_size, stream>>>(
-            out, *envs, pool, omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
-            reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( int3c2e_kernel, blocks, threads, shm_size, stream,
+        out, *envs, pool, omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets,
+        gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
+        reorder_aux, to_sph, head, nbatches_shl_pair, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
@@ -1605,10 +1622,11 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
 {
     constexpr int threads = 256;
     int aux_batches = (naux + threads - 1) / threads;
-    dim3 blocks(nshl_pair, aux_batches);
-    cart2sph_kernel<<<blocks, threads, 0, stream>>>(
-            out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
-            naux, nao_sph, pair_compressed);
+    auto blocks = make_grid(nshl_pair, aux_batches);
+    auto thread_block = make_block(threads);
+    LAUNCH_KERNEL( cart2sph_kernel, blocks, thread_block, 0, stream,
+        out, input, *envs, bas_ij_idx, out_offsets, input_offsets,
+        naux, nao_sph, pair_compressed);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));

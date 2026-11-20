@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import importlib.util
 import sys
 import time
 import platform
@@ -120,8 +121,56 @@ def device(obj):
     else:
         return 'cpu'
 
+def _format_sycl_sys_info():
+    '''format_sys_info() for the SYCL (dpnp/dpctl) backend.'''
+    import gpu4pyscf
+    import dpnp, dpctl
+    from gpu4pyscf.__config__ import num_devices, mem_fraction
+
+    pyscf_info = lib.repo_info(pyscf.__file__)
+    gpu4pyscf_info = lib.repo_info(os.path.join(__file__, '..', '..'))
+    try:
+        device = dpctl.get_devices(device_type='gpu')[0]
+    except IndexError:
+        device = dpctl.select_default_device()  # GPU-less host (e.g. CPU CI)
+    result = [
+        f'System: {platform.uname()}  Threads {lib.num_threads()}',
+        f'Python {sys.version}',
+        f'numpy {numpy.__version__}  scipy {scipy.__version__}  '
+        f'h5py {h5py.__version__}',
+        f'Date: {time.ctime()}',
+        f'PySCF version {pyscf.__version__}',
+        f'PySCF path  {pyscf_info["path"]}',
+        'SYCL Environment',
+        f'    dpnp {dpnp.__version__}',
+        f'    dpctl {dpctl.__version__}',
+        'Device info',
+        f'    Device name {device.name}',
+        f'    Device driver version {device.driver_version}',
+        f'    Device global memory {device.global_mem_size / 1024**3:.2f} GB',
+        f'    dpnp memory fraction {mem_fraction}',
+        f'    Num. Devices {num_devices}',
+        f'GPU4PySCF {gpu4pyscf.__version__}',
+        f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
+    ]
+    if 'git' in pyscf_info:
+        result.append(pyscf_info['git'])
+    return result
+
 def format_sys_info():
     '''Format a list of system information for printing.'''
+    # SYCL backend <=> real cupy is absent (cupy_backends ships with it) and
+    # dpctl drives the device. Checking cupy_backends first keeps CUDA boxes
+    # that happen to have dpctl installed on the unmodified CUDA path below.
+    try:
+        has_cupy_backends = importlib.util.find_spec('cupy_backends') is not None
+    except ValueError:
+        # The cupy facade registers a sys.modules stub with __spec__ = None;
+        # that is the shim, not a real cupy install.
+        has_cupy_backends = False
+    if (not has_cupy_backends
+            and importlib.util.find_spec('dpctl') is not None):
+        return _format_sycl_sys_info()
     import gpu4pyscf
     from cupyx._runtime import get_runtime_info
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props

@@ -15,8 +15,7 @@
  */
 
 #include <stdio.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 
 #include "evaluation.cuh"
 

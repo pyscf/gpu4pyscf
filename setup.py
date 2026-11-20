@@ -34,6 +34,41 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
+# Selects the compute backend for this build. CUDA is the default. To build
+# SYCL:
+#
+#     python setup.py --sycl build
+#     CMAKE_CONFIGURE_ARGS=-DUSE_SYCL=ON pip install .
+#
+# The second form covers pip and other PEP 517 frontends, which do not forward
+# unknown flags to setup.py; CMAKE_CONFIGURE_ARGS has to be set for a SYCL
+# build regardless, to point cmake at icpx.
+def build_backend():
+    # --sycl / --cuda are ours, not setuptools', so strip them from argv before
+    # setuptools parses it -- an unrecognised global option is a hard error.
+    # Precedence: command line, then -DUSE_SYCL=ON in CMAKE_CONFIGURE_ARGS,
+    # otherwise use the existing HIP/CUDA detection.
+    backend = None
+    for flag in ('--sycl', '--cuda'):
+        while flag in sys.argv:
+            sys.argv.remove(flag)
+            backend = flag[2:]
+    if backend is not None:
+        return backend
+
+    if 'USE_SYCL=ON' in os.getenv('CMAKE_CONFIGURE_ARGS', ''):
+        return 'sycl'
+    if use_hip():
+        return 'hip'
+    return 'cuda'
+
+
+def get_sycl_version():
+    icpx_out = subprocess.check_output(["icpx", "--version"]).decode('utf-8')
+    m = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", icpx_out)
+    return m.group(0)
+
+
 def get_cuda_version():
     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
     m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
@@ -121,7 +156,7 @@ def get_version():
 
 VERSION = get_version()
 
-USE_HIP = use_hip()
+BACKEND = build_backend()
 
 
 # AMD GPU build presets. GPU_TARGET selects what hardware to build for; an
@@ -165,7 +200,9 @@ class CMakeBuildPy(build_py):
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
         cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
-        if USE_HIP:
+        if BACKEND == 'sycl':
+            cmd.append('-DUSE_SYCL=ON')
+        elif BACKEND == 'hip':
             cmd.extend(self._setup_hip_build())
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
@@ -279,7 +316,10 @@ try:
 except ImportError:
     pass
 
-if USE_HIP and 'sdist' not in sys.argv:
+if BACKEND == 'sycl' and 'sdist' not in sys.argv:
+    package_name = NAME + '-sycl' + get_sycl_version()
+    install_requires = ['pyscf>=2.8.0', 'dpnp', 'geometric', 'packaging']
+elif BACKEND == 'hip' and 'sdist' not in sys.argv:
     # AMD ROCm/HIP build. CuPy for ROCm and (optionally) PyTorch-ROCm are
     # provided by the environment -- there is no cupy-rocm / gpu4pyscf-libxc-rocm
     # wheel to depend on -- so only the backend-agnostic requirements are declared.
@@ -317,7 +357,12 @@ setup(
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf
     # include *.so *.dat files. They are now placed in MANIFEST.in
     include_package_data=True,  # include everything in source control
-    packages=find_packages(exclude=['*test*', '*examples*', '*docker*']),
+    # The top-level cupy/ and cupyx/ forwarder packages exist only so that
+    # `import cupy` resolves to the SYCL shim when the repo root is on
+    # sys.path (PYTHONPATH). They must never be installed into site-packages,
+    # where they would shadow the real CuPy on CUDA builds.
+    packages=find_packages(exclude=['*test*', '*examples*', '*docker*',
+                                    'cupy', 'cupy.*', 'cupyx', 'cupyx.*']),
     tests_require=[
         "pytest==7.2.0",
         "pytest-cov==4.0.0",
