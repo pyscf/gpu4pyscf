@@ -28,7 +28,7 @@ import gpu4pyscf
 import numpy as np
 import scipy
 import cupy
-from gpu4pyscf.lib.cusolver import eigh_std
+from gpu4pyscf.lib.cusolver import eigh_std, cholesky, LinAlgError
 import cupy as cp
 
 import cupyx.scipy.linalg
@@ -402,13 +402,14 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=
     t0 = log.init_timer()
 
     # Cholesky decomposition
-    # cupy does not raise error, but will give nan
+    # cupy.linalg.cholesky does not raise an error on failure; it gives nan with
+    # cuSOLVER and a partial factor with rocSOLVER. cholesky checks potrf's info.
     if alg.lower().startswith('cd'):
         log.debug('j2c decomposition by Cholesky decomposition')
         try:
-            j2c_l = cp.linalg.cholesky(j2c)
-            cholesky_ok = not cp.isnan(j2c_l).any()
-        except ValueError:
+            j2c_l = cholesky(j2c)
+            cholesky_ok = True
+        except (ValueError, LinAlgError):
             # dpnp raises LinAlgError (a ValueError) on non-PD input
             cholesky_ok = False
         if cholesky_ok:
