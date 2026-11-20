@@ -1,0 +1,1200 @@
+        If you don't want 'gpu4pyscf.lib.deps.include.exchcxx.impl.builtin.kernels' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.deps.include.exchcxx.impl.builtin.kernels' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.deps.include.exchcxx.util' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.deps.include.exchcxx.util' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.deps.include.exchcxx.util' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.deps.include.exchcxx.util' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.deps.include.exchcxx.util' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.deps.lib' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.deps.lib' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.deps.lib' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.deps.lib' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.deps.lib' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.deps.lib.cmake.ExchCXX' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.deps.lib.cmake.ExchCXX' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.deps.lib.cmake.ExchCXX' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.deps.lib.cmake.ExchCXX' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.deps.lib.cmake.ExchCXX' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.ecp' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.ecp' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.ecp' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.ecp' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.ecp' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.gdft' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.gdft' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.gdft' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.gdft' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.gdft' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.gint' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.gint' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.gint' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.gint' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.gint' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.gsycl' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.gsycl' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.gsycl' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.gsycl' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.gsycl' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.gsycl.cub' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.gsycl.cub' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.gsycl.cub' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.gsycl.cub' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.gsycl.cub' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.gvhf' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.gvhf' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.gvhf' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.gvhf' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.gvhf' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.hip_compat' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.hip_compat' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.hip_compat' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.hip_compat' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.hip_compat' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.hip_compat.cub' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.hip_compat.cub' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.hip_compat.cub' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.hip_compat.cub' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.hip_compat.cub' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.multigrid' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.multigrid' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.multigrid' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.multigrid' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.multigrid' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.multigrid.multigrid_v2' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.multigrid.multigrid_v2' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.multigrid.multigrid_v2' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.multigrid.multigrid_v2' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.multigrid.multigrid_v2' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.multigrid.multigrid_v3' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.multigrid.multigrid_v3' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.multigrid.multigrid_v3' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.multigrid.multigrid_v3' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.multigrid.multigrid_v3' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.onemkl_helper' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.onemkl_helper' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.onemkl_helper' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.onemkl_helper' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.onemkl_helper' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.pbc' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.pbc' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.pbc' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.pbc' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.pbc' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.sem' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.sem' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.sem' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.sem' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.sem' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+/home/runner/micromamba/envs/sycl-ci/lib/python3.12/site-packages/setuptools/command/build_py.py:215: _Warning: Package 'gpu4pyscf.lib.solvent' is absent from the `packages` configuration.
+!!
+
+        ********************************************************************************
+        ############################
+        # Package would be ignored #
+        ############################
+        Python recognizes 'gpu4pyscf.lib.solvent' as an importable package[^1],
+        but it is absent from setuptools' `packages` configuration.
+
+        This leads to an ambiguous overall configuration. If you want to distribute this
+        package, please make sure that 'gpu4pyscf.lib.solvent' is explicitly added
+        to the `packages` configuration field.
+
+        Alternatively, you can also rely on setuptools' discovery methods
+        (for example by using `find_namespace_packages(...)`/`find_namespace:`
+        instead of `find_packages(...)`/`find:`).
+
+        You can read more about "package discovery" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+        If you don't want 'gpu4pyscf.lib.solvent' to be distributed and are
+        already explicitly excluding 'gpu4pyscf.lib.solvent' via
+        `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+        you can try to use `exclude_package_data`, or `include-package-data=False` in
+        combination with a more fine grained `package-data` configuration.
+
+        You can read more about "package data files" on setuptools documentation page:
+
+        - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+        [^1]: For Python, any directory (with suitable naming) can be imported,
+              even if it does not contain any `.py` files.
+              On the other hand, currently there is no concept of package data
+              directory, all directories are treated like packages.
+        ********************************************************************************
+
+!!
+  check.warn(importable)
+copying gpu4pyscf/lib/CMakeLists.txt -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/gpu_compat.h -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libcupy_helper.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgdft.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgecp.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgint.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgsycl.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf_md.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libgvhf_rys.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libmgrid_v3.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libonemkl_helper.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libpbc.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libsem.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libsolvent.so -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/libxc_prune.patch -> build/lib/gpu4pyscf/lib
+copying gpu4pyscf/lib/warp_size.h -> build/lib/gpu4pyscf/lib
+creating build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/CMakeLists.txt -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/add_sparse.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/async_d2h_2d.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/block_diag.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/cart2sph.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/dist_matrix.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/grouped_dot.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/grouped_gemm.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/sparse_cderi.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/take_last2d.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/transpose.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+copying gpu4pyscf/lib/cupy_helper/unpack.cu -> build/lib/gpu4pyscf/lib/cupy_helper
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx
+copying gpu4pyscf/lib/deps/include/exchcxx/boilerplate.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx
+copying gpu4pyscf/lib/deps/include/exchcxx/exchcxx.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx
+copying gpu4pyscf/lib/deps/include/exchcxx/exchcxx_config.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx
+copying gpu4pyscf/lib/deps/include/exchcxx/xc_functional.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx
+copying gpu4pyscf/lib/deps/include/exchcxx/xc_kernel.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/enums
+copying gpu4pyscf/lib/deps/include/exchcxx/enums/backend.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/enums
+copying gpu4pyscf/lib/deps/include/exchcxx/enums/enums.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/enums
+copying gpu4pyscf/lib/deps/include/exchcxx/enums/functionals.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/enums
+copying gpu4pyscf/lib/deps/include/exchcxx/enums/kernels.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/enums
+copying gpu4pyscf/lib/deps/include/exchcxx/enums/spin.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/enums
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/exceptions
+copying gpu4pyscf/lib/deps/include/exchcxx/exceptions/exchcxx_exception.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/exceptions
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/factory
+copying gpu4pyscf/lib/deps/include/exchcxx/factory/xc_kernel.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/factory
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/libxc.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/xc_kernel.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/xc_kernel_fwd.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/constants.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/fwd.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/interface.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernel_type.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/util.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/b88.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/b97_d.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bc95_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bmk_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/bmk_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/cf22d_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/cf22d_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/deorbitalized.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc17_1.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc17_2.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc18_1.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/epc18_2.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ft98_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hjs_pbe_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hse03_wpbeh_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/hse06_wpbeh_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x_015.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/ityh_x_033.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lcwpbe_wpbeh_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lrcwpbe_hjs_pbe_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lrcwpbeh_hjs_pbe_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/lyp.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_2x_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_2x_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m05_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_2x_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_2x_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_hf_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_hf_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_l_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_l_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_sx_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_sx_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m06_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_hx_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_hx_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_so_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m08_so_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m11_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/m11_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mbeef_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_l_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_l_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_sx_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn12_sx_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_l_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_l_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mn15_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/mpw91_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/n12_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/n12_sx_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/optx_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/p86_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/p86vwn_ft_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_sol_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pbe_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pc07_k.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pc07opt_k.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pkzb_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pkzb_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw86_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda_mod.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_lda_rpa.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pw91_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pz81.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/pz81_mod.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scan_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scan_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scanl_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/r2scanl_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_m06_l_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_m06_l_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rev_pbe_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/revtpss_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/revtpss_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rpbe_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rscan_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/rscan_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scan_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scan_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scanl_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/scanl_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/screening_interface.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/slater_exchange.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/sogga11_x_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/sogga11_x_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/tpss_c.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/tpss_x.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn3.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/vwn_rpa.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97_xc.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_d3_xc.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_d_xc.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_v_xc.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wb97x_xc.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+copying gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels/wpbeh_x_default0.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/impl/builtin/kernels
+creating build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+copying gpu4pyscf/lib/deps/include/exchcxx/util/bidirectional_map.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+copying gpu4pyscf/lib/deps/include/exchcxx/util/div_ceil.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+copying gpu4pyscf/lib/deps/include/exchcxx/util/exchcxx_macros.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+copying gpu4pyscf/lib/deps/include/exchcxx/util/named_type.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+copying gpu4pyscf/lib/deps/include/exchcxx/util/param_macros.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+copying gpu4pyscf/lib/deps/include/exchcxx/util/unused.hpp -> build/lib/gpu4pyscf/lib/deps/include/exchcxx/util
+creating build/lib/gpu4pyscf/lib/deps/lib
+copying gpu4pyscf/lib/deps/lib/libexchcxx.so -> build/lib/gpu4pyscf/lib/deps/lib
+copying gpu4pyscf/lib/deps/lib/libxc.so -> build/lib/gpu4pyscf/lib/deps/lib
+creating build/lib/gpu4pyscf/lib/deps/lib/cmake/ExchCXX
+copying gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXConfig.cmake -> build/lib/gpu4pyscf/lib/deps/lib/cmake/ExchCXX
+copying gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXConfigVersion.cmake -> build/lib/gpu4pyscf/lib/deps/lib/cmake/ExchCXX
+copying gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXTargets-release.cmake -> build/lib/gpu4pyscf/lib/deps/lib/cmake/ExchCXX
+copying gpu4pyscf/lib/deps/lib/cmake/ExchCXX/ExchCXXTargets.cmake -> build/lib/gpu4pyscf/lib/deps/lib/cmake/ExchCXX
+creating build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/CMakeLists.txt -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/bessel.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/cart2sph.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/common.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp.h -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp_type1.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp_type1_ip.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp_type1_ipip.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp_type2.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp_type2_ip.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/ecp_type2_ipip.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/gauss_chebyshev.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/nr_ecp_driver.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/type1_ang_nuc.cu -> build/lib/gpu4pyscf/lib/ecp
+copying gpu4pyscf/lib/ecp/type2_ang_nuc.cu -> build/lib/gpu4pyscf/lib/ecp
+creating build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/CMakeLists.txt -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/contract_rho.cu -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/contract_rho.cuh -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/exchcxx.cpp -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/exchcxx.h -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/gen_grids.cu -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/libxc.cu -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/libxc.h -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/nr_eval_gto.cu -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/nr_eval_gto.cuh -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/nr_numint_sparse.cu -> build/lib/gpu4pyscf/lib/gdft
+copying gpu4pyscf/lib/gdft/vv10.cu -> build/lib/gpu4pyscf/lib/gdft
+creating build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/CMakeLists.txt -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/bpcache.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/cart2sph.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/cint2e.cuh -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/config.h -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/constant.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/cuda_alloc.cuh -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/fill_ints.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g1e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g1e_ip_root_1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g1e_root_1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e.c -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e.h -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e_root1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e_root2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e_root3.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g2e_root_n.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c1e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c1e_ip.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c1e_ipip.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e_ip1ip2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e_ip2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e_ipip1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e_ipip2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/g3c2e_ipvip1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/gint.h -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/gint1e.h -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/gout2e.cuh -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/gout3c2e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/j_engine_matrix_reorder.c -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c1e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c1e_ip.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c1e_ipip.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e_ip1ip2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e_ip2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e_ipip1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e_ipip2.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_int3c2e_ipvip1.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/nr_fill_ao_ints.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/pair_data.c -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/reduction.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/rys_roots.cu -> build/lib/gpu4pyscf/lib/gint
+copying gpu4pyscf/lib/gint/rys_roots_dat.cu -> build/lib/gpu4pyscf/lib/gint
+creating build/lib/gpu4pyscf/lib/gsycl
+copying gpu4pyscf/lib/gsycl/CMakeLists.txt -> build/lib/gpu4pyscf/lib/gsycl
+copying gpu4pyscf/lib/gsycl/cuComplex.h -> build/lib/gpu4pyscf/lib/gsycl
+copying gpu4pyscf/lib/gsycl/sycl_api_python.cpp -> build/lib/gpu4pyscf/lib/gsycl
+copying gpu4pyscf/lib/gsycl/sycl_device.hpp -> build/lib/gpu4pyscf/lib/gsycl
+creating build/lib/gpu4pyscf/lib/gsycl/cub
+copying gpu4pyscf/lib/gsycl/cub/cub.cuh -> build/lib/gpu4pyscf/lib/gsycl/cub
+creating build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/CMakeLists.txt -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/constant.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/constant.cuh -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/contract_jk.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_get_veff_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_get_veff_ip1_root2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_ip1_root2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_ip1_root3.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_root2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g2e_root3.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g3c2e.cuh -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g3c2e_ip2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g3c2e_pass1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/g3c2e_pass2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/get_veff_driver_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/gvhf.h -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/nr_jk_driver.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/nr_jk_driver_int3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/nr_jk_driver_int3c2e_ip2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/nr_jk_driver_int3c2e_pass1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/nr_jk_driver_int3c2e_pass2.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/nr_jk_driver_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf
+copying gpu4pyscf/lib/gvhf/rys_roots_dat.cu -> build/lib/gpu4pyscf/lib/gvhf
+creating build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/CMakeLists.txt -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/boys.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/contract_Et.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/contract_int3c2e.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/md_contract_j.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/md_indices.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/md_j.cuh -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/md_j_driver.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/md_pairdata.c -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/pbc_md_contract_j.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/unrolled_md_j.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+copying gpu4pyscf/lib/gvhf-md/unrolled_md_j_4dm.cu -> build/lib/gpu4pyscf/lib/gvhf-md
+creating build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/CMakeLists.txt -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/build_rys_gxyz.cuh -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/cart2xyz.c -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/contract_int3c2e.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/create_tasks.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/decompress.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/e_int2c2e_ip2.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/ejk_int3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/ejk_int3c2e_ip2.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/fill_int3c2e.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/fill_int3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/fill_int4c2e.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/gamma_inc.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/gxyz_offset.cuh -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/int3c2e_recontract.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/mole_helper.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/nr_sr_estimator.c -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/nr_sr_estimator.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_constant.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_contract_j.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_contract_jk.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_contract_jk_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_contract_jk_ip2.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_contract_k.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_contract_k.cuh -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_jk_driver.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_roots.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_roots.cuh -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_roots_dat.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/rys_roots_for_k.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_ejk_int3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_ejk_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_ejk_ip2_type12.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_ejk_ip2_type3.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_int3c2e.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_kernels.cuh -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_rys_jk.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_rys_jk_ip1.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/unrolled_rys_k.cu -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/utils.c -> build/lib/gpu4pyscf/lib/gvhf-rys
+copying gpu4pyscf/lib/gvhf-rys/vhf.cuh -> build/lib/gpu4pyscf/lib/gvhf-rys
+creating build/lib/gpu4pyscf/lib/hip_compat
+copying gpu4pyscf/lib/hip_compat/cuComplex.h -> build/lib/gpu4pyscf/lib/hip_compat
+copying gpu4pyscf/lib/hip_compat/cuda.h -> build/lib/gpu4pyscf/lib/hip_compat
+copying gpu4pyscf/lib/hip_compat/cuda_runtime.h -> build/lib/gpu4pyscf/lib/hip_compat
+copying gpu4pyscf/lib/hip_compat/gpu_runtime.h -> build/lib/gpu4pyscf/lib/hip_compat
+creating build/lib/gpu4pyscf/lib/hip_compat/cub
+copying gpu4pyscf/lib/hip_compat/cub/cub.cuh -> build/lib/gpu4pyscf/lib/hip_compat/cub
+creating build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/CMakeLists.txt -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/cart2xyz.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/estimator.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/eval_mat_gga.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/eval_mat_lda.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/eval_mat_tau.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/eval_rho.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/eval_tau.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/loader.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/mg_driver.cu -> build/lib/gpu4pyscf/lib/multigrid
+copying gpu4pyscf/lib/multigrid/multigrid.cuh -> build/lib/gpu4pyscf/lib/multigrid
+creating build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/cartesian.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/constant_objects.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/drivers.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/eval_xc.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/eval_xc_grad.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/evaluation.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/gradient.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/screen.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/screening.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+copying gpu4pyscf/lib/multigrid/multigrid_v2/utils.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v2
+creating build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_density.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_lda_mat.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_mgga_mat.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/aft_eval_tau.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/aft_recursion.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/cartesian.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/constant_objects.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/drivers.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_density.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_density_v2.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_lda_mat.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_lda_mat_v2.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_lda_strain_grad.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_mgga_mat.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_mgga_mat_v2.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_mgga_strain_grad.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_tau.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/eval_tau_v2.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/screen.cu -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+copying gpu4pyscf/lib/multigrid/multigrid_v3/utils.cuh -> build/lib/gpu4pyscf/lib/multigrid/multigrid_v3
+creating build/lib/gpu4pyscf/lib/onemkl_helper
+copying gpu4pyscf/lib/onemkl_helper/CMakeLists.txt -> build/lib/gpu4pyscf/lib/onemkl_helper
+copying gpu4pyscf/lib/onemkl_helper/onemkl_lapack.cpp -> build/lib/gpu4pyscf/lib/onemkl_helper
+creating build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/CMakeLists.txt -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/contract_ft_ao.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/contract_int3c2e.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/contract_int3c2e_pvp.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/create_tasks.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/e_int2c2e_ip1.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/ejk_int3c2e_ip1.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/fill_int2c2e.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/fill_int2c2e_ip1.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/fill_int3c2e.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/fill_triu.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/ft_ao.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/ft_ao.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/ft_ao_ip1.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/int3c2e.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/int3c2e_create_tasks.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/int3c2e_recontract.c -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/nr_eval_gto.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/overlap.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/overlap.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/pbc.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/ppnl.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/recursion.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/rys_contract_j.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/rys_contract_jk_ip1.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/rys_contract_k.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/rys_roots_dat.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/screen.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/sorting.c -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/supmol_sr_estimator.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/unrolled_int3c2e.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/unrolled_kernels.cuh -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/unrolled_rys_k.cu -> build/lib/gpu4pyscf/lib/pbc
+copying gpu4pyscf/lib/pbc/write_cderi.c -> build/lib/gpu4pyscf/lib/pbc
+creating build/lib/gpu4pyscf/lib/sem
+copying gpu4pyscf/lib/sem/CMakeLists.txt -> build/lib/gpu4pyscf/lib/sem
+copying gpu4pyscf/lib/sem/eri_1c2e_kernel.cu -> build/lib/gpu4pyscf/lib/sem
+copying gpu4pyscf/lib/sem/eri_2c2e_kernel.cu -> build/lib/gpu4pyscf/lib/sem
+copying gpu4pyscf/lib/sem/fock.cu -> build/lib/gpu4pyscf/lib/sem
+copying gpu4pyscf/lib/sem/grad_kernel.cu -> build/lib/gpu4pyscf/lib/sem
+copying gpu4pyscf/lib/sem/ss_kernel.cu -> build/lib/gpu4pyscf/lib/sem
+creating build/lib/gpu4pyscf/lib/solvent
+copying gpu4pyscf/lib/solvent/CMakeLists.txt -> build/lib/gpu4pyscf/lib/solvent
+copying gpu4pyscf/lib/solvent/pcm.cu -> build/lib/gpu4pyscf/lib/solvent
