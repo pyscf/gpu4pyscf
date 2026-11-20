@@ -159,6 +159,18 @@ if(USE_HIP)
   # + the host effective-warp-size helper (force-included after the shim, so the
   # HIP runtime it uses is already available).
   set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/hip_compat/gpu_runtime.h -include ${PROJECT_SOURCE_DIR}/warp_size.h")
+  # Work around a register coalescer bug in the ROCm 10.1 compiler (AMD clang
+  # 24.0.0): on gfx90a and gfx942 a load in the persistent loop of the Rys J/K
+  # kernels overwrites the zero that machine LICM hoisted out of the loop as
+  # the atomicAdd offset, and every basis with d shells then faults. Without the
+  # hoist the pattern does not form. Fixed in LLVM 8c6e07731faf and in ROCm
+  # 10.2, but both ROCm compilers report clang 24.0.0, so the flag is applied to
+  # every HIP build. Under -fgpu-rdc the device code is generated at link time,
+  # and CMake's HIP link rule passes CMAKE_HIP_FLAGS there too.
+  option(HIP_DISABLE_MACHINE_LICM "Pass -mllvm -disable-machine-licm (ROCm 10.1 compiler workaround)" ON)
+  if(HIP_DISABLE_MACHINE_LICM)
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -mllvm -disable-machine-licm")
+  endif()
 
   # Wavefront width is derived per device sub-compilation from the target
   # __gfxNNN__ macro in the force-included warp_size.h (64 on GCN/CDNA, 32 on
