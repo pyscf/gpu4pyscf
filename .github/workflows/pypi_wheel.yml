@@ -21,7 +21,8 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
         -e GPU4PYSCF_BUILD_CUDA_WHEEL=1 \
-        -e CMAKE_CONFIGURE_ARGS="-DCUDA_ARCHITECTURES=70;80-real -DBUILD_LIBXC=OFF -DENABLE_MULTIGRID_V2=OFF" \
+        -e CUDA_ARCHITECTURES="70;80-real" \
+        -e CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF -DENABLE_MULTIGRID_V2=OFF" \
         ${{ env.img }} \
         bash -ex /gpu4pyscf/dockerfiles/manylinux/build_wheels.sh
     - name: List available wheels
@@ -45,7 +46,8 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
         -e GPU4PYSCF_BUILD_CUDA_WHEEL=1 \
-        -e CMAKE_CONFIGURE_ARGS="-DCUDA_ARCHITECTURES=70-real;80;90-real -DBUILD_LIBXC=OFF -DENABLE_MULTIGRID_V2=OFF" \
+        -e CUDA_ARCHITECTURES="70-real;80;90-real" \
+        -e CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF -DENABLE_MULTIGRID_V2=OFF" \
         ${{ env.img }} \
         bash -ex /gpu4pyscf/dockerfiles/manylinux/build_wheels.sh
     - name: List available wheels
@@ -69,7 +71,8 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
         -e GPU4PYSCF_BUILD_CUDA_WHEEL=1 \
-        -e CMAKE_CONFIGURE_ARGS="-DCUDA_ARCHITECTURES=80;90-real;120-real -DBUILD_LIBXC=OFF -DENABLE_MULTIGRID_V2=OFF" \
+        -e CUDA_ARCHITECTURES="80;90-real;120-real" \
+        -e CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF -DENABLE_MULTIGRID_V2=OFF" \
         ${{ env.img }} \
         bash -ex /gpu4pyscf/dockerfiles/manylinux/build_wheels.sh
     - name: List available wheels
