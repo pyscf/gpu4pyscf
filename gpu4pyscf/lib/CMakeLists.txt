@@ -175,12 +175,11 @@ if (USE_SYCL)
     set(GPU4PYSCF_EXCHCXX_SYCL_TARGET "")
   endif()
 
-  # SYCL compat layer; built only for SYCL builds (this whole block is inside
-  # if(USE_SYCL)). CUDA builds never see gsycl/ on the include path.
+  # Build the libgsycl runtime and define the SYCL header target only for SYCL builds.
   add_subdirectory(gsycl)
-  # Every subdirectory links the sycl_compat INTERFACE target, which injects
-  # gsycl/ at the front of the include path (no raw <cuda*> includes remain
-  # outside gsycl/ itself -- sources use gpu_compat.h instead).
+  # GPU targets link the sycl_compat INTERFACE target to add compat/sycl/ to
+  # their include path. This resolves <cuComplex.h> and <cub/cub.cuh> to the
+  # SYCL shims while CUDA builds use the toolkit headers.
 elseif(USE_HIP)
   message("HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 else()
@@ -261,7 +260,7 @@ endif ()
 #endif()
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-include_directories(${PROJECT_SOURCE_DIR})
+include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/compat)
 include_directories(${PROJECT_SOURCE_DIR}/deps/include)
 link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 
@@ -269,12 +268,12 @@ if(USE_HIP)
   # Place the CUDA->HIP compatibility stubs (cuda_runtime.h / cuda.h) ahead of
   # the ROCm headers, and force-include the shim so the CUDA-authored .cu
   # kernels build unmodified with hipcc.
-  include_directories(BEFORE ${PROJECT_SOURCE_DIR}/hip_compat)
+  include_directories(BEFORE ${PROJECT_SOURCE_DIR}/compat/hip)
   # -Wno-register: the CUDA sources use the C++17-removed `register` keyword.
   # gpu_runtime.h: CUDA->HIP shim (force-included). warp_size.h: per-arch WARP_SIZE
   # + the host effective-warp-size helper (force-included after the shim, so the
   # HIP runtime it uses is already available).
-  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/hip_compat/gpu_runtime.h -include ${PROJECT_SOURCE_DIR}/warp_size.h")
+  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wno-register -include ${PROJECT_SOURCE_DIR}/compat/hip/gpu_runtime.h -include ${PROJECT_SOURCE_DIR}/compat/warp_size.h")
 
   # Wavefront width is derived per device sub-compilation from the target
   # __gfxNNN__ macro in the force-included warp_size.h (64 on GCN/CDNA, 32 on

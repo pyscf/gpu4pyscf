@@ -43,7 +43,7 @@ if(USE_SYCL)
     -x c++ -nocudainc -nocudalib
   )
   target_include_directories(exchcxx_shim PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}   # exchcxx.h, gint/sycl_device.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}   # exchcxx.h
     ${PROJECT_SOURCE_DIR}         # project-wide includes
   )
   # Provides exchcxx/exchcxx.hpp include path + EXCHCXX_HAS_CONFIG_H=1

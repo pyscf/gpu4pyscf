@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "gpu_compat.h"
-#include "../warp_size.h"
+#include "warp_size.h"
 
 #define THREADS         256
 #define LMAX            4

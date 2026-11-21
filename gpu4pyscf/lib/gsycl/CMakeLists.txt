@@ -17,11 +17,11 @@
 # ── gsycl: SYCL compatibility layer ────────────────────────────────────
 #
 # Provides two things:
-#   1. sycl_compat  — INTERFACE target that injects gsycl/ at the front
+#   1. sycl_compat  — INTERFACE target that injects compat/sycl/ at the front
 #                     of the include path (SYCL builds only), so <cub/cub.cuh>
 #                     and <cuComplex.h> resolve to the SYCL shims here instead
 #                     of the real CUDA toolkit headers. Sources include the
-#                     dual-backend gpu_compat.h (lib/ root) directly.
+#                     dual-backend gpu_compat.h (lib/compat/) directly.
 #   2. gsycl        — shared library exposing the Python ABI (extern "C"
 #                     device/queue management symbols) via libgsycl.so.
 #                     All other .so files link against this to resolve
@@ -30,8 +30,8 @@
 # 1. Header-only INTERFACE target — consumed by every other subdirectory
 add_library(sycl_compat INTERFACE)
 target_include_directories(sycl_compat INTERFACE
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
-  "$<INSTALL_INTERFACE:include/gsycl>"
+  "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/compat/sycl>"
+  "$<INSTALL_INTERFACE:include/compat/sycl>"
 )
 
 # 2. Python ABI shared library — ONE translation unit owns all queue state

@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
-#include "../warp_size.h"
+#include "warp_size.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"

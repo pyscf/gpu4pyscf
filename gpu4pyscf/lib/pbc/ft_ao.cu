@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "../warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
+#include "warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
 #include "ft_ao.cuh"
 
 #define THREADS         256
