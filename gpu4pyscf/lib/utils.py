@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import os
-import importlib.util
 import sys
 import time
 import platform
@@ -159,19 +158,9 @@ def _format_sycl_sys_info():
 
 def format_sys_info():
     '''Format a list of system information for printing.'''
-    # SYCL backend <=> real cupy is absent (cupy_backends ships with it) and
-    # dpctl drives the device. Checking cupy_backends first keeps CUDA boxes
-    # that happen to have dpctl installed on the unmodified CUDA path below.
-    try:
-        has_cupy_backends = importlib.util.find_spec('cupy_backends') is not None
-    except ValueError:
-        # The cupy facade registers a sys.modules stub with __spec__ = None;
-        # that is the shim, not a real cupy install.
-        has_cupy_backends = False
-    if (not has_cupy_backends
-            and importlib.util.find_spec('dpctl') is not None):
-        return _format_sycl_sys_info()
     import gpu4pyscf
+    if gpu4pyscf.BACKEND == 'sycl':
+        return _format_sycl_sys_info()
     from cupyx._runtime import get_runtime_info
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 

@@ -7,7 +7,7 @@ name: SYCL CPU CI
 # CPU runtime. Nothing is built from source except gpu4pyscf itself.
 #
 # Production builds AOT-compile for Intel PVC; that cannot run here, so the
-# build passes -DGPU4PYSCF_SYCL_AOT=OFF (see gpu4pyscf/lib/CMakeLists.txt) to
+# build sets SYCL_ARCHITECTURES=generic (see gpu4pyscf/lib/CMakeLists.txt) to
 # get a generic spir64 JIT build that the OpenCL CPU device can execute.
 #
 # Triggers:
@@ -130,17 +130,18 @@ jobs:
           CC: icx
           CXX: icpx
           FC: ifx
+          GPU4PYSCF_BACKEND: sycl
+          SYCL_ARCHITECTURES: generic
           CMAKE_CONFIGURE_ARGS: >-
             -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx
-            -DCMAKE_Fortran_COMPILER=ifx -DUSE_SYCL=ON
+            -DCMAKE_Fortran_COMPILER=ifx
             -DCMAKE_BUILD_TYPE=Release
-            -DGPU4PYSCF_SYCL_AOT=OFF
             -DCMAKE_C_COMPILER_LAUNCHER=ccache
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         run: |
           export MKLROOT="$CONDA_PREFIX" TBBROOT="$CONDA_PREFIX"
           set -o pipefail; mkdir -p /tmp/logs
-          python setup.py --sycl build 2>&1 | tee /tmp/logs/40_gpu4pyscf_build.log
+          python setup.py build 2>&1 | tee /tmp/logs/40_gpu4pyscf_build.log
           ccache -s || true
 
       - name: Save ccache (even on failure, partial objects speed up retries)

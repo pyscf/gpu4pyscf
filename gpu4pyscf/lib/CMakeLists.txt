@@ -15,13 +15,63 @@
 cmake_minimum_required (VERSION 3.21 FATAL_ERROR) # Required by Libxc 7.1.2 and the first-class HIP language
 project (gpu4pyscf C CXX)
 
-option(USE_SYCL "Using SYCL backend" OFF)
-option(USE_HIP "Using HIP backend" OFF)
+set(GPU4PYSCF_BACKEND cuda CACHE STRING "GPU backend: cuda, hip, or sycl")
+set_property(CACHE GPU4PYSCF_BACKEND PROPERTY STRINGS cuda hip sycl)
+string(TOLOWER "${GPU4PYSCF_BACKEND}" GPU4PYSCF_BACKEND)
+set(USE_HIP OFF)
+set(USE_SYCL OFF)
+if(GPU4PYSCF_BACKEND STREQUAL "hip")
+  set(USE_HIP ON)
+elseif(GPU4PYSCF_BACKEND STREQUAL "sycl")
+  set(USE_SYCL ON)
+elseif(NOT GPU4PYSCF_BACKEND STREQUAL "cuda")
+  message(FATAL_ERROR "GPU4PYSCF_BACKEND must be cuda, hip, or sycl")
+endif()
 
 if(USE_HIP)
   # Set explicit targets before compiler detection so builds do not need a GPU.
-  if(DEFINED GPU_ARCHITECTURES)
-    set(CMAKE_HIP_ARCHITECTURES "${GPU_ARCHITECTURES}")
+  # HIP_ARCHITECTURES takes precedence over CMake's native architecture setting.
+  set(_hip_cdna_archs "gfx908;gfx90a;gfx942;gfx950")
+  set(_hip_rdna_archs "gfx10-3-generic;gfx11-generic;gfx12-generic")
+  string(TOLOWER "${HIP_ARCHITECTURES}" _hip_target)
+  if(_hip_target STREQUAL "all")
+    set(CMAKE_HIP_ARCHITECTURES "${_hip_cdna_archs};${_hip_rdna_archs}")
+  elseif(_hip_target STREQUAL "cdna")
+    set(CMAKE_HIP_ARCHITECTURES "${_hip_cdna_archs}")
+  elseif(_hip_target STREQUAL "rdna")
+    set(CMAKE_HIP_ARCHITECTURES "${_hip_rdna_archs}")
+  elseif(_hip_target STREQUAL "native" OR _hip_target STREQUAL "auto")
+    # An explicit request to detect GPUs overrides any cached architecture list.
+    set(CMAKE_HIP_ARCHITECTURES "")
+  elseif(HIP_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "${HIP_ARCHITECTURES}")
+  endif()
+
+  # Preserve an explicit CMake architecture list; otherwise detect installed GPUs.
+  if(NOT CMAKE_HIP_ARCHITECTURES)
+    find_program(ROCM_AGENT_ENUMERATOR NAMES rocm_agent_enumerator
+                 HINTS ENV ROCM_PATH ENV HIP_PATH ENV ROCM_HOME PATH_SUFFIXES bin)
+    if(ROCM_AGENT_ENUMERATOR)
+      execute_process(COMMAND ${ROCM_AGENT_ENUMERATOR}
+                      OUTPUT_VARIABLE _rocm_agents
+                      OUTPUT_STRIP_TRAILING_WHITESPACE)
+      string(REPLACE "\n" ";" _rocm_agents "${_rocm_agents}")
+      set(_hip_archs "")
+      foreach(_agent ${_rocm_agents})
+        # skip the host/CPU agent (gfx000) and any blank lines
+        if(_agent MATCHES "^gfx" AND NOT _agent STREQUAL "gfx000")
+          list(APPEND _hip_archs "${_agent}")
+        endif()
+      endforeach()
+      list(REMOVE_DUPLICATES _hip_archs)
+      set(CMAKE_HIP_ARCHITECTURES "${_hip_archs}")
+    endif()
+  endif()
+  if(NOT CMAKE_HIP_ARCHITECTURES)
+    message(FATAL_ERROR
+      "HIP backend selected but no AMD GPU architecture could be determined. "
+      "Pass -DHIP_ARCHITECTURES=gfxXXXX (e.g. gfx90a, gfx942, gfx1100, gfx1151) "
+      "or set CMAKE_HIP_ARCHITECTURES.")
   endif()
   enable_language(HIP)
 endif()
@@ -41,12 +91,14 @@ if (USE_SYCL)
 
   add_compile_definitions(USE_SYCL=1)
 
-  # Production builds AOT-compile device code for Intel PVC (spir64_gen +
-  # -device pvc). That cannot run anywhere without a PVC, so CPU-only CI
-  # (GitHub-hosted runners driving the OpenCL CPU device) passes
-  # -DGPU4PYSCF_SYCL_AOT=OFF to get a generic JIT (spir64) build instead.
-  # Default ON keeps production PVC builds byte-identical.
-  option(GPU4PYSCF_SYCL_AOT "AOT-compile SYCL device code for Intel PVC" ON)
+  # Generic device code is compiled for the selected device at runtime.
+  # PVC instead compiles ahead of time for Intel Data Center GPU Max.
+  set(SYCL_ARCHITECTURES generic CACHE STRING "SYCL target: generic or pvc")
+  set_property(CACHE SYCL_ARCHITECTURES PROPERTY STRINGS generic pvc)
+  string(TOLOWER "${SYCL_ARCHITECTURES}" SYCL_ARCHITECTURES)
+  if(NOT SYCL_ARCHITECTURES MATCHES "^(generic|pvc)$")
+    message(FATAL_ERROR "SYCL_ARCHITECTURES must be generic or pvc")
+  endif()
 
   # Honor a user-supplied CMAKE_BUILD_TYPE (e.g. passed through
   # CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo"). When nothing is
@@ -83,7 +135,7 @@ if (USE_SYCL)
     -fno-system-debug
     -fsycl-default-sub-group-size=32
   )
-  if (GPU4PYSCF_SYCL_AOT)
+  if (SYCL_ARCHITECTURES STREQUAL "pvc")
     add_compile_options(
       -fsycl-targets=spir64_gen
       "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
@@ -109,7 +161,7 @@ if (USE_SYCL)
     -fsycl-device-code-split=per_kernel
     -fsycl-max-parallel-link-jobs=64
   )
-  if (GPU4PYSCF_SYCL_AOT)
+  if (SYCL_ARCHITECTURES STREQUAL "pvc")
     add_link_options(
       -ftarget-register-alloc-mode=pvc:auto
       -fsycl-targets=spir64_gen
@@ -130,34 +182,6 @@ if (USE_SYCL)
   # gsycl/ at the front of the include path (no raw <cuda*> includes remain
   # outside gsycl/ itself -- sources use gpu_compat.h instead).
 elseif(USE_HIP)
-  # AMD GPU targets. Honour the explicit override set above or a pre-set
-  # CMAKE_HIP_ARCHITECTURES; otherwise auto-detect the installed AMD GPU(s)
-  # with rocm_agent_enumerator. No specific gfx arch is hard-coded.
-  if(NOT CMAKE_HIP_ARCHITECTURES)
-    find_program(ROCM_AGENT_ENUMERATOR NAMES rocm_agent_enumerator
-                 HINTS ENV ROCM_PATH ENV HIP_PATH ENV ROCM_HOME PATH_SUFFIXES bin)
-    if(ROCM_AGENT_ENUMERATOR)
-      execute_process(COMMAND ${ROCM_AGENT_ENUMERATOR}
-                      OUTPUT_VARIABLE _rocm_agents
-                      OUTPUT_STRIP_TRAILING_WHITESPACE)
-      string(REPLACE "\n" ";" _rocm_agents "${_rocm_agents}")
-      set(_hip_archs "")
-      foreach(_agent ${_rocm_agents})
-        # skip the host/CPU agent (gfx000) and any blank lines
-        if(_agent MATCHES "^gfx" AND NOT _agent STREQUAL "gfx000")
-          list(APPEND _hip_archs "${_agent}")
-        endif()
-      endforeach()
-      list(REMOVE_DUPLICATES _hip_archs)
-      set(CMAKE_HIP_ARCHITECTURES "${_hip_archs}")
-    endif()
-  endif()
-  if(NOT CMAKE_HIP_ARCHITECTURES)
-    message(FATAL_ERROR
-      "USE_HIP is ON but no AMD GPU architecture could be determined. "
-      "Pass -DGPU_ARCHITECTURES=gfxXXXX (e.g. gfx90a, gfx942, gfx1100, gfx1151) "
-      "or set CMAKE_HIP_ARCHITECTURES.")
-  endif()
   message("HIP_ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 else()
   # Set architectures before enabling CUDA, which otherwise initializes its own default.
@@ -526,3 +550,7 @@ add_subdirectory(gvhf-md)
 add_subdirectory(pbc)
 add_subdirectory(multigrid)
 add_subdirectory(ecp)
+
+# Python imports this value before initializing backend-specific modules.
+file(GENERATE OUTPUT "${PROJECT_SOURCE_DIR}/../_build_config.py"
+     CONTENT "# Generated by CMake.\nBACKEND = '${GPU4PYSCF_BACKEND}'\n")
