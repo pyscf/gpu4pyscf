@@ -196,7 +196,7 @@ def eigh(h, s, overwrite=False):
     else:
         A = h.copy()
         B = s.copy()
-    if cupy.cuda.runtime.is_hip:
+    if BACKEND == 'hip':
         _handle = _dn_handle
         _dn('SetStream')(_handle, ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
     else:
