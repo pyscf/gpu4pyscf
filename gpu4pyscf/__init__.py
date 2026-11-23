@@ -14,6 +14,15 @@
 
 __version__ = '1.9.1'
 
+import sys
+from ._build_config import BACKEND
+
+if BACKEND == 'sycl':
+    # Load fake cupy first. It registers the dpnp facade as cupy in sys.modules
+    from . import cupy
+    from . import cupyx
+    sys.modules['cupyx'] = cupyx
+
 
 def _check_rocm_import_order():
     '''Fail early, with instructions, when CuPy cannot compile GPU kernels on
@@ -23,12 +32,9 @@ def _check_rocm_import_order():
     before gpu4pyscf, CuPy reuses that hipRTC, which may be unable to build
     CuPy's kernels. Only runs on ROCm, when torch has already been imported.
     '''
-    import sys
-    if 'torch' not in sys.modules:
+    if BACKEND != 'hip' or 'torch' not in sys.modules:
         return
     import cupy
-    if not cupy.cuda.runtime.is_hip:
-        return
     try:
         with open('/proc/self/maps') as f:
             hiprtc = sorted({line.split()[-1] for line in f if 'libhiprtc' in line})

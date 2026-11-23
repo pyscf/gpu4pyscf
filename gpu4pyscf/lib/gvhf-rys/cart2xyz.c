@@ -152,6 +152,9 @@ static void _dm_xyz_to_dm(double* dm_xyz, double* dm, int nao, int li, int lj, d
     }
 }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void transform_cart_to_xyz(double *dm_xyz, double *dm, int *ao_loc, int *pair_loc,
                            int *bas, int nbas, double *env)
 {
@@ -184,8 +187,14 @@ void transform_cart_to_xyz(double *dm_xyz, double *dm, int *ao_loc, int *pair_lo
     }
 }
 }
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void transform_xyz_to_cart(double *vj, double *vj_xyz, int *ao_loc, int *pair_loc,
                            int *bas, int nbas, double *env)
 {
@@ -218,3 +227,6 @@ void transform_xyz_to_cart(double *vj, double *vj_xyz, int *ao_loc, int *pair_lo
     }
 }
 }
+#ifdef __cplusplus
+} // extern "C"
+#endif

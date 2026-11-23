@@ -29,8 +29,8 @@ jobs:
       image: rocm/dev-ubuntu-24.04:7.2.4
     env:
       ROCM_PATH: /opt/rocm
-      USE_HIP: "1"
-      GPU_TARGET: all
+      GPU4PYSCF_BACKEND: hip
+      HIP_ARCHITECTURES: all
       CMAKE_GENERATOR: Ninja
       # Override setup.py's default parallelism to fit runner memory.
       CMAKE_BUILD_ARGS: "--parallel 2"

@@ -2,8 +2,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -21,7 +19,7 @@
     int reorder_aux, int to_sph, \
     int thread_id, int worker_id, double *shared_memory
 
-#define LAUNCH_KERNEL(KERNEL) \
+#define CALL_UNROLLED_KERNEL(KERNEL) \
     KERNEL(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
     bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph, thread_id, worker_id, shared_memory)
 
@@ -2470,36 +2468,38 @@ int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_000); break;
+        CALL_UNROLLED_KERNEL(int3c2e_000); break;
     case 5: // li=1 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_100); break;
+        CALL_UNROLLED_KERNEL(int3c2e_100); break;
     case 6: // li=1 lj=1 lk=0
-        LAUNCH_KERNEL(int3c2e_110); break;
+        CALL_UNROLLED_KERNEL(int3c2e_110); break;
     case 10: // li=2 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_200); break;
+        CALL_UNROLLED_KERNEL(int3c2e_200); break;
     case 11: // li=2 lj=1 lk=0
-        LAUNCH_KERNEL(int3c2e_210); break;
+        CALL_UNROLLED_KERNEL(int3c2e_210); break;
     case 12: // li=2 lj=2 lk=0
-        LAUNCH_KERNEL(int3c2e_220); break;
+        CALL_UNROLLED_KERNEL(int3c2e_220); break;
     case 25: // li=0 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_001); break;
+        CALL_UNROLLED_KERNEL(int3c2e_001); break;
     case 30: // li=1 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_101); break;
+        CALL_UNROLLED_KERNEL(int3c2e_101); break;
     case 31: // li=1 lj=1 lk=1
-        LAUNCH_KERNEL(int3c2e_111); break;
+        CALL_UNROLLED_KERNEL(int3c2e_111); break;
     case 35: // li=2 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_201); break;
+        CALL_UNROLLED_KERNEL(int3c2e_201); break;
     case 36: // li=2 lj=1 lk=1
-        LAUNCH_KERNEL(int3c2e_211); break;
+        CALL_UNROLLED_KERNEL(int3c2e_211); break;
     case 50: // li=0 lj=0 lk=2
-        LAUNCH_KERNEL(int3c2e_002); break;
+        CALL_UNROLLED_KERNEL(int3c2e_002); break;
     case 55: // li=1 lj=0 lk=2
-        LAUNCH_KERNEL(int3c2e_102); break;
+        CALL_UNROLLED_KERNEL(int3c2e_102); break;
     case 56: // li=1 lj=1 lk=2
-        LAUNCH_KERNEL(int3c2e_112); break;
+        CALL_UNROLLED_KERNEL(int3c2e_112); break;
     case 60: // li=2 lj=0 lk=2
-        LAUNCH_KERNEL(int3c2e_202); break;
+        CALL_UNROLLED_KERNEL(int3c2e_202); break;
     default: return 0;
     }
     return 1;
 }
+
+#undef CALL_UNROLLED_KERNEL
