@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import cupy
+from gpu4pyscf import BACKEND
 
 num_devices = cupy.cuda.runtime.getDeviceCount()
 
@@ -42,7 +43,7 @@ if shared_mem_optin > 65536:
     shm_size -= 2048
 else:
     shm_size = props['sharedMemPerBlock']
-    if cupy.cuda.runtime.is_hip:
+    if BACKEND == 'hip':
         # The kernels' static __shared__ variables count against the same
         # 64 KB as the dynamic buffer sized from shm_size.
         shm_size -= 1024
