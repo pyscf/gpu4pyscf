@@ -20,11 +20,12 @@ from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib.utils import load_library
 
 from ctypes.util import find_library
 # On ROCm/HIP, hipSOLVER is loaded in place of cuSOLVER (see below).
-if not cupy.cuda.runtime.is_hip:
+if BACKEND == 'cuda':
     libcusolver = find_library('cusolver')
     if libcusolver is not None:
         libcusolver = ctypes.CDLL(libcusolver)
@@ -47,7 +48,7 @@ CUSOLVER_EIG_MODE_VECTOR = 1
 # (cusolverDn*). The Dn symbols have identical signatures, but the enum values
 # differ between the two libraries, so both the library handle/symbol prefix and
 # the enum constants are selected per backend below. The CUDA path is unchanged.
-if cupy.cuda.runtime.is_hip:
+if BACKEND == 'hip':
     libcusolver = ctypes.CDLL(find_library('hipsolver') or 'libhipsolver.so')
     _DN_PREFIX = 'hipsolverDn'
     CUSOLVER_EIG_TYPE_1 = 211         # HIPSOLVER_EIG_TYPE_1
@@ -320,7 +321,7 @@ def eigh_std(a):
     single-precision inputs, which syevd does not take, also stay on
     cupy.linalg.eigh.
     '''
-    if (cupy.cuda.runtime.is_hip and a.ndim == 2 and
+    if (BACKEND == 'hip' and a.ndim == 2 and
             a.dtype in (np.float64, np.complex128)):
         return syevd(a)
     return cupy.linalg.eigh(a)

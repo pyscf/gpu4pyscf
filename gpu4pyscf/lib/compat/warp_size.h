@@ -19,7 +19,7 @@
  *
  * This header is force-included (-include) into every HIP translation unit, so it
  * is the single source of truth for WARP_SIZE. On CUDA/NVIDIA it is pulled in
- * explicitly (relative include) by the few headers that need the host helper.
+ * explicitly by the few headers that need the host helper.
  *
  * WARP_SIZE -- the wavefront width the *device* code is compiled for. In a
  * multi-arch (fat-binary) HIP build each device sub-compilation defines the

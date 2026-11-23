@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include <cuda_runtime.h>
+#include "gpu_compat.h"
 #include <stdio.h>
 #include <iostream>
 #include "cutlass/cutlass.h"

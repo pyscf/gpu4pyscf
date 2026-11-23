@@ -38,19 +38,32 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int naux)
 {
-    // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+    setup_context();
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, ksh0);
+    DECLARE_SHARED(int, ksh1);
+    DECLARE_SHARED(int, nksh);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, lk);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, nf);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, g_size);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nst_per_block);
+    DECLARE_SHARED(int, aux_per_block);
+    DECLARE_SHARED(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
+    // For better load balance, consume blocks in the reversed order
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -392,19 +405,32 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int npairs, int naux)
 {
-    // For better load balance, consume blocks in the reversed order
-    int thread_id = threadIdx.x;
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int ksh0, ksh1, nksh;
-    __shared__ int li, lj, lk, nroots, nf;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int g_size;
-    __shared__ int nao;
-    __shared__ int gout_stride, nst_per_block, aux_per_block, nsp_per_block;
+    setup_context();
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, ksh0);
+    DECLARE_SHARED(int, ksh1);
+    DECLARE_SHARED(int, nksh);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, lk);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, nf);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, g_size);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nst_per_block);
+    DECLARE_SHARED(int, aux_per_block);
+    DECLARE_SHARED(int, nsp_per_block);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
+    // For better load balance, consume blocks in the reversed order
+    int thread_id = threadIdx_x;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -744,13 +770,14 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm, cudaStream_t stream)
 {
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    sum_ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size, stream>>>(
-            ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
-            omega, lr_factor, sr_factor,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offset, naux);
+    LAUNCH_KERNEL( sum_ejk_int3c2e_ip1_kernel, blocks, threads, shm_size, stream,
+        ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
+        omega, lr_factor, sr_factor,
+        shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+        ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));
@@ -768,16 +795,18 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     int *ao_pair_loc, int aux_offset,
                     int nao, int npairs, int naux, int natm, cudaStream_t stream)
 {
-    cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     size_t nao2 = nao * nao;
+
+    cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    auto blocks = make_grid(nbatches_shl_pair, nbatches_ksh);
+    auto threads = make_block(THREADS);
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
-        ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size, stream>>>(
-                ejk+n*natm*3, ejk_aux ? ejk_aux+n*natm*3 : NULL,
-                dm, density_auxvec, n_dm-n,
-                omega, lr_factor, sr_factor, *envs,
-                shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-                ao_pair_loc, aux_offset, npairs, naux);
+        LAUNCH_KERNEL( ejk_int3c2e_ip1_kernel, blocks, threads, shm_size, stream,
+            ejk+n*natm*3, ejk_aux ? ejk_aux+n*natm*3 : (double *)NULL,
+            dm, density_auxvec, n_dm-n,
+            omega, lr_factor, sr_factor, *envs,
+            shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+            ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange
             dm += DM_BLOCK * (size_t)npairs * naux;
         } else {

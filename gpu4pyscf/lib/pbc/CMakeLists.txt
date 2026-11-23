@@ -22,4 +22,18 @@ set_target_properties(pbc PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON)
 gpu4pyscf_configure_gpu_target(pbc)
 
-target_link_libraries(pbc OpenMP::OpenMP_C)
+if (USE_SYCL)
+  # rys_roots_dat.cu is included by rys_roots.cuh as constexpr tables; do not
+  # also compile it as its own TU.
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/rys_roots_dat.cu
+    PROPERTIES HEADER_FILE_ONLY ON)
+  # gvhf-rys/vhf.cuh spells the gxyz device_global s_rys_gxyz_offset. libpbc.so
+  # and libgvhf_rys.so are loaded into one process with no DT_NEEDED link and
+  # default symbol visibility, so identical names would bind both libraries to
+  # whichever loaded first and one library's host memcpy would land in the
+  # other's device image (kernels then read uninitialised offsets). Give
+  # libpbc its own name.
+  target_compile_definitions(pbc PRIVATE s_rys_gxyz_offset=s_pbc_gxyz_offset)
+endif()
+
+target_link_libraries(pbc PRIVATE OpenMP::OpenMP_C)

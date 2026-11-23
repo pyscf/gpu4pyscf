@@ -191,7 +191,8 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
 
     Returns:
         CuPy array: [n_ecp_atoms, 3, nao, nao],
-            reindex the first dimension acoording to ecp_atoms
+            one block per atom of ecp_atoms, in its order (default: the ECP
+            atoms in increasing index order)
     """
     assert len(mol._ecpbas) > 0
 
@@ -262,12 +263,13 @@ def get_ecp_ipip(mol, ip_type='ipipv', ecp_atoms=None):
 
     Returns:
         CuPy array: [n_ecp_atoms, 9, nao, nao],
-            reindex the first dimension acoording to ecp_atoms
+            one block per atom of ecp_atoms, in its order (default: the ECP
+            atoms in increasing index order)
     """
     assert len(mol._ecpbas) > 0
 
     if ecp_atoms is None:
-        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
 
     if ip_type == 'ipipv':
         fn = libecp.ECP_ipipv_cart

@@ -34,13 +34,20 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
                         int *gout_stride_lookup)
 {
-    int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;
-    extern __shared__ double shared_memory[];
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int nbas;
-    __shared__ int li, lj, nroots, nao, iprim, jprim;
-    __shared__ int gout_stride;
+    setup_context();
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, nbas);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, gout_stride);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    int sp_block_id = blockIdx_x;
+    int thread_id = threadIdx_x;
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -195,7 +202,9 @@ int fill_int2c2e(double *out, PBCIntEnvVars *envs,
                  uint32_t *bas_ij_idx, int *gout_stride_lookup, cudaStream_t stream)
 {
     cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(nbatches_shl_pair);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( pbc_int2c2e_kernel, blocks, threads, shm_size, stream,
             out, *envs, omega, lr_factor, sr_factor,
             shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();

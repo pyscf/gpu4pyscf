@@ -16,6 +16,10 @@
 
 #pragma once
 
+#include "gpu_compat.h"
+
+#define MAKE_RANGE_3D(X, Y, Z)  make_block((X), (Y), (Z))
+
 typedef struct {
     int natm;
     int nbas;
