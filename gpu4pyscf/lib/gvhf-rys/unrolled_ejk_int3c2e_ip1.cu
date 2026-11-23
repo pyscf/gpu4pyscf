@@ -2,8 +2,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
@@ -19,7 +17,7 @@
     int aux_offset, int naux, int nao, \
     int thread_id, double *shared_memory
 
-#define LAUNCH_KERNEL(KERNEL) \
+#define CALL_UNROLLED_KERNEL(KERNEL) \
     KERNEL(ejk, ejk_aux, dm, density_auxvec, omega, lr_factor, sr_factor, envs, \
     shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim, \
     bas_ij_idx, ao_pair_loc, aux_offset, naux, nao, thread_id, shared_memory)
@@ -2175,20 +2173,22 @@ int int3c2e_ip1_unrolled(double *ejk, double *ejk_aux, double *dm, double *densi
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_ip1_000); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_000); break;
     case 5: // li=1 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_ip1_100); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_100); break;
     case 6: // li=1 lj=1 lk=0
-        LAUNCH_KERNEL(int3c2e_ip1_110); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_110); break;
     case 10: // li=2 lj=0 lk=0
-        LAUNCH_KERNEL(int3c2e_ip1_200); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_200); break;
     case 25: // li=0 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_ip1_001); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_001); break;
     case 30: // li=1 lj=0 lk=1
-        LAUNCH_KERNEL(int3c2e_ip1_101); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_101); break;
     case 50: // li=0 lj=0 lk=2
-        LAUNCH_KERNEL(int3c2e_ip1_002); break;
+        CALL_UNROLLED_KERNEL(int3c2e_ip1_002); break;
     default: return 0;
     }
     return 1;
 }
+
+#undef CALL_UNROLLED_KERNEL

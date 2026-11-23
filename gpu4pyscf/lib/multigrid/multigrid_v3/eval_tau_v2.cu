@@ -37,15 +37,19 @@ void eval_tau_kernel(double *rho_c, double *tau_c, double *dm, PBCIntEnvVars env
     constexpr int tile = threads / nsp_per_block;
     constexpr int nfi = (LI + 1) * (LI + 2) / 2;
     constexpr int nfj = (LJ + 1) * (LJ + 2) / 2;
-    int thread_id = threadIdx.x;
+    setup_context();
+    int thread_id = threadIdx_x;
     int tx = thread_id % nsp_per_block;
     int ty = thread_id / nsp_per_block;
-    int segment_id = blockIdx.x / atom_mesh_a_max;
-    int a_index_id = blockIdx.x - atom_mesh_a_max * segment_id;
-    __shared__ int a_index;
-    __shared__ int b_start, b_stop;
-    __shared__ int c_start, c_stop, c_index1;
-    extern __shared__ double rho_cache[];
+    int segment_id = blockIdx_x / atom_mesh_a_max;
+    int a_index_id = blockIdx_x - atom_mesh_a_max * segment_id;
+    DECLARE_SHARED(int, a_index);
+    DECLARE_SHARED(int, b_start);
+    DECLARE_SHARED(int, b_stop);
+    DECLARE_SHARED(int, c_start);
+    DECLARE_SHARED(int, c_stop);
+    DECLARE_SHARED(int, c_index1);
+    DYNAMIC_SHARED_PTR(double, rho_cache);
 
     float2 x_range = atom_frac_ranges[       segment_id];
     float2 y_range = atom_frac_ranges[nseg  +segment_id];
@@ -283,11 +287,14 @@ for (int c_index0 = c_start; c_index0 < c_stop; c_index0 += c_stride) {
 
 extern "C" {
 #define eval_tau_kernel_case(li, lj, slice_i, slice_j) \
-    case (li * LMAX1 + lj): \
-        eval_tau_kernel<li,lj,slice_i,slice_j><<<ntasks, threads, shmsize, stream>>>(\
+    case (li * LMAX1 + lj): { \
+        auto _threads = make_block(threads); \
+        auto _grids = make_grid(ntasks); \
+        LAUNCH_KERNEL( (eval_tau_kernel<li,lj,slice_i,slice_j>), _grids, _threads, shmsize, stream, \
             rho_c, tau_c, dm, *envs, factor, shl_pair_offsets, bas_ij_idx, \
-            atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
-            da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
+                        atom_frac_ranges, atom_mesh[0], nseg, c_stride, \
+                        da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, negligible); \
+    } \
     break
 
 int evaluate_tau_v2(double *rho_c, double *tau_c, double *dm,

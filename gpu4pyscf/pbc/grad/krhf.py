@@ -55,7 +55,7 @@ def get_hcore(cell, kpts):
         coords = cp.asarray(cell.get_uniform_grids())
         vlocG = get_vlocG(cell)
         vpplocG = -cp.einsum('ij,ij->j', SI, vlocG)
-        vpplocG[0] = cp.sum(get_alphas(cell))
+        vpplocG[0] = get_alphas(cell).sum()
         vpplocR = pbctools.ifft(vpplocG, cell.mesh).real
         ni = pbc_numint.KNumInt()
         grids = UniformGrids(cell)

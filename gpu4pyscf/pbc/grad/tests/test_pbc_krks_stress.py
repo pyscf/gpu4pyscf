@@ -256,7 +256,11 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat2[i,j] - (exc1 - exc2)/2e-4) < 1e-7
 
-    def test_multigrid_image_boundary_strain_deriv(self):
+    def test_multigrid_v2_image_boundary_strain_deriv(self):
+        from gpu4pyscf.pbc.dft import multigrid_v2
+        if multigrid_v2.libgpbc is None:
+            self.skipTest('libmgrid_v2 is not available')
+
         # The structure is from t-HfO2, all elements are changed to H.
         cell = gto.Cell()
         cell.atom = [
