@@ -31,7 +31,8 @@ from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, _normalize_kpts, _format_kpts_array)
 
 L_AUX_MAX = 6
 THREADS = 256
@@ -121,8 +122,6 @@ def _check_opt(cell, hermi, kpts, bvkmesh=None, scale_precision=1):
 
     assert isinstance(cell, Cell)
     if bvkmesh is None:
-        if kpts is not None:
-            kpts = kpts.reshape(-1, 3)
         bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
     rcut = cell.rcut
@@ -215,6 +214,11 @@ class _Int1eOpt:
 
     def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
               out=None, buf=None, shls_slice=None):
+        if isinstance(self.cell, Mole):
+            kpts, is_single_kpt = np.zeros((1, 3)), True
+        else:
+            kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+            kpts = kpts.kpts
         if comp == 1:
             gout_width = 36
         else:
@@ -258,7 +262,7 @@ class _Int1eOpt:
         if err != 0:
             raise RuntimeError(f'{kern} failed')
 
-        is_gamma_point = kpts is None or is_zero(kpts)
+        is_gamma_point = is_zero(kpts)
         if isinstance(cell, Mole) or is_gamma_point:
             if ncells > 1: # corresponding to self.bvkmesh is None
                 mat = mat.sum(axis=0)
@@ -271,13 +275,12 @@ class _Int1eOpt:
                 out = mat
             if comp == 1:
                 out = out[0]
-            if kpts is not None and kpts.ndim == 2:
+            if not is_single_kpt:
                 # In k-mesh KS calculations, the leading dimension is the index
                 # for k-points.
                 out = out[None]
         else:
-            is_single_kpt = kpts.ndim == 1
-            kpts = asarray(kpts.reshape(-1, 3))
+            kpts = asarray(kpts)
             nkpts = len(kpts)
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
@@ -297,12 +300,12 @@ class _Int1eOpt:
         return out
 
     def _derivatives_intor(self, dm, kern, deriv, kpts=None):
-        cell = self.cell
-        dm = cell.apply_C_mat_CT(dm)
-        if kpts is None:
+        if isinstance(self.cell, Mole):
             kpts = np.zeros((1, 3))
         else:
-            kpts = kpts.reshape(-1, 3)
+            kpts, _ = _format_kpts_array(kpts)
+        cell = self.cell
+        dm = cell.apply_C_mat_CT(dm)
         nkpts = len(kpts)
         nao = dm.shape[-1]
         dm = dm.reshape(-1, nkpts, nao, nao)

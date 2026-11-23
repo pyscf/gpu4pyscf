@@ -22,8 +22,7 @@ from pyscf.pbc.lib.kpts_helper import gamma_point
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import most_diffuse_pgto, SortedGTO
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts, kpts_to_bvkmesh
 
 kern_map = {
     'int1e_ovlp':         ('PBCint1e_ovlp',         1, (0, 0)),
@@ -75,7 +74,8 @@ def _sorted_fake_cell_vnl(cell, type='scalar'):
     return fakecell, hl_blocks, pattern, splits
 
 def get_pp_nl(cell, kpts=None):
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+    kpts = kpts.kpts
     nkpts = len(kpts)
 
     # pattern stores the unique [hl_dim, l] combinations
@@ -133,10 +133,8 @@ def get_pp_soc(cell, kpts=None):
         gamma point and complex for k-points.
     '''
     from pyscf.pbc.gto.pseudo.pp_int import _angmom_matrix
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
+    kpts = kpts.kpts
     nkpts = len(kpts)
 
     nao = cell.nao
