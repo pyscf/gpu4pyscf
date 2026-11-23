@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "warp_size.h"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
@@ -29,6 +30,14 @@
 // 48KB ~18, 96KB ~41, 160KB ~61
 #define RT_TMP_SIZE 31
 #define RT2_IDX_CACHE_SIZE (35*56)
+
+// Lane mask of a group of threadsx lanes for __shfl_down_sync. The group can
+// start at lane 32 or above on 64-wide wavefronts, which needs a 64-bit mask.
+#if WARP_SIZE == 64
+typedef unsigned long long lane_mask_t;
+#else
+typedef unsigned int lane_mask_t;
+#endif
 
 #define ADDR(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \
@@ -103,7 +112,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int t_id = gout_id * nsq_per_block + sq_id;
     int lane_id = t_id % warpSize;
     int group_id = lane_id / threadsx;
-    unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
+    lane_mask_t mask = (((lane_mask_t)1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
@@ -436,7 +445,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int t_id = gout_id * nsq_per_block + sq_id;
     int lane_id = t_id % warpSize;
     int group_id = lane_id / threadsx;
-    unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
+    lane_mask_t mask = (((lane_mask_t)1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
