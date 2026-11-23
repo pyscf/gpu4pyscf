@@ -39,7 +39,9 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, conj_kpts, _get_kmesh
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, conj_kpts, _get_kmesh, _as_kpts_array)
 
 PBC_LINDEP_MO_ENERGY_OFFSET = 1e5
 
@@ -319,8 +321,9 @@ class KSCF(pbchf.SCF):
     e.g. mo_coeff is (nkpts, nao, nao) ndarray
 
     Attributes:
-        kpts : (nks,3) ndarray
+        kpts : (nks,3) ndarray or KPointSampling
             The sampling k-points in Cartesian coordinates, in units of 1/Bohr.
+            Sampling objects retain their mesh-generation metadata.
     '''
     conv_tol_grad = khf_cpu.KSCF.conv_tol_grad
     time_reversal_symmetry = True
@@ -347,17 +350,23 @@ class KSCF(pbchf.SCF):
     def dump_flags(self, verbose=None):
         mol_hf.SCF.dump_flags(self, verbose)
         log = logger.new_logger(self, verbose)
+        if log.verbose < logger.INFO:
+            return self
+
         log.info('\n')
         log.info('******** PBC SCF flags ********')
-        log.info('N kpts = %d', len(self.kpts))
-        log.debug2('kpts = %s', self.kpts)
+        kpts = self.kpts
+        if 'kpts_sampling' in self.__dict__:
+            kpts = KPointSampling.loads(self.__dict__['kpts_sampling'])
+        nkpts = len(kpts)
+        log.info('N kpts = %d', nkpts)
+        log.debug2('kpts = %s', kpts)
         log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
             isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
-            madelung = tools.pbc.madelung(cell, self.kpts)
+            madelung = tools.pbc.madelung(cell, _as_kpts_array(kpts))
             log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
-            nkpts = len(self.kpts)
             # FIXME: consider the fractional num_electron or not? This maybe
             # relates to the charged system.
             if hasattr(self, '_gate_nelectron'):
@@ -375,7 +384,14 @@ class KSCF(pbchf.SCF):
             self.with_df.dump_flags(verbose)
         return self
 
-    kpts = khf_cpu.KSCF.kpts
+    @khf_cpu.KSCF.kpts.setter
+    def kpts(self, value):
+        if not isinstance(value, KPointSampling):
+            value = np.reshape(value, (-1, 3))
+        self.with_df.kpts = value
+        if self.rsjk:
+            self.rsjk.kpts = _as_kpts_array(value)
+
     mol = pbchf.SCF.mol
     mo_energy_kpts = khf_cpu.KSCF.mo_energy_kpts
     mo_coeff_kpts = khf_cpu.KSCF.mo_coeff_kpts
@@ -385,8 +401,11 @@ class KSCF(pbchf.SCF):
     reset = pbchf.SCF.reset
 
     def build(self, cell=None):
-        # To handle the attribute kpt or kpts loaded from chkfile
-        if 'kpts' in self.__dict__:
+        # kpts is a property of KSCF class, must be assigned via setattr.
+        if 'kpts_sampling' in self.__dict__:
+            self.kpts = KPointSampling.loads(self.__dict__.pop('kpts_sampling'))
+            self.__dict__.pop('kpts', None)
+        elif 'kpts' in self.__dict__:
             self.kpts = self.__dict__.pop('kpts')
 
         kpts = self.kpts
@@ -414,10 +433,11 @@ class KSCF(pbchf.SCF):
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
         if kpts is None:
-            kpts = self.kpts
+            kpts = _as_kpts_array(self.kpts)
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
+        kpts = _as_kpts_array(kpts)
         bvkmesh = None
         if kpts_in_bvkcell:
             bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
@@ -427,7 +447,7 @@ class KSCF(pbchf.SCF):
         from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
         if cell is None: cell = self.cell
         if kpts is None:
-            kpts = self.kpts
+            kpts = _as_kpts_array(self.kpts)
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
@@ -456,6 +476,7 @@ class KSCF(pbchf.SCF):
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
 
+        kpts = _as_kpts_array(kpts)
         bvkmesh = None
         if kpts_in_bvkcell:
             bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
@@ -532,7 +553,7 @@ class KSCF(pbchf.SCF):
         once with ik_conj = None.
         '''
         cell = self.cell
-        kpts = self.kpts
+        kpts = _as_kpts_array(self.kpts)
 
         if time_reversal_symmetry is None:
             time_reversal_symmetry = self.time_reversal_symmetry
@@ -691,7 +712,11 @@ class KSCF(pbchf.SCF):
     init_guess_by_1e = NotImplemented
     init_guess_by_huckel = NotImplemented
     init_guess_by_mod_huckel = NotImplemented
-    init_guess_by_chkfile = return_cupy_array(khf_cpu.KSCF.init_guess_by_chkfile)
+    def init_guess_by_chkfile(self, chk=None, project=None, kpts=None):
+        if chk is None: chk = self.chkfile
+        if kpts is None: kpts = self.kpts
+        return cp.asarray(khf_cpu.init_guess_by_chkfile(
+            self.cell, chk, project, _as_kpts_array(kpts)))
     from_chk = return_cupy_array(khf_cpu.KSCF.from_chk)
 
     analyze = NotImplemented
@@ -719,7 +744,9 @@ class KSCF(pbchf.SCF):
         if self.chkfile:
             mol_hf.SCF.dump_chk(self, envs)
             with lib.H5FileWrap(self.chkfile, 'a') as fh5:
-                fh5['scf/kpts'] = cp.asnumpy(self.kpts)
+                fh5['scf/kpts'] = cp.asnumpy(_as_kpts_array(self.kpts))
+                if isinstance(self.kpts, KPointSampling):
+                    fh5['scf/kpts_sampling'] = self.kpts.dumps()
         return self
 
 class KRHF(KSCF):
@@ -814,7 +841,7 @@ class KRHF(KSCF):
         mo_energy = self.mo_energy.get()
         mo_occ = self.mo_occ.get()
         cell = self.cell
-        kpts = self.kpts
+        kpts = _as_kpts_array(self.kpts)
         if log.verbose >= logger.NOTE:
             self.dump_scf_summary(log)
             log.note('**** MO energy ****')
