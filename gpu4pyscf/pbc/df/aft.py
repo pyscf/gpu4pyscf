@@ -29,16 +29,16 @@ from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, reset_kpts, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts, _get_kmesh
 from gpu4pyscf.gto.mole import SortedGTO
-from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
-                                       get_avail_mem, asarray, ndarray)
 
 KE_SCALING = aft_cpu.KE_SCALING
 
@@ -167,24 +167,21 @@ class AFTDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+        return self._kpts
 
     @kpts.setter
     def kpts(self, val):
         if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
+            self._kpts = KPointSampling.gamma_point(self.cell)
+        elif isinstance(val, (KPoints, KPointSampling)):
             self._kpts = val
         else:
-            self._kpts = self.cell.get_scaled_kpts(val)
+            self._kpts = KPointSampling.from_kpts(
+                self.cell, np.asarray(val).reshape(-1, 3))
 
     def reset(self, cell=None):
         if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
+            self._kpts = reset_kpts(self._kpts, cell)
             self.cell = cell
         self._rsh_df = {}
         return self
@@ -349,8 +346,13 @@ class AFTDF(lib.StreamObject):
 
     def to_cpu(self):
         from pyscf.pbc.df.aft import AFTDF
-        out = AFTDF(self.cell, kpts=self.kpts)
-        return utils.to_cpu(self, out=out)
+        kpts = self.kpts
+        if isinstance(kpts, KPointSampling):
+            kpts = kpts.kpts
+        out = AFTDF(self.cell, kpts=kpts)
+        out = utils.to_cpu(self, out=out)
+        out.kpts = kpts
+        return out
 
 def _check_kpts(kpts, dm=None):
     '''Normalize k-point sampling and optionally validate the density layout.
@@ -364,18 +366,11 @@ def _check_kpts(kpts, dm=None):
 
     Returns an (nkpts, 3) k-point array and is_single_kpt.
     '''
+    kpts, is_single_kpt = _normalize_kpts(kpts)
     if dm is None:
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-            is_single_kpt = True
-        else:
-            is_single_kpt = kpts.ndim == 1
-        return kpts.reshape(-1, 3), is_single_kpt
+        return kpts, is_single_kpt
 
-    if kpts is None or kpts.ndim == 1:
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        is_single_kpt = True
+    if is_single_kpt:
         assert (dm.ndim == 2 or # RHF
                 (dm.ndim == 3 and len(dm) == 2)) # UHF
         return kpts.reshape(1, 3), is_single_kpt

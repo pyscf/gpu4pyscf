@@ -36,18 +36,14 @@ from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, pack_tril, get_avail_mem, asarray, ndarray)
-from gpu4pyscf.lib.memcpy import copy_array
+from gpu4pyscf.lib.cupy_helper import asarray, ndarray
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import AFTDF
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    reset_kpts, fft_matrix, conj_kpts, _normalize_kpts, _get_kmesh)
-from gpu4pyscf.__config__ import num_devices
-
-DEBUG = False
+    _as_kpts_array, kpts_to_bvkmesh, reset_kpts, fft_matrix, conj_kpts,
+    _normalize_kpts, _get_kmesh)
 
 
 class GDF(lib.StreamObject):
@@ -77,24 +73,21 @@ class GDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+        return self._kpts
 
     @kpts.setter
     def kpts(self, val):
         if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
+            self._kpts = KPointSampling.gamma_point(self.cell)
+        elif isinstance(val, (KPoints, KPointSampling)):
             self._kpts = val
         else:
-            self._kpts = self.cell.get_scaled_kpts(val)
+            self._kpts = KPointSampling.from_kpts(
+                self.cell, np.asarray(val).reshape(-1, 3))
 
     def reset(self, cell=None):
         if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
+            self._kpts = reset_kpts(self._kpts, cell)
             self.cell = cell
             self.auxcell = None
         self._cderi = self._cderip = self._cderi_idx = None
@@ -135,7 +128,7 @@ class GDF(lib.StreamObject):
         self.nao = cell.nao
         self._omega = cell.omega
 
-        kpts = self.kpts
+        kpts = _as_kpts_array(self.kpts)
         if self.is_gamma_point:
             assert kpts is None or is_zero(kpts)
             self.bvkmesh = [1] * 3
@@ -152,7 +145,10 @@ class GDF(lib.StreamObject):
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
 
-    has_kpts = df_cpu.GDF.has_kpts
+    def has_kpts(self, kpts):
+        cpu_df = self.view(df_cpu.GDF)
+        cpu_df.kpts = _as_kpts_array(self.kpts)
+        return df_cpu.GDF.has_kpts(cpu_df, _as_kpts_array(kpts))
     weighted_coulG = AFTDF.weighted_coulG
     pw_loop = NotImplemented
     ft_loop = NotImplemented
@@ -180,7 +176,7 @@ class GDF(lib.StreamObject):
             self.build(j_only=self._j_only)
         nkpts = len(self.kpts)
         if kpts is None:
-            kpts = self.kpts
+            kpts = _as_kpts_array(self.kpts)
         else:
             assert len(kpts) == nkpts
         if aux_iter is None:
@@ -291,7 +287,7 @@ class GDF(lib.StreamObject):
                 Allows multiple GPU executors to share the producer, dynamically
                 loading the tesnor blocks as needed.
         '''
-        assert is_zero(self.kpts)
+        assert is_zero(_as_kpts_array(self.kpts))
         cell = self.cell
         cderi_sparse = self._cderi[0]
         naux, npairs = cderi_sparse.shape
@@ -323,5 +319,10 @@ class GDF(lib.StreamObject):
 
     def to_cpu(self):
         from pyscf.pbc.df.df import GDF
-        out = GDF(self.cell, kpts=self.kpts)
-        return utils.to_cpu(self, out=out)
+        kpts = self.kpts
+        if isinstance(kpts, KPointSampling):
+            kpts = kpts.kpts
+        out = GDF(self.cell, kpts=kpts)
+        out = utils.to_cpu(self, out=out)
+        out.kpts = kpts
+        return out

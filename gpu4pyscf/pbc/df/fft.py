@@ -32,6 +32,7 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk, aft
 from gpu4pyscf.pbc.df.aft import _check_kpts, get_SI, _get_ZSI
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
 
 def get_nuc(mydf, kpts=None):
@@ -246,24 +247,21 @@ class FFTDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+        return self._kpts
 
     @kpts.setter
     def kpts(self, val):
         if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
+            self._kpts = KPointSampling.gamma_point(self.cell)
+        elif isinstance(val, (KPoints, KPointSampling)):
             self._kpts = val
         else:
-            self._kpts = self.cell.get_scaled_kpts(val)
+            self._kpts = KPointSampling.from_kpts(
+                self.cell, np.asarray(val).reshape(-1, 3))
 
     def reset(self, cell=None):
         if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
+            self._kpts = reset_kpts(self._kpts, cell)
             self.cell = cell
         self._rsh_df = {}
         return self
@@ -315,7 +313,10 @@ class FFTDF(lib.StreamObject):
     # customize to_cpu because attributes grids and kpts are not compatible with pyscf-2.10
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
-        out = FFTDF(self.cell, kpts=self.kpts)
+        kpts = self.kpts
+        if isinstance(kpts, KPointSampling):
+            kpts = kpts.kpts
+        out = FFTDF(self.cell, kpts=kpts)
         out.exxdiv = self.exxdiv
         if self._mesh is not None:
             out.mesh = self._mesh

@@ -53,7 +53,7 @@ class KPointSampling:
     '''
 
     def __init__(self, lattice_vectors):
-        self.lattice_vectors = np.array(lattice_vectors, dtype=float, copy=True)
+        self.lattice_vectors = np.array(lattice_vectors, dtype=np.float64, copy=True)
         self.kpts_scaled = None
         self.kmesh = None
         self.wrap_around = None
@@ -81,6 +81,16 @@ class KPointSampling:
         if scaled_center is not None:
             self.scaled_center = np.asarray(scaled_center)
         return self
+
+    @classmethod
+    def gamma_point(cls, cell):
+        '''Create a single Gamma-point sampling with kmesh (1, 1, 1).'''
+        kpts = cls(cell.lattice_vectors())
+        kpts.kpts_scaled = np.zeros((1, 3))
+        kpts.kmesh = np.asarray([1, 1, 1])
+        kpts.with_gamma_point = True
+        kpts.wrap_around = True
+        return kpts
 
     @classmethod
     def from_kpts(cls, cell, kpts):
