@@ -20,6 +20,8 @@ from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
 from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_weights, get_SI
+from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -270,7 +272,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
                     'Accessing kpts via mf.kpts is deprecated. '
                     'kpts should be passed to get_coulG explicitly.')
         else:
-            assert kpts.ndim == 2
+            assert isinstance(kpts, KPointSampling) or _as_kpts_array(kpts).ndim == 2
         Nk = len(kpts)
         coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega)
     return coulG
@@ -286,10 +288,30 @@ def probe_charge_sr_coulomb(cell, omega, kmesh=None):
     return 2 * ewovrl * np.prod(kmesh)
 
 def madelung(cell, kpts=None, omega=None):
+    '''Ewald probe-charge correction for arrays or KPointSampling.
+
+    Args:
+        cell : Cell
+            Periodic cell defining the lattice and numerical precision.
+
+    Kwargs:
+        kpts : KPointSampling, or Cartesian k-points.
+        omega : float or None
+            Range-separation parameter. Zero means full-range Coulomb 1/r.
+            Positive values means erf(omega*r)/r. Negative values means
+            erfc(abs(omega)*r)/r. None uses cell.omega.
+
+    Returns:
+        float
+            Probe-charge correction in Hartree, used as the occupied-orbital
+            energy shift for the Ewald exchange-divergence correction.
+    '''
     if kpts is None:
         Nk = np.array([1,1,1])
+    elif isinstance(kpts, KPointSampling) and kpts.kmesh is not None:
+        Nk = kpts.kmesh
     else:
-        Nk = get_monkhorst_pack_size(cell, kpts)
+        Nk = get_monkhorst_pack_size(cell, kpts.reshape(-1, 3))
     ecell = cell.copy(deep=False)
     ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
     ecell._env = np.append(cell._env, [0., 0., 0.])

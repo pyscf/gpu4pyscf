@@ -29,7 +29,6 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import (
     _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm)
@@ -37,8 +36,9 @@ from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE, _check_rsh_factors
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _normalize_kpts, _get_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, kk_adapted_iter, conj_kpts, _normalize_kpts, _get_kmesh,
+    _as_kpts_array)
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
@@ -143,7 +143,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     # For off-gamma MP mesh, the common k-shift in ki and kj cancels.
     # This mesh can be made the same to the MP mesh.
     transfer_mesh = kmesh
-    qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+    qpts = _as_kpts_array(cell.make_kpts(transfer_mesh, with_gamma_point=True))
     kk_iters = ((qpts[q], ki_idx, kj_idx, q == q_conj)
                  for q, q_conj, ki_idx, kj_idx in
                  kk_adapted_iter(kmesh, with_gamma_point))
@@ -534,7 +534,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     # transfer_mesh for q = kj - ki
     transfer_mesh = kmesh
-    qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+    qpts = _as_kpts_array(cell.make_kpts(transfer_mesh, with_gamma_point=True))
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
     cell = ft_opt.cell
     dms = cp.asarray(dm0.reshape(-1,nao,nao))
@@ -724,7 +724,9 @@ def _estimate_max_shm_size(cell, deriv_ij=None):
     return shm_size
 
 def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
-    from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size, cutoff_to_mesh
+    from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
+    from gpu4pyscf.pbc.tools.pbc import madelung
+    from gpu4pyscf.pbc.lib.kpts import KPointSampling
     from gpu4pyscf.pbc.df.aft import _get_ZSI
     from gpu4pyscf.pbc.dft import multigrid_v3
     from gpu4pyscf.pbc.grad.rhf import ewald_derivatives
@@ -733,7 +735,11 @@ def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
     ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
     ecell._env = np.append(cell._env, [0., 0., 0.])
     ecell.unit = 'B'
-    ecell.a = cell.lattice_vectors() * get_monkhorst_pack_size(cell, kpts)[:,None]
+    if isinstance(kpts, KPointSampling) and kpts.kmesh is not None:
+        kmesh = kpts.kmesh
+    else:
+        kmesh = get_monkhorst_pack_size(cell, _as_kpts_array(kpts))
+    ecell.a = cell.lattice_vectors() * kmesh[:,None]
     if omega == 0:
         ewald_G0_response = -2 * ewald_derivatives(ecell)[-3:]
     else:

@@ -42,12 +42,11 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df.df_jk import _factorize_dm
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh)
-from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke
+    kpts_to_bvkmesh, kk_adapted_iter, conj_images_in_bvk_cell, conj_kpts,
+    _normalize_kpts, _get_kmesh, _as_kpts_array)
+from gpu4pyscf.pbc.tools.pbc import get_coulG, mesh_to_ke, madelung
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
@@ -134,6 +133,7 @@ class PBCJKMatrixOpt:
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
     def build(self, kpts=None, verbose=None):
+        kpts = _as_kpts_array(kpts)
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
@@ -467,7 +467,7 @@ class PBCJKMatrixOpt:
                     # This term rapidly decays to 0 for large k-mesh. In the
                     # FFTDF.get_jk based implementation, this contribution is
                     # included in the short-range part.
-                    wcoulG_SR_at_G0 += pbctools.madelung(cell, kpts, omega=-omega)
+                    wcoulG_SR_at_G0 += madelung(cell, kpts, omega=-omega)
                 wcoulG_SR_at_G0 *= sr_factor
                 s = int1e.int1e_ovlp(cell, kpts)
                 vk = contract('kpq,nkqr->nkpr', s, dms)
@@ -487,7 +487,7 @@ class PBCJKMatrixOpt:
         assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
         # The common k-shift in kj - ki cancels, so transfer_mesh includes Gamma.
         transfer_mesh = kmesh
-        qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+        qpts = _as_kpts_array(cell.make_kpts(transfer_mesh, with_gamma_point=True))
         kpt_iters = ((qpts[q], ki_idx, kj_idx, q == q_conj)
                      for q, q_conj, ki_idx, kj_idx in
                      kk_adapted_iter(kmesh, with_gamma_point))
@@ -1129,7 +1129,7 @@ class PBCJKMatrixOpt:
         kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
         assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
         transfer_mesh = kmesh
-        qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+        qpts = _as_kpts_array(cell.make_kpts(transfer_mesh, with_gamma_point=True))
         assert ft_opt.permutation_symmetry
         ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 

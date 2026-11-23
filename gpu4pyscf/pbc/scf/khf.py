@@ -27,7 +27,6 @@ import cupy as cp
 from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
-from pyscf.pbc import tools
 from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
@@ -38,6 +37,7 @@ from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
+from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import (
@@ -365,7 +365,7 @@ class KSCF(pbchf.SCF):
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
             isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
-            madelung = tools.pbc.madelung(cell, _as_kpts_array(kpts))
+            madelung = tools.pbc.madelung(cell, kpts)
             log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
             # FIXME: consider the fractional num_electron or not? This maybe
             # relates to the charged system.

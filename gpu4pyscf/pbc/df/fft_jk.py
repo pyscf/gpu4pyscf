@@ -29,8 +29,8 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
-from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, _normalize_kpts, _as_kpts_array)
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -50,6 +50,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         vj : (nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
+    kpts = _as_kpts_array(kpts)
     cell = mydf.cell
     mesh = mydf.mesh
     assert cell.low_dim_ft_type != 'inf_vacuum'
@@ -373,6 +374,7 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
     s = int1e_ovlp(cell, kpts=kpts)
     m = tools.madelung(cell, kpts)
+    kpts = _as_kpts_array(kpts)
     if kpts is None:
         for i,dm in enumerate(dms):
             vk[i] += m * s.dot(dm).dot(s)
