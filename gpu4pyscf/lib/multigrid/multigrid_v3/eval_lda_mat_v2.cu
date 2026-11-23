@@ -24,28 +24,41 @@
 
 template <int LI, int LJ, int SLICE_SIZE_I, int SLICE_SIZE_J>
 __global__ static
-void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs,
+void eval_lda_mat_kernel_v2(double *out, double *vxc_weights,
                          int64_t *bas_ij_idx, float2 *grid_frac_ranges,
                          double da_squared, double db_squared, double dc_squared,
                          int mesh_a, int mesh_b, int mesh_c, int npairs,
-                         double negligible)
+                         double negligible, PBCIntEnvVars envs)
 {
     constexpr int tile = 16;
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    setup_context();
+    int tx = threadIdx_x;
+    int ty = threadIdx_y;
     int thread_id = ty * tile + tx;
-    int pair_id = blockIdx.x;
+    int pair_id = blockIdx_x;
 
-    __shared__ int a_start, a_stop;
-    __shared__ int b_start, b_stop;
-    __shared__ int c_start, c_stop;
-    __shared__ uint32_t ij_offset;
-    __shared__ double cc, exp_da_squared;
-    __shared__ float e_cutoff;
-    __shared__ double xi, yi, zi;
-    __shared__ double xj, yj, zj;
-    __shared__ double xij, yij, zij, aij, theta_rr;
-    __shared__ double swap[256 / MGRID_SUBGROUP_SIZE];
+    DECLARE_SHARED(int, a_start);
+    DECLARE_SHARED(int, a_stop);
+    DECLARE_SHARED(int, b_start);
+    DECLARE_SHARED(int, b_stop);
+    DECLARE_SHARED(int, c_start);
+    DECLARE_SHARED(int, c_stop);
+    DECLARE_SHARED(uint32_t, ij_offset);
+    DECLARE_SHARED(double, cc);
+    DECLARE_SHARED(double, exp_da_squared);
+    DECLARE_SHARED(float, e_cutoff);
+    DECLARE_SHARED(double, xi);
+    DECLARE_SHARED(double, yi);
+    DECLARE_SHARED(double, zi);
+    DECLARE_SHARED(double, xj);
+    DECLARE_SHARED(double, yj);
+    DECLARE_SHARED(double, zj);
+    DECLARE_SHARED(double, xij);
+    DECLARE_SHARED(double, yij);
+    DECLARE_SHARED(double, zij);
+    DECLARE_SHARED(double, aij);
+    DECLARE_SHARED(double, theta_rr);
+    DECLARE_SHARED(double, swap, [256 / MGRID_SUBGROUP_SIZE]);
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -239,11 +252,12 @@ void eval_lda_mat_kernel_v2(double *out, double *vxc_weights, PBCIntEnvVars envs
 
 extern "C" {
 #define eval_lda_mat_kernel_v2_case(li, lj, slice_i, slice_j) \
-    case (li * LMAX1 + lj): \
-        eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j><<<npairs, threads, 0, stream>>>(\
-            out, vxc, *envs, bas_ij_idx, grid_frac_ranges, \
+    case (li * LMAX1 + lj): { \
+        LAUNCH_KERNEL((eval_lda_mat_kernel_v2<li,lj,slice_i,slice_j>), grids, threads, 0, stream, \
+            out, vxc, bas_ij_idx, grid_frac_ranges, \
             da_squared, db_squared, dc_squared, mesh_a, mesh_b, mesh_c, npairs, \
-            negligible); \
+            negligible, *envs); \
+    } \
     break
 
 int evaluate_lda_mat_v2(double *out, double *vxc, double *placeholder, PBCIntEnvVars *envs,
@@ -257,7 +271,8 @@ int evaluate_lda_mat_v2(double *out, double *vxc, double *placeholder, PBCIntEnv
     double da_squared = distance_squared(dxyz_dabc[0], dxyz_dabc[1], dxyz_dabc[2]);
     double db_squared = distance_squared(dxyz_dabc[3], dxyz_dabc[4], dxyz_dabc[5]);
     double dc_squared = distance_squared(dxyz_dabc[6], dxyz_dabc[7], dxyz_dabc[8]);
-    dim3 threads(16, 16);
+    auto threads = make_block(16, 16);
+    auto grids = make_grid(npairs, 1);
     switch (li * LMAX1 + lj) {
         eval_lda_mat_kernel_v2_case(0,0, 1, 1);
         eval_lda_mat_kernel_v2_case(1,0, 3, 1);

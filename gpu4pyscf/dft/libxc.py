@@ -20,6 +20,7 @@ from ctypes import POINTER
 # Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
 # which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
 from pyscf.dft import libxc as libxc_cpu
+from gpu4pyscf import BACKEND
 from gpu4pyscf.dft.libxc_structs import xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.dft import libxc_structs
@@ -32,15 +33,24 @@ is_nlc           = libxc_cpu.is_nlc
 is_hybrid_xc     = libxc_cpu.is_hybrid_xc
 test_deriv_order = libxc_cpu.test_deriv_order
 
-try:
+_libxc = None
+__version__ = 'libXC not available'
+
+if BACKEND != 'hip':
     _libxc = load_library('libxc', path='gpu4pyscf/lib/deps/lib')
-except OSError:
+    _libxc.xc_version_string.restype = ctypes.c_char_p
+    _libxc_version = _libxc.xc_version_string().decode()
+    __version__ = _libxc_version + ' (CUDA)'
+
+else:
     # ROCm/HIP builds do not include the CUDA libXC fork. Keep libXC optional
     # there so XC is evaluated on CPU via PySCF's libXC (see below); a missing
     # libXC remains a hard error on CUDA.
-    if not cupy.cuda.runtime.is_hip:
-        raise
-    _libxc = None
+    import warnings
+    warnings.warn(
+        "GPU libXC is not available on ROCm/HIP; XC functionals are "
+        "evaluated on CPU via PySCF's libXC."
+    )
 
 libgdft = load_library('libgdft')
 libgdft.GDFT_xc_lda.argtypes = (
@@ -70,24 +80,6 @@ libgdft.GDFT_xc_mgga.argtypes = (
     POINTER(xc_mgga_out_params),
     POINTER(xc_mgga_out_params),
     ctypes.c_void_p)
-
-if _libxc is None:
-    import warnings
-    warnings.warn(
-        "GPU libXC is not available on ROCm/HIP; XC functionals are "
-        "evaluated on CPU via PySCF's libXC."
-    )
-    __version__ = 'libXC not available'
-else:
-    _libxc.xc_version_string.restype = ctypes.c_char_p
-    _libxc_version = _libxc.xc_version_string().decode()
-    __version__ = _libxc_version + ' (CUDA)'
-    # The packaged 7.0.0 fork inserts params_size before the four thresholds.
-    # Select the layout before binding xc_func_alloc and the other C functions.
-    if _libxc_version == '7.0.0':
-        xc_func_type = libxc_structs.xc_func_type_700
-    else:
-        xc_func_type = libxc_structs.xc_func_type
 
 LDA_OUTPUT_LABELS = [
                 "zk",       # 1, 1
@@ -126,28 +118,25 @@ MGGA_OUTPUT_LABELS =         [
                 "v4lapl2tau2", "v4lapltau3", "v4tau4"
             ]
 
-def _check_arrays(current_arrays, fields, sizes, factor, required):
-    """
-    A specialized function built to construct and check the sizes of arrays given to the LibXCFunctional class.
-    """
-    # Nothing supplied so we build it out
-    if current_arrays is None:
-        current_arrays = {}
+# Set from the device library below when it advertises a limit; None means
+# "no limit reported", i.e. the device path handles every order it advertises.
+MAX_DERIV_ORDER = None
 
-    if not required:
-        return current_arrays
-
-    for label in fields:
-        size = sizes[label]
-        # [0] for output, [1] for temporary storage
-        current_arrays[label] = cupy.empty((2, factor, size), dtype=np.float64)
-
-    return current_arrays
-
-class _xcfun(ctypes.Structure):
-    pass
+# Highest derivative order the device library implements. The CUDA libxc
+# build handles every order it advertises, so it does not export this
+# symbol; the SYCL ExchCXX shim stops at fxc and does. Anything beyond it
+# is routed to PySCF's CPU libxc by XCfun.on_gpu below.
+if BACKEND == 'sycl':
+    _libxc.xc_device_max_deriv_order.restype = ctypes.c_int
+    MAX_DERIV_ORDER = _libxc.xc_device_max_deriv_order()
 
 if _libxc is not None:
+    # The packaged 7.0.0 fork inserts params_size before the four thresholds.
+    # Select the layout before binding xc_func_alloc and the other C functions.
+    if _libxc_version == '7.0.0':
+        xc_func_type = libxc_structs.xc_func_type_700
+    else:
+        xc_func_type = libxc_structs.xc_func_type
     _xc_func_p = ctypes.POINTER(xc_func_type)
     _libxc.xc_func_alloc.restype = _xc_func_p
     _libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
@@ -178,6 +167,27 @@ else:
     XC_CODES = {}
 
 
+def _check_arrays(current_arrays, fields, sizes, factor, required):
+    """
+    A specialized function built to construct and check the sizes of arrays given to the LibXCFunctional class.
+    """
+    # Nothing supplied so we build it out
+    if current_arrays is None:
+        current_arrays = {}
+
+    if not required:
+        return current_arrays
+
+    for label in fields:
+        size = sizes[label]
+        # [0] for output, [1] for temporary storage
+        current_arrays[label] = cupy.empty((2, factor, size), dtype=np.float64)
+
+    return current_arrays
+
+class _xcfun(ctypes.Structure):
+    pass
+
 def _has_omega(func):
     info = ctypes.cast(func.contents.info, ctypes.c_void_p)
     n = _libxc.xc_func_info_get_n_ext_params(info)
@@ -192,6 +202,15 @@ def _set_omega(func, omega):
     for i in range(func.contents.n_func_aux):
         if _has_omega(func_aux[i]):
             _libxc.xc_func_set_ext_params_name(func_aux[i], b'_omega', omega)
+
+def _can_set_omega(func):
+    '''True if omega is a runtime ext param of func or one of its components.
+    Real libxc always exposes _omega for range-separated functionals; the SYCL
+    ExchCXX shim reports none because ExchCXX fixes omega at construction.'''
+    if _has_omega(func):
+        return True
+    func_aux = ctypes.cast(func.contents.xc_func_type, POINTER(_xc_func_p))
+    return any(_has_omega(func_aux[i]) for i in range(func.contents.n_func_aux))
 
 class XCfun:
     def __init__(self, xc, spin, omega=0):
@@ -208,6 +227,16 @@ class XCfun:
             self.on_gpu = xc in XC_IDS
             self.func_id = xc
         self._family = libxc_cpu.xc_type(xc)
+
+        if omega != 0 and BACKEND == 'sycl':
+            # SYCL only: the device library (ExchCXX) fixes omega at
+            # construction and cannot change it at runtime. Fall back
+            # to CPU libxc, which honours omega, instead of silently
+            # evaluating with the default omega (numint routes
+            # on_gpu=False functionals to pyscf's CPU libxc).
+            default_omega = libxc_cpu.rsh_coeff(self.func_id)[0]
+            if omega != default_omega:
+                self.on_gpu = False
 
         self.xc_func = None
         if self.on_gpu:
@@ -239,7 +268,9 @@ class XCfun:
         assert not do_lxc
         assert self.on_gpu
         stream = cupy.cuda.get_current_stream().ptr
-        assert stream == 0, 'libxc CUDA evaluation requires the default stream'
+        if BACKEND != 'sycl':
+            # SYCL: the shim's single in-order master queue is the default stream.
+            assert stream == 0, 'libxc CUDA evaluation requires the default stream'
 
         if isinstance(inp, cupy.ndarray):
             inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}

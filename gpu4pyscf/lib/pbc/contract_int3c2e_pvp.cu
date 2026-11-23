@@ -17,8 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "gvhf-rys/build_rys_gxyz.cuh"
@@ -35,22 +33,43 @@ void contract_int3c2e_pvp_auxvec_kernel(double *out, double *auxvec, double omeg
                                         float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
                                         int *head, int npairs_ij, int ksh_blocks)
 {
-    int thread_id = threadIdx.x;
-    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    setup_context();
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, ksh_block_id);
+    DECLARE_SHARED(int, ksh0_cell0);
+    DECLARE_SHARED(int, ksh1_cell0);
+    DECLARE_SHARED(int, ish);
+    DECLARE_SHARED(int, jsh);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, lk);
+    DECLARE_SHARED(int, nroots);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, kprim);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nst_per_block);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
+    DECLARE_SHARED(int, ci);
+    DECLARE_SHARED(int, cj);
+    DECLARE_SHARED(double, xi);
+    DECLARE_SHARED(double, yi);
+    DECLARE_SHARED(double, zi);
+    DECLARE_SHARED(double, xjxi);
+    DECLARE_SHARED(double, yjyi);
+    DECLARE_SHARED(double, zjzi);
+    DECLARE_SHARED(int, num_ijk_tasks);
+    DECLARE_SHARED(int, num_sub_tasks);
+    DECLARE_SHARED(int, img_not_processed);
+    DECLARE_SHARED(int, img_tile_size);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    int thread_id = threadIdx_x;
+    img_pool += blockIdx_x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
     // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
-    extern __shared__ double shared_memory[];
-    __shared__ int pair_ij, ksh_block_id;
-    __shared__ int ksh0_cell0, ksh1_cell0;
-    __shared__ int ish, jsh, li, lj, lk, nroots;
-    __shared__ int iprim, jprim, kprim;
-    __shared__ int gout_stride, nst_per_block;
-    __shared__ int expi, expj, ci, cj;
-    __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
-    __shared__ int num_ijk_tasks;
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx_x * POOL_SIZE;
 while (1) {
     if (thread_id == 0) {
         int batch_id = atomicAdd(head, 1);
@@ -327,7 +346,9 @@ int PBCcontract_int3c2e_pvp_auxvec(double *out, double *auxvec, double omega, PB
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    contract_int3c2e_pvp_auxvec_kernel<<<workers, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( contract_int3c2e_pvp_auxvec_kernel, blocks, threads, shm_size, stream,
             out, auxvec, omega, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
             diffuse_exps, diffuse_coefs, log_cutoff,

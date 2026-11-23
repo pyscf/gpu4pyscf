@@ -920,15 +920,14 @@ def indexed_scale(a, idx, b):
     fn_name = 'indexed_scale'
     if fn_name not in _kernel_registery:
         _kernel_registery[fn_name] = cp.RawKernel(r'''
-#include <cuComplex.h>
 extern "C" __global__
-void ''' + fn_name + r'''(cuDoubleComplex *a, int *idx, double *b, int ncol) {
+void ''' + fn_name + r'''(double2 *a, int *idx, double *b, int ncol) {
     int i = blockIdx.x;
     size_t row = idx[i];
     size_t off = row * ncol;
     for (int j = threadIdx.x; j < ncol; j += blockDim.x) {
         double w = b[j];
-        cuDoubleComplex val = a[off + j];
+        double2 val = a[off + j];
         val.x *= w;
         val.y *= w;
         a[off + j] = val;

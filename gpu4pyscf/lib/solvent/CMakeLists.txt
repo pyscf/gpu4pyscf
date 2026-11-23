@@ -18,12 +18,18 @@
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_50 --ptxas-options=-v -maxrregcount=255")
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
-add_library(solvent SHARED
-mnsol_interface.f90
-mnsol_mem.F
-mnsol.F
-pcm.cu
+
+set(FTN_SRCS
+  mnsol_interface.f90
+  mnsol_mem.F
+  mnsol.F
 )
+
+set(GPU_SRCS
+  pcm.cu
+)
+
+add_library(solvent SHARED ${FTN_SRCS} ${GPU_SRCS})
 target_compile_options(solvent PRIVATE
   "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-std=legacy>")
 
@@ -35,6 +41,5 @@ target_compile_options(solvent PRIVATE
 
 set_target_properties(solvent PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_target_properties(solvent PROPERTIES 
-  CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+
 gpu4pyscf_configure_gpu_target(solvent)

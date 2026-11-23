@@ -1,4 +1,5 @@
 include MANIFEST.in
+exclude gpu4pyscf/_build_config.py
 include README.md setup.py CHANGELOG AUTHORS LICENSE NOTICE
 recursive-include gpu4pyscf *.c *.cpp *.cu *.cuh *.h *.hpp
 recursive-include gpu4pyscf/lib CMakeLists.txt *.cmake
