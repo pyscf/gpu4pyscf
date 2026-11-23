@@ -29,7 +29,7 @@ from scipy.special import expit, xlogy
 from pyscf import lib
 from pyscf.data.nist import HARTREE2EV
 from pyscf.pbc.lib.kpts import KPoints
-from gpu4pyscf.lib import diis, logger
+from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.scf import smearing
 from gpu4pyscf.pbc.scf.gcscf import ConstantMuSCF
 from gpu4pyscf.pbc.scf.slabgate import SlabGateCharge, _sheet_potential
@@ -37,7 +37,9 @@ from gpu4pyscf.pbc.scf.slabdipole import _dipole_grids, _sawtooth, _slab_length
 
 
 def _occupations(energies, nelec, sigma):
-    '''Return one chemical potential, KRKS occupations and entropy per cell.'''
+    '''
+    Return one chemical potential, KRKS occupations and entropy per cell.
+    '''
     if sigma is None or sigma <= 0:
         raise ValueError('FCP requires Fermi smearing with sigma > 0')
     energies = np.asarray(energies)
@@ -56,13 +58,16 @@ def _occupations(energies, nelec, sigma):
 
 
 def _fit_potential(nelec, mu, tol):
-    '''Fit in a scaled coordinate and increase the degree only when needed.'''
+    '''
+    Fit in a scaled coordinate and increase the degree only when needed.
+    '''
     nelec = np.asarray(nelec)
     mu = np.asarray(mu)
     max_degree = min(3, len(np.unique(nelec))-1)
     if max_degree < 1:
         raise ValueError('Fitting requires at least two different electron numbers')
     for degree in range(1, max_degree+1):
+        # this follows the original FCP paper
         fit = Polynomial.fit(nelec, mu, degree)
         rms = np.sqrt(np.mean((fit(nelec)-mu)**2))
         if rms <= tol:
@@ -79,7 +84,6 @@ def _newton_step(fit, nelec, mu, lr, max_step):
 
 
 class _FixedNKRKS:
-    '''Keep the ordinary smearing energy and orbital-gradient implementations.'''
 
     __name_mixin__ = 'FixedN'
     _keys = {'fcp_nelec', 'fcp_eta'}
@@ -91,9 +95,7 @@ class _FixedNKRKS:
             mo_energy = self.mo_energy
             if mo_coeff is None:
                 mo_coeff = self.mo_coeff
-        # Linear-dependency removal may pad k-points with zero MO columns.
-        if mo_coeff is not None and cp.any(cp.all(mo_coeff == 0, axis=-2)):
-            raise NotImplementedError('FCP does not support padded orbitals')
+
         eta, occ, entropy = _occupations(cp.asnumpy(mo_energy),
                                         self.fcp_nelec, self.sigma)
         self.fcp_eta = eta
@@ -143,12 +145,12 @@ class FCP:
     Set nelec_bounds from fixed-charge trial calculations for the chosen model.
     conv_tol and fit_tol are in Hartree; sample_step and max_step are electrons
     per cell. The inner SCF tolerances must resolve the target chemical potential.
+    Trial steps, including presampling, respect max_step and nelec_bounds.
     A failed inner SCF or exhausted outer loop raises RuntimeError and leaves
-    converged=False. Results from a failed inner SCF are not retained.
+    converged=False.
 
     Geometry, basis, gate and dipole parameters must remain fixed while reusing
-    this object. Create a new FCP object after changing them. Padded orbitals
-    from k-dependent linear-dependency removal are not supported.
+    this object. Create a new FCP object after changing them.
     '''
 
     conv_tol = 1e-3/HARTREE2EV
@@ -164,12 +166,13 @@ class FCP:
             raise ValueError('FCP requires Fermi smearing with sigma > 0')
         from gpu4pyscf.pbc.dft.krks import KRKS
 
-        if not isinstance(mf, KRKS) or isinstance(mf.kpts, KPoints):
+        if not isinstance(mf, KRKS):
             raise NotImplementedError('FCP requires KRKS with an equal-weight k-point array')
+        # TODO: 2D not support yet.
         if not isinstance(mf, SlabGateCharge) or mf.cell.dimension != 3 or mf.barrier:
             raise NotImplementedError('FCP requires a 3D gate calculation without barrier')
         if isinstance(mf, ConstantMuSCF) or mf.level_shift:
-            raise NotImplementedError('FCP cannot wrap constant-mu SCF or level shifting')
+            raise NotImplementedError('FCP cannot wrap constant-mu SCF (GCSCF) or level shifting')
         mf = smearing.smearing(mf, sigma=sigma, method='fermi', mu0=None)
         if not isinstance(mf, _FixedNKRKS):
             lib.set_class(mf, (_FixedNKRKS, mf.__class__))
@@ -187,6 +190,7 @@ class FCP:
         self.e_tot = self.e_free = self.e_grand = None
 
     def _prepare(self):
+        # TODO: this should be moved to gate_charge.
         from gpu4pyscf.pbc.dft import numint
 
         mf = self.mf
@@ -219,7 +223,9 @@ class FCP:
         self._matrices = overlap, c1, position, a_c, b_c, p_ion, f_c
 
     def chemical_potential_shift(self, dm):
-        '''Gate and dipole charge derivative Lambda, in Hartree.'''
+        '''
+        Gate and dipole charge derivative Lambda, in Hartree.
+        '''
         if self._matrices is None:
             self._prepare()
         overlap, c1, position, a_c, b_c, p_ion, f_c = self._matrices
@@ -230,7 +236,10 @@ class FCP:
         return h_c + qc*b_c + 4*np.pi*dipole/self.mf.cell.vol*f_c
 
     def evaluate(self, nelec, dm0=None):
-        '''Run one complete fixed-N SCF and return eta + Lambda.'''
+        '''
+        Run one complete fixed-N SCF and return eta + Lambda.
+        Pass the previous density directly to the ordinary SCF kernel.
+        '''
         self.converged = False
         mf = self.mf
         if dm0 is None:
@@ -249,25 +258,13 @@ class FCP:
         mf.fcp_nelec = float(nelec)
         if self._matrices is None:
             self._prepare()
-        overlap = self._matrices[0]
-        if dm0 is None:
-            dm0 = mf.get_init_guess()
-        # Drop old orbital tags before rescaling a previous density.
-        dm0 = cp.array(dm0)
-        count = float(cp.einsum('kij,kji->', dm0, overlap).real)/len(mf.kpts)
-        dm0 *= nelec/count
-        if isinstance(mf.diis, diis.DIIS):
-            mf.diis = mf.DIIS(mf)
-            mf.diis.space = mf.diis_space
-        mf.entropy = mf.e_free = mf.e_zero = None
-        mf._fcp_previous_free = None
         mf.kernel(dm0=dm0)
         if not mf.converged:
             raise RuntimeError('Fixed-electron-number SCF did not converge')
         self.nelec = float(nelec)
         self.dm = mf.make_rdm1()
         self.eta = mf.fcp_eta
-        self.shift = self.chemical_potential_shift(self.dm)
+        self.shift = self.chemical_potential_shift(self.dm) # electron changed part
         self.mu_eff = self.eta + self.shift
         self.e_tot = mf.e_tot
         self.e_free = mf.e_free
@@ -275,13 +272,25 @@ class FCP:
         return self.mu_eff
 
     def kernel(self, nelec=None, dm0=None):
-        '''Converge the actual chemical potential; never accept a fitted residual.'''
+        '''
+        Converge the actual chemical potential.
+        '''
         if nelec is None:
             nelec = self.nelec
         initial = float(nelec)
         self.converged = False
         self.history = []
         self._matrices = None
+        if self.nelec_bounds is not None:
+            lower, upper = self.nelec_bounds
+            if not lower < upper or not lower <= initial <= upper:
+                raise ValueError('Initial electron number must lie inside nelec_bounds')
+        # The second sampling move crosses both sides of the initial point.
+        step = min(self.sample_step, self.max_step/2)
+        samples = [initial-step, initial+step]
+        if self.nelec_bounds is not None:
+            samples = np.clip(samples, *self.nelec_bounds)
+        samples = [float(n) for n in samples if n != initial]
         lr, oscillations = 1., 1
         previous = None
         numbers, potentials = [], []
@@ -299,17 +308,22 @@ class FCP:
                 return self.e_grand
             if cycle+1 == self.max_cycle:
                 break
+            # handle oscillations
             if self.adaptive_lr and previous is not None and previous*residual < 0:
                 oscillations += 1
                 lr -= .5**oscillations
             previous = residual
-            if len(numbers) == 1:
-                nelec = initial-self.sample_step
-            elif len(numbers) == 2:
-                nelec = initial+self.sample_step
+            if samples:
+                # for starting steps
+                nelec = samples.pop(0)
             else:
+                # next step nelec from newton update
                 fit = _fit_potential(numbers, potentials, self.fit_tol)
                 nelec, slope = _newton_step(fit, self.nelec, self.mu, lr, self.max_step)
+                if self.nelec_bounds is not None:
+                    nelec = float(np.clip(nelec, *self.nelec_bounds))
+                    if nelec == self.nelec:
+                        raise RuntimeError('FCP target cannot be reached within nelec_bounds')
                 logger.debug(self.mf, 'FCP fit degree = %d slope = %.8g lr = %.6g',
                              fit.degree(), slope, lr)
         raise RuntimeError('FCP did not converge within max_cycle')
