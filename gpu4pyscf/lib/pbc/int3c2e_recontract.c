@@ -19,6 +19,10 @@
 #include <limits.h>
 #include "gint/gint.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define NOT_INITIALIZED -1
 
 /* Contracted addresses encode (i, image, j), with i >= j. Reflecting an
@@ -142,3 +146,7 @@ void PBCzrecontract_cderi(double _Complex* __restrict__ out,
         }
     }
 }
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

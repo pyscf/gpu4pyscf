@@ -26,21 +26,33 @@
     float dm_penalty, int64_t *pool, int *head
 
 #define JKMATRIX_KERNEL_SETUP() \
-    int sq_id = threadIdx.x; \
-    int gout_id = threadIdx.y; \
-    int _nsq_per_block = blockDim.x; \
-    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH; \
-    extern __shared__ double shared_memory[]; \
-    __shared__ int ntasks, pair_ij, pair_kl0; \
-    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0; \
-    __shared__ double ri[3]; \
-    __shared__ double rjri[3]; \
-    __shared__ int expi; \
-    __shared__ int expj;
+    setup_context(); \
+    int sq_id = threadIdx_x; \
+    int gout_id = threadIdx_y; \
+    int _nsq_per_block = blockDim_x; \
+    int64_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH; \
+    DECLARE_SHARED(int, ntasks); \
+    DECLARE_SHARED(int, pair_ij); \
+    DECLARE_SHARED(int, pair_kl0); \
+    DECLARE_SHARED(int, cell_j); \
+    DECLARE_SHARED(int, ish_cell0); \
+    DECLARE_SHARED(int, jsh_cell0); \
+    DECLARE_SHARED(int, i0); \
+    DECLARE_SHARED(int, j0); \
+    DECLARE_SHARED(double, ri, [3]); \
+    DECLARE_SHARED(double, rjri, [3]); \
+    DECLARE_SHARED(int, expi); \
+    DECLARE_SHARED(int, expj); \
+    DYNAMIC_SHARED_PTR(double, shared_memory);
 
-#define LAUNCH_JKMATRIX_KERNEL(KERNEL) \
-    KERNEL<<<workers, threads, buflen*sizeof(double), stream>>>(\
-    *envs, *kmat, *bounds, \
-    pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
-    nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
-    s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head)
+#define LAUNCH_JKMATRIX_KERNEL(KERNEL) { \
+    auto _rys_envs = *envs; auto _rys_kmat = *kmat; auto _rys_bounds = *bounds; \
+    auto _rys_blocks = make_grid(workers, 1); \
+    auto _rys_threads = make_block(nsq_per_block, gout_stride); \
+    LAUNCH_KERNEL( KERNEL, _rys_blocks, _rys_threads, \
+        (buflen)*sizeof(double), stream, \
+        _rys_envs, _rys_kmat, _rys_bounds, \
+        pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup, \
+        nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl, \
+        s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); \
+  }

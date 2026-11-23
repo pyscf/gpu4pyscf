@@ -34,8 +34,9 @@ void _fill_tasks(int& ntasks, int& pair_kl0, uint32_t *pair_kl_idx,
                  float *q_cond_ij, float *q_cond_kl, int *swap,
                  RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    int threads = blockDim.x * blockDim.y;
+    setup_context();
+    int t_id = threadIdx_y * blockDim_x + threadIdx_x;
+    int threads = blockDim_x * blockDim_y;
     __syncthreads();
     if (t_id == 0) {
         ntasks = 0;
@@ -73,7 +74,7 @@ void _fill_tasks(int& ntasks, int& pair_kl0, uint32_t *pair_kl_idx,
         __syncthreads();
     }
     // pad data to avoid overflow
-    if (threadIdx.y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
+    if (threadIdx_y == 0 && ntasks + t_id < QUEUE_DEPTH && ntasks > 0) {
         pair_kl_idx[ntasks+t_id] = pair_kl_idx[ntasks-1];
     }
     __syncthreads();
@@ -87,20 +88,25 @@ void int4c2e_kernel(double *out, RysIntEnvVars envs, BoundsInfo bounds,
                     int reserved_shm_size,
                     double omega, double lr_factor, double sr_factor)
 {
+    setup_context();
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+    DECLARE_SHARED(int, ntasks);
+    DECLARE_SHARED(int, pair_ij);
+    DECLARE_SHARED(int, pair_kl0);
+    DECLARE_SHARED(int, ish);
+    DECLARE_SHARED(int, jsh);
+    DECLARE_SHARED(int, ij0);
+    DECLARE_SHARED(double, ri, [3]);
+    DECLARE_SHARED(double, rjri, [3]);
+    DECLARE_SHARED(double, aij_cache, [2]);
+    DECLARE_SHARED(int, expi);
+    DECLARE_SHARED(int, expj);
     // sq is short for shl_quartet
-    int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    uint32_t *pair_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
-    extern __shared__ double shared_memory[];
-    __shared__ int ntasks, pair_ij, pair_kl0;
-    __shared__ int ish, jsh, ij0;
-    __shared__ double ri[3];
-    __shared__ double rjri[3];
-    __shared__ double aij_cache[2];
-    __shared__ int expi;
-    __shared__ int expj;
+    int sq_id = threadIdx_x;
+    int nsq_per_block = blockDim_x;
+    int gout_id = threadIdx_y;
+    int gout_stride = blockDim_y;
+    uint32_t *pair_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
 
     int t_id = gout_id * nsq_per_block + sq_id;
     int threads = nsq_per_block * gout_stride;
@@ -417,7 +423,8 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
     int nf = nfi * nfj * nfk * nfl;
     int scheme[4];
     threads_scheme(scheme, bounds, shm_size, nf);
-    dim3 threads(scheme[0], scheme[1]);
+    auto blocks = make_grid(workers);
+    auto threads = make_block(scheme[0], scheme[1]);
     int buflen = scheme[2];
     int reserved_shm_size = scheme[3];
     cudaFuncSetAttribute(int4c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen);
@@ -428,7 +435,7 @@ int RYS_fill_int4c2e(double *out, int nao_pairs,
         return 1;
     }
 
-    int4c2e_kernel<<<workers, threads, buflen, stream>>>(
+    LAUNCH_KERNEL( int4c2e_kernel, blocks, threads, buflen, stream,
         out, *envs, bounds, q_cond_ij, q_cond_kl, ij_pair_loc, kl_pair_loc,
         pool, head, nf, nao_pairs, reserved_shm_size, omega, lr_factor, sr_factor);
 

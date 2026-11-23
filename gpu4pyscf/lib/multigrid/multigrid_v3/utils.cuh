@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "../../warp_size.h"
+#include "warp_size.h"
 
 constexpr int MGRID_SUBGROUP_SIZE = WARP_SIZE;
 static_assert(MGRID_SUBGROUP_SIZE == 32 || MGRID_SUBGROUP_SIZE == 64);
@@ -38,6 +38,7 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
 __device__ __forceinline__
 double reduce(double val, double *swap, int thread_id)
 {
+    setup_context();
     for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
         val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);
     }
@@ -48,7 +49,7 @@ double reduce(double val, double *swap, int thread_id)
     }
     __syncthreads();
     if (warp == 0) {
-        int nwarps = blockDim.x * blockDim.y * blockDim.z / MGRID_SUBGROUP_SIZE;
+        int nwarps = blockDim_x * blockDim_y * blockDim_z / MGRID_SUBGROUP_SIZE;
         val = (lane < nwarps) ? swap[lane] : 0.;
         for (int offset = MGRID_SUBGROUP_SIZE/2; offset > 0; offset >>= 1) {
             val += __shfl_down_sync(__activemask(), val, offset, MGRID_SUBGROUP_SIZE);

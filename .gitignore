@@ -33,3 +33,4 @@ gpu4pyscf/gpu4pyscf/examples/launch_logs
 gpu4pyscf/gpu4pyscf/lib/dftd3
 gpu4pyscf/gpu4pyscf/lib/dftd4
 gpu4pyscf/wheelhouse
+gpu4pyscf/_build_config.py
