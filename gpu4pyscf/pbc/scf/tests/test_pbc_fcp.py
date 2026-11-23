@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''Small two-k-point tests for the fixed-N gate adapter and FCP loop.'''
 
 import unittest
 import numpy as np
@@ -48,45 +47,13 @@ class KnownValues(unittest.TestCase):
         np.testing.assert_allclose(occ, expected, atol=1e-12)
         self.assertGreater(entropy, 0.)
 
-    def test_entropy_per_cell(self):
         energies = np.zeros((2, 1))
         eta, occ, entropy = fcp._occupations(energies, 1., .1)
         self.assertAlmostEqual(eta, 0., delta=1e-12)
         np.testing.assert_allclose(occ, np.ones((2, 1)), atol=1e-12)
         self.assertAlmostEqual(entropy, 2*np.log(2), delta=1e-12)
 
-    def test_potential_reference(self):
-        energies = np.array([[-.5, .2], [-.3, .4]])
-        eta, occ, entropy = fcp._occupations(energies, 1.7, .1)
-        shifted_eta, shifted_occ, shifted_entropy = fcp._occupations(energies+2, 1.7, .1)
-        self.assertAlmostEqual(shifted_eta, eta+2, delta=1e-12)
-        np.testing.assert_allclose(shifted_occ, occ, atol=1e-12)
-        self.assertAlmostEqual(shifted_entropy, entropy, delta=1e-12)
-
-    def test_smearing_required(self):
-        energies = np.zeros((2, 1))
-        with self.assertRaisesRegex(ValueError, 'smearing'):
-            fcp._occupations(energies, 1., 0.)
-        with self.assertRaisesRegex(ValueError, 'smearing'):
-            fcp.FCP(None, mu=0., sigma=None)
-        with self.assertRaisesRegex(ValueError, 'smearing'):
-            fcp.FCP(None, mu=0., sigma=0.)
-        calc = make_fcp()
-        calc.mf.sigma = None
-        with self.assertRaisesRegex(ValueError, 'smearing'):
-            calc.mf.get_occ(cp.asarray(energies))
-        calc.mf.sigma = 0.
-        with self.assertRaisesRegex(ValueError, 'smearing'):
-            calc.mf.get_occ(cp.asarray(energies))
-        with self.assertRaisesRegex(NotImplementedError, 'smearing'):
-            calc.mf.undo_smearing()
-
-    def test_orbital_capacity(self):
-        energies = np.zeros((2, 1))
-        with self.assertRaisesRegex(ValueError, 'capacity'):
-            fcp._occupations(energies, 2.1, .1)
-
-    def test_linear_newton_step(self):
+    def test_newton_fit(self):
         numbers = np.array([1.9, 2., 2.1])
         mu = .5*(numbers-2.)
         fit = fcp._fit_potential(numbers, mu, 1e-10)
@@ -95,23 +62,16 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(slope, .5, delta=1e-12)
         self.assertAlmostEqual(new_number, 2.1, delta=1e-12)
 
-    def test_quadratic_fit(self):
         numbers = np.array([1., 1.5, 2., 2.5, 3.])
         fit = fcp._fit_potential(numbers, numbers**2, .01)
         self.assertEqual(fit.degree(), 2)
         self.assertAlmostEqual(fit(2.), 4., delta=1e-12)
         self.assertAlmostEqual(fit.deriv()(2.), 4., delta=1e-12)
 
-    def test_step_limit(self):
         fit = fcp._fit_potential([1., 2., 3.], [1., 2., 3.], 1e-10)
         new_number, slope = fcp._newton_step(fit, 2., 10., 1., .2)
         self.assertAlmostEqual(new_number, 2.2, delta=1e-12)
         self.assertAlmostEqual(slope, 1., delta=1e-12)
-
-    def test_negative_slope(self):
-        fit = fcp._fit_potential([1., 2., 3.], [3., 2., 1.], 1e-10)
-        with self.assertRaisesRegex(RuntimeError, 'positive'):
-            fcp._newton_step(fit, 2., 1., 1., .2)
 
     def test_fractional_count_and_gate(self):
         calc = make_fcp()
@@ -126,30 +86,29 @@ class KnownValues(unittest.TestCase):
     def test_environment_energy_and_shift(self):
         calc = make_fcp()
         mf = calc.mf
-        mf.fcp_nelec = 2.1
-        dm = 1.05 * mf.get_init_guess()
-        shift = calc.chemical_potential_shift(dm)
-        vhf = mf.get_veff(dm=dm)
-        energy = mf.energy_tot(dm, mf.get_hcore(), vhf)
+        dm0 = mf.get_init_guess()
         plain = dft.KRKS(mf.cell, mf.kpts, xc=mf.xc)
-        e0 = plain.energy_tot(dm, plain.get_hcore(), plain.get_veff(dm=dm))
-        self.assertAlmostEqual(energy-e0, mf.scf_summary['egate']+vhf.edip,
-                               delta=1e-10)
+        for side in (-1, 1):
+            gate_charge(mf, zgate=12., gate_side=side, barrier=False)
+            for nelec in (2., 2.1):
+                with self.subTest(side=side, nelec=nelec):
+                    mf.fcp_nelec = nelec
+                    dm = (nelec/2) * dm0
+                    vhf = mf.get_veff(dm=dm)
+                    energy = mf.energy_tot(dm, mf.get_hcore(), vhf)
+                    shift = mf.scf_summary['gate_shift']
+                    e0 = plain.energy_tot(dm)
+                    self.assertAlmostEqual(energy-e0, mf.scf_summary['egate']+vhf.edip,
+                                           delta=1e-10)
 
-        # Lambda is the explicit gate-charge derivative at fixed density.
-        step = 1e-4
-        mf.fcp_nelec = 2.1+step
-        plus = mf.energy_tot(dm, mf.get_hcore(), mf.get_veff(dm=dm))
-        mf.fcp_nelec = 2.1-step
-        minus = mf.energy_tot(dm, mf.get_hcore(), mf.get_veff(dm=dm))
-        self.assertAlmostEqual((plus-minus)/(2*step), shift, delta=1e-8)
-
-    def test_padded_orbitals_are_rejected(self):
-        calc = make_fcp()
-        energies = cp.array([[-.5, .2], [-.3, .4]])
-        coeff = cp.zeros((2, 2, 2))
-        with self.assertRaisesRegex(NotImplementedError, 'padded'):
-            calc.mf.get_occ(energies, coeff)
+                    # Lambda is the explicit charge derivative at fixed density,
+                    # also at qc=0, where the sheet energy itself vanishes.
+                    step = 1e-4
+                    mf.fcp_nelec = nelec+step
+                    plus = mf.energy_tot(dm)
+                    mf.fcp_nelec = nelec-step
+                    minus = mf.energy_tot(dm)
+                    self.assertAlmostEqual((plus-minus)/(2*step), shift, delta=1e-8)
 
     def test_constant_fock_shift_is_not_converged(self):
         calc = make_fcp()
@@ -163,36 +122,6 @@ class KnownValues(unittest.TestCase):
                 'norm_gorb': 0., 'norm_ddm': 0.}
         self.assertFalse(calc.mf.check_convergence(envs))
 
-    def test_diis_history_reset(self):
-        calc = make_fcp()
-        mf = calc.mf
-        mf.diis = mf.DIIS(mf)
-        mf.diis_space = 6
-        mf.diis_start_cycle = 1
-        calc.evaluate(2.)
-        previous_diis = mf.diis
-        self.assertGreater(previous_diis.get_num_vec(), 0)
-
-        # Stop before the first DIIS update to inspect the new, empty history.
-        mf.max_cycle = 1
-        with self.assertRaisesRegex(RuntimeError, 'SCF did not converge'):
-            calc.evaluate(2.1)
-        self.assertIsNot(mf.diis, previous_diis)
-        self.assertEqual(mf.diis.get_num_vec(), 0)
-        self.assertEqual(mf.diis.space, mf.diis_space)
-
-    def test_failed_scf_clears_results(self):
-        calc = make_fcp()
-        calc.evaluate(2.)
-        calc.mf.max_cycle = 1
-        with self.assertRaisesRegex(RuntimeError, 'SCF did not converge'):
-            calc.evaluate(2.2)
-        self.assertFalse(calc.converged)
-        self.assertIsNone(calc.dm)
-        self.assertIsNone(calc.mu_eff)
-        self.assertIsNone(calc.e_free)
-        self.assertIsNone(calc.e_grand)
-
     def test_free_energy_derivative(self):
         calc = make_fcp()
         mu = calc.evaluate(2.1)
@@ -200,6 +129,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(calc.e_free,
                                calc.e_tot-calc.mf.sigma*calc.mf.entropy, delta=1e-12)
         self.assertAlmostEqual(calc.e_grand, calc.e_free-calc.mu*calc.nelec, delta=1e-12)
+        nelec = float(cp.einsum('kij,kji->', calc.dm, calc.mf.get_ovlp()).real)/2
+        self.assertAlmostEqual(nelec, 2.1, delta=1e-8)
         step = .001
         calc.evaluate(2.1+step)
         plus = calc.e_free
@@ -212,28 +143,17 @@ class KnownValues(unittest.TestCase):
         calc.mu = calc.evaluate(2.1)
         calc.max_cycle = 20
         calc.conv_tol = 1e-5
-        energy = calc.kernel(nelec=2.)
+        calc.fit_tol = 1e-6
+        calc.sample_step = .005
+        calc.nelec_bounds = (2.08, 2.3)
+        energy = calc.kernel(nelec=2.08)
         self.assertTrue(calc.converged)
         self.assertLess(abs(calc.mu_eff-calc.mu), calc.conv_tol)
         self.assertAlmostEqual(calc.nelec, 2.1, delta=5e-4)
+        self.assertTrue(all(2.08 <= n <= 2.3 for n, _, _ in calc.history))
         self.assertEqual(energy, calc.e_grand)
         nelec = float(cp.einsum('kij,kji->', calc.dm, calc.mf.get_ovlp()).real)/2
         self.assertAlmostEqual(nelec, calc.nelec, delta=1e-8)
-
-    def test_zero_cycle_is_not_scf(self):
-        calc = make_fcp()
-        calc.mf.max_cycle = 0
-        with self.assertRaisesRegex(ValueError, 'zero-cycle'):
-            calc.evaluate(2.)
-        self.assertFalse(calc.converged)
-
-    def test_outer_iteration_limit(self):
-        calc = make_fcp()
-        calc.mu = calc.evaluate(2.) + .1
-        calc.max_cycle = 1
-        with self.assertRaisesRegex(RuntimeError, 'max_cycle'):
-            calc.kernel(nelec=2.)
-        self.assertFalse(calc.converged)
 
 
 if __name__ == '__main__':

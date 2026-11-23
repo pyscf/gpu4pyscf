@@ -21,7 +21,8 @@ import numpy as np
 import cupy as cp
 from pyscf import lib, __config__
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.scf.slabdipole import _slab_length, _dipole_grids, _slab_charge
+from gpu4pyscf.pbc.scf.slabdipole import (
+    _slab_length, _dipole_grids, _slab_charge, _sawtooth)
 
 
 # Dipole-plane separation as a fraction of the cell length along z.
@@ -92,6 +93,10 @@ def gate_charge(mf, zgate=None, barrier=False, barrier_start=None,
     and sheet terms should vanish or remain constant when placed in vacuum.
     scf_summary['egate'] and ['ebarrier'] report these complete additions.
     Electronic contributions are already in scf_summary['e1'].
+    scf_summary['gate_shift'] stores the chemical-potential correction Lambda:
+    the explicit gate-charge derivative at fixed density, including the dipole
+    and barrier terms. If the dipole potential has a constant offset, its
+    orbital-energy shift is subtracted so that mu = eta + Lambda.
     ** It should be noted that the qc*v_b(zgate) term is constant for fixed
     parameters, some codes may ignore it. **
 
@@ -347,12 +352,13 @@ class SlabGateCharge:
                 raise ValueError('Gate plane must lie strictly inside the barrier interval')
         return length, zgate, start, end, self.barrier_height, width
 
-    def _gate_matrices(self, cell, kpts):
+    def _gate_matrices(self, cell, kpts, charge=None):
+        '''Gate and barrier matrices; charge=1 gives the unit-sheet matrix.'''
         from gpu4pyscf.pbc.dft import numint
         length, zgate, start, end, height, width = self._gate_parameters(cell)
         kpts = np.asarray(kpts).reshape(-1, 3)
         grids = _dipole_grids(self, cell)
-        qc = -_slab_charge(self, cell)
+        qc = -_slab_charge(self, cell) if charge is None else charge
         charge_matrix = barrier_matrix = None
         # TODO: may use multigrid to speed up
         ni = numint.KNumInt()
@@ -374,27 +380,29 @@ class SlabGateCharge:
                     barrier_matrix[k] += ao.conj().T @ ((weight*vb)[:, None] * ao)
         return charge_matrix, barrier_matrix
 
-    def _gate_ionic_energy(self, cell):
+    def _gate_ionic_energy(self, cell, deriv=0):
+        '''Static energies, or their gate-charge derivatives for deriv=1.'''
         # electron energy will be added in energy_tot
         length, zgate, start, end, height, width = self._gate_parameters(cell)
         area = cell.vol/length
         qc = -_slab_charge(self, cell)
         z = cell.atom_coords()[:, 2]
         egate = np.dot(cell.atom_charges(),
-                       _sheet_potential(z, zgate, length, area, qc,
+                       _sheet_potential(z, zgate, length, area, 1. if deriv else qc,
                                         dimension=cell.dimension).get())
         # In the 2D finite-part reference phi(zgate)=0, hence no sheet self term.
         if cell.dimension == 3:
-            egate += np.pi*qc**2*length/(6*area)
+            egate += np.pi*length/(6*area) * (2*qc if deriv else qc**2)
         ebarrier = 0.
         if self.barrier:
             # TODO: the following two terms may be modified.
             # if barrier interacts with atoms this will appear
-            ebarrier = -np.dot(cell.atom_charges(),
-                               _barrier_potential(z, start, end, length, height, width,
-                                                  dimension=cell.dimension).get())
+            if not deriv:
+                ebarrier = -np.dot(cell.atom_charges(),
+                                   _barrier_potential(z, start, end, length, height, width,
+                                                      dimension=cell.dimension).get())
             # this term can be ignored for this is a constant.
-            ebarrier -= qc * float(
+            ebarrier -= (1. if deriv else qc) * float(
                 _barrier_potential(zgate, start, end, length, height, width,
                                    dimension=cell.dimension))
         return float(egate), float(ebarrier)
@@ -418,17 +426,30 @@ class SlabGateCharge:
     def energy_elec(self, dm=None, h1e=None, vhf=None):
         if dm is None:
             dm = self.make_rdm1()
+        if vhf is None or getattr(vhf, 'ecoul', None) is None:
+            vhf = self.get_veff(self.cell, dm)
         energy = super().energy_elec(dm, h1e, vhf)
         egate, ebarrier = self._gate_ionic_energy(self.cell)
-        vc, vb = self._gate_matrices(self.cell, self.kpts if self.istype('KSCF') else self.kpt)
+        # The same contraction gives the energy and its charge derivative,
+        # including at qc=0, where dividing the gate energy by qc is undefined.
+        vc, vb = self._gate_matrices(
+            self.cell, self.kpts if self.istype('KSCF') else self.kpt, charge=1.)
         dm_charge = cp.asarray(dm)
         if self.istype('UHF') or self.istype('KUHF'):
             dm_charge = dm_charge[0] + dm_charge[1]
         dm_charge = dm_charge.reshape(vc.shape)
-        self.scf_summary['egate'] = egate + float(
-            cp.einsum('kij,kji->', dm_charge, vc).real) / len(vc)
+        electronic_shift = float(cp.einsum('kij,kji->', dm_charge, vc).real) / len(vc)
+        self.scf_summary['egate'] = egate - _slab_charge(self, self.cell)*electronic_shift
         self.scf_summary['ebarrier'] = ebarrier + float(
             cp.einsum('kij,kji->', dm_charge, vb).real) / len(vb)
+        shift = electronic_shift + sum(self._gate_ionic_energy(self.cell, deriv=1))
+        if hasattr(vhf, 'dipole'):
+            length, zgate, *_ = self._gate_parameters(self.cell)
+            f_c = float(_sawtooth(zgate, self.cut, length, self.dipole_width))
+            # Reuse the dipole from get_veff; eta already includes its offset, remove it.
+            # TODO: offset part seems very confusing, needs to be simplified.
+            shift += 4*np.pi*vhf.dipole/self.cell.vol * (f_c-vhf.dipole_offset)
+        self.scf_summary['gate_shift'] = shift
         logger.debug(self, 'Gate energy = %.10g, barrier energy = %.10g',
                      self.scf_summary['egate'], self.scf_summary['ebarrier'])
         # The electronic terms are included once through the corrected hcore.

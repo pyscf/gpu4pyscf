@@ -14,11 +14,7 @@
 
 '''
 Fully converged constant potential with fixed-N KRKS and a planar gate.
-
-All electron numbers and energies are per primitive cell. Energies, including
-mu and sigma, are in Hartree. Only Fermi smearing and equal-weight k-points
-are supported. The input Cell retains its reference charge; fcp_nelec controls
-the actual electron number and compensating charge of each inner calculation.
+ref: J. Chem. Theory Comput. 2023, 19, 5168-5175
 '''
 
 import numpy as np
@@ -28,24 +24,18 @@ from scipy.optimize import brentq
 from scipy.special import expit, xlogy
 from pyscf import lib
 from pyscf.data.nist import HARTREE2EV
-from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.scf import smearing
 from gpu4pyscf.pbc.scf.gcscf import ConstantMuSCF
-from gpu4pyscf.pbc.scf.slabgate import SlabGateCharge, _sheet_potential
-from gpu4pyscf.pbc.scf.slabdipole import _dipole_grids, _sawtooth, _slab_length
+from gpu4pyscf.pbc.scf.slabgate import SlabGateCharge
 
 
 def _occupations(energies, nelec, sigma):
     '''
     Return one chemical potential, KRKS occupations and entropy per cell.
     '''
-    if sigma is None or sigma <= 0:
-        raise ValueError('FCP requires Fermi smearing with sigma > 0')
     energies = np.asarray(energies)
     nkpts, nmo = energies.shape
-    if not 0 < nelec < 2*nmo:
-        raise ValueError('Electron number must lie inside the orbital capacity')
 
     def residual(eta):
         return 2*expit((eta-energies)/sigma).sum()/nkpts - nelec
@@ -63,6 +53,7 @@ def _fit_potential(nelec, mu, tol):
     '''
     nelec = np.asarray(nelec)
     mu = np.asarray(mu)
+    # This is set as the original FCP paper.
     max_degree = min(3, len(np.unique(nelec))-1)
     if max_degree < 1:
         raise ValueError('Fitting requires at least two different electron numbers')
@@ -148,6 +139,8 @@ class FCP:
     Trial steps, including presampling, respect max_step and nelec_bounds.
     A failed inner SCF or exhausted outer loop raises RuntimeError and leaves
     converged=False.
+    Set mf.verbose=5 to log N, eta, Lambda, mu and the polynomial coefficients
+    in powers of N, together with the fit residual and Newton update.
 
     Geometry, basis, gate and dipole parameters must remain fixed while reusing
     this object. Create a new FCP object after changing them.
@@ -184,56 +177,9 @@ class FCP:
         mf._fcp_previous_free = None
         self.converged = False
         self.history = []
-        self._matrices = None
         self.dm = None
         self.eta = self.shift = self.mu_eff = None
         self.e_tot = self.e_free = self.e_grand = None
-
-    def _prepare(self):
-        # TODO: this should be moved to gate_charge.
-        from gpu4pyscf.pbc.dft import numint
-
-        mf = self.mf
-        cell = mf.cell
-        length = _slab_length(cell)
-        area = cell.vol/length
-        zgate = mf.zgate % length
-        cut = mf.cut % length
-        width = mf.dipole_width
-        # Use the same zero-offset Brumme reference as the work equations.
-        mf.z0 = (cut+length/2) % length
-        overlap = cp.asarray(mf.get_ovlp())
-        c1 = cp.zeros(overlap.shape, dtype=complex)
-        position = cp.zeros_like(c1)
-        grids = _dipole_grids(mf, cell)
-        ni = numint.KNumInt()
-        for ao_kpts, weight, coords in ni.block_loop(cell, grids, kpts=mf.kpts):
-            z = coords[:, 2]
-            vc = -_sheet_potential(z, zgate, length, area, 1.)
-            f = _sawtooth(z, cut, length, width)
-            for k, ao in enumerate(ao_kpts):
-                c1[k] += ao.conj().T @ ((weight*vc)[:, None]*ao)
-                position[k] += ao.conj().T @ ((weight*f)[:, None]*ao)
-        charges = cell.atom_charges()
-        z = cell.atom_coords()[:, 2]
-        a_c = float(np.dot(charges, _sheet_potential(z, zgate, length, area, 1.).get()))
-        b_c = np.pi*length/(3*area)
-        p_ion = float(np.dot(charges, _sawtooth(z, cut, length, width).get()))
-        f_c = float(_sawtooth(zgate, cut, length, width))
-        self._matrices = overlap, c1, position, a_c, b_c, p_ion, f_c
-
-    def chemical_potential_shift(self, dm):
-        '''
-        Gate and dipole charge derivative Lambda, in Hartree.
-        '''
-        if self._matrices is None:
-            self._prepare()
-        overlap, c1, position, a_c, b_c, p_ion, f_c = self._matrices
-        nkpts = len(self.mf.kpts)
-        qc = self.mf.fcp_nelec-self.mf.cell.atom_charges().sum()
-        h_c = a_c + float(cp.einsum('kij,kji->', dm, c1).real)/nkpts
-        dipole = p_ion + qc*f_c - float(cp.einsum('kij,kji->', dm, position).real)/nkpts
-        return h_c + qc*b_c + 4*np.pi*dipole/self.mf.cell.vol*f_c
 
     def evaluate(self, nelec, dm0=None):
         '''
@@ -256,19 +202,22 @@ class FCP:
             if not lower <= nelec <= upper:
                 raise ValueError('Trial electron number is outside nelec_bounds')
         mf.fcp_nelec = float(nelec)
-        if self._matrices is None:
-            self._prepare()
+        logger.debug(mf, 'FCP fixed-N SCF: N = %.10f', mf.fcp_nelec)
         mf.kernel(dm0=dm0)
         if not mf.converged:
             raise RuntimeError('Fixed-electron-number SCF did not converge')
         self.nelec = float(nelec)
         self.dm = mf.make_rdm1()
         self.eta = mf.fcp_eta
-        self.shift = self.chemical_potential_shift(self.dm) # electron changed part
+        self.shift = mf.scf_summary['gate_shift']
         self.mu_eff = self.eta + self.shift
         self.e_tot = mf.e_tot
         self.e_free = mf.e_free
         self.e_grand = self.e_free-self.mu*self.nelec
+        logger.debug(mf, 'FCP result: N = %.10f eta = %.12g Lambda = %.12g '
+                     'mu = %.12g target = %.12g residual = %.6g Ha',
+                     self.nelec, self.eta, self.shift, self.mu_eff,
+                     self.mu, self.mu_eff-self.mu)
         return self.mu_eff
 
     def kernel(self, nelec=None, dm0=None):
@@ -280,7 +229,6 @@ class FCP:
         initial = float(nelec)
         self.converged = False
         self.history = []
-        self._matrices = None
         if self.nelec_bounds is not None:
             lower, upper = self.nelec_bounds
             if not lower < upper or not lower <= initial <= upper:
@@ -316,14 +264,23 @@ class FCP:
             if samples:
                 # for starting steps
                 nelec = samples.pop(0)
+                logger.debug(self.mf, 'FCP sampling: N = %.10f -> %.10f',
+                             self.nelec, nelec)
             else:
                 # next step nelec from newton update
                 fit = _fit_potential(numbers, potentials, self.fit_tol)
+                logger.debug(self.mf, 'FCP fit: degree = %d RMS = %.6g Ha; '
+                             'mu_fit(N) = sum_i c[i]*N**i, c = %s',
+                             fit.degree(), np.sqrt(np.mean((fit(numbers)-potentials)**2)),
+                             np.array2string(fit.convert().coef, precision=12,
+                                             separator=', ', max_line_width=160))
                 nelec, slope = _newton_step(fit, self.nelec, self.mu, lr, self.max_step)
                 if self.nelec_bounds is not None:
                     nelec = float(np.clip(nelec, *self.nelec_bounds))
                     if nelec == self.nelec:
                         raise RuntimeError('FCP target cannot be reached within nelec_bounds')
-                logger.debug(self.mf, 'FCP fit degree = %d slope = %.8g lr = %.6g',
-                             fit.degree(), slope, lr)
+                logger.debug(self.mf, 'FCP Newton: N = %.10f mu_fit = %.12g Ha '
+                             'slope = %.12g Ha/e lr = %.6g -> N = %.10f (dN = %.6g)',
+                             self.nelec, fit(self.nelec), slope, lr, nelec,
+                             nelec-self.nelec)
         raise RuntimeError('FCP did not converge within max_cycle')

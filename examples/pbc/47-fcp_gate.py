@@ -34,11 +34,13 @@ cell = gto.M(
 
 kpts = cell.make_kpts([2, 1, 1])
 mf = dft.KRKS(cell, kpts, xc='lda,vwn')
+# Add a planar countercharge.
 mf = gate_charge(mf, zgate=12., gate_side=1, barrier=False)
 mf.conv_tol = 1e-9
 mf.conv_tol_grad = 1e-6
 mf.max_cycle = 200
 mf.chkfile = None
+# Set mf.verbose = 5 to see fit coefficients, N, eta, Lambda and Newton steps.
 
 # FCP enables fixed-N Fermi smearing. sigma=None or sigma=0 raises ValueError.
 calc = FCP(mf, mu=0., sigma=.1/HARTREE2EV)
@@ -48,6 +50,7 @@ mu0 = calc.evaluate(neutral)
 # Keep this neutral reference fixed when changing the target or geometry.
 delta_u = .5  # volts relative to the neutral model, not SHE
 calc.mu = mu0 - delta_u/HARTREE2EV
+print('mu0:', mu0)
 calc.nelec_bounds = (neutral-.5, neutral+.5)
 calc.kernel(nelec=neutral)
 assert calc.converged
