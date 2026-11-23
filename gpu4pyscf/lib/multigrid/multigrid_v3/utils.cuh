@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "../../warp_size.h"
+#include "warp_size.h"
 
 constexpr int MGRID_SUBGROUP_SIZE = WARP_SIZE;
 static_assert(MGRID_SUBGROUP_SIZE == 32 || MGRID_SUBGROUP_SIZE == 64);

@@ -138,7 +138,7 @@ void block_reduce(double val, double *d_out) {
 
     if (tid < warpSize) {
         double value = sdata[tid]; // load to register
-        unsigned int mask = __activemask(); // all lanes in warp 0 are active
+        const auto mask = __activemask(); // all lanes in warp 0 are active
         // Final intra-warp reduction; stride starts at warpSize/2.
         for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
             value += __shfl_down_sync(mask, value, offset);

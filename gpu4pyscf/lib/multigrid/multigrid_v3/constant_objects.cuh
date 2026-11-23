@@ -16,7 +16,7 @@
 
 #pragma once
 
-// gpu_compat.h (via this header chain) provides CUDA_VERSION (aft_eval_*); the runtime API shims live in gsycl/sycl_device.hpp.
+// gpu_compat.h (via this header chain) provides CUDA_VERSION (aft_eval_*); the runtime API shims live in compat/sycl/sycl_device.hpp.
 #include <cuComplex.h>
 #include "gpu_compat.h"
 

@@ -29,7 +29,7 @@
 #include <utility>
 #ifdef USE_SYCL
 #include <optional>
-#include "gsycl/sycl_device.hpp"
+#include "sycl/sycl_device.hpp"
 #else
 #include <cuda.h>
 #include <cuda_runtime.h>

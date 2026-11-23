@@ -115,9 +115,9 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
     }
 
     static_assert(THREADS <= 32);
-    const unsigned int mask = __activemask();
+    const auto mask = __activemask();
     for (int offset = THREADS/2; offset > 0; offset >>= 1) {
-        sum_i += __shfl_down_sync(mask, sum_i, offset);
+        sum_i += __shfl_down_sync(mask, sum_i, offset, THREADS);
     }
 
     if (threadIdx_x == 0) {

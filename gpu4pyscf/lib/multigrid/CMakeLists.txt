@@ -12,8 +12,8 @@
 #  CUDA_SEPARABLE_COMPILATION ON)
 
 if (ENABLE_MULTIGRID_V2)
-if(USE_SYCL)
-  message(FATAL_ERROR "mgrid_v2 does not support SYCL. Configure with -DENABLE_MULTIGRID_V2=OFF.")
+if(USE_SYCL OR USE_HIP)
+  message(FATAL_ERROR "mgrid_v2 does not support SYCL or HIP. Configure with -DENABLE_MULTIGRID_V2=OFF.")
 endif()
 add_library(mgrid_v2 SHARED
         multigrid_v2/drivers.cu
