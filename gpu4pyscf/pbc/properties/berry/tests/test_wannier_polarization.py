@@ -26,6 +26,8 @@ from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from gpu4pyscf.pbc.properties import berry
 from gpu4pyscf.pbc.properties.berry import polarization as polarization_lib
 from gpu4pyscf.pbc.properties.berry.overlap import _commensurate_bvkmesh
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 HAS_LIBWANNIER90 = importlib.util.find_spec('libwannier90') is not None
@@ -66,12 +68,12 @@ class KnownValues(unittest.TestCase):
         kmesh = np.asarray([3, 2, 2])
         kpts = cell.make_kpts(
             kmesh, wrap_around=True, scaled_center=[.17, -.11, .07])
-        topology = berry.KPointMesh(cell, kpts, kmesh)
+        topology = berry.KPointMesh.from_ksampling(cell, _normalize_kpts(cell, kpts)[0], kmesh)
 
         for direction in range(3):
             neighbors, shifts = topology.neighbors(direction)
             neighbor_images = cell.get_abs_kpts(
-                topology.scaled_kpts[neighbors] + shifts)
+                topology.kpts_scaled[neighbors] + shifts)
             expected = kpts + topology.reciprocal_step(direction)
             np.testing.assert_allclose(neighbor_images, expected, atol=1e-12)
 
@@ -81,6 +83,24 @@ class KnownValues(unittest.TestCase):
                 (np.prod(np.delete(kmesh, direction)), kmesh[direction]))
             np.testing.assert_array_equal(
                 neighbors[strings], np.roll(strings, -1, axis=1))
+
+    def test_kpoint_mesh_reordered_and_gamma(self):
+        cell = gto.M(atom='He 0 0 0', basis='sto-3g', a=np.eye(3)*4, verbose=0)
+        topology = berry.KPointMesh.from_ksampling(cell, KPointSampling.from_mesh(
+            cell, [2, 2, 1], wrap_around=True, scaled_center=[.25, 0., 0.]))
+        permutation = [2, 0, 3, 1]
+        reordered = berry.KPointMesh.from_ksampling(
+            cell, KPointSampling.from_kpts(cell, topology.kpts[permutation]), topology.kmesh)
+        gamma = berry.KPointMesh.from_ksampling(cell, KPointSampling.gamma_point(cell))
+        for direction in range(3):
+            neighbors, shifts = reordered.neighbors(direction)
+            np.testing.assert_allclose(
+                reordered.kpts[neighbors] + shifts @ reordered.reciprocal_vectors(),
+                reordered.kpts + reordered.reciprocal_step(direction), atol=1e-12)
+            np.testing.assert_array_equal(gamma.strings(direction), [[0]])
+            np.testing.assert_array_equal(gamma.neighbors(direction)[1], np.eye(3, dtype=int)[direction:direction+1])
+        np.testing.assert_array_equal(
+            _commensurate_bvkmesh(cell, topology), [4, 2, 1])
 
     def test_wilson_centers_are_gauge_invariant(self):
         rng = np.random.default_rng(4)
@@ -139,7 +159,7 @@ class KnownValues(unittest.TestCase):
         cell.build()
         kmesh = np.asarray([2, 1, 2])
         kpts = cell.make_kpts(kmesh, wrap_around=True)
-        topology = berry.KPointMesh(cell, kpts, kmesh)
+        topology = berry.KPointMesh.from_ksampling(cell, _normalize_kpts(cell, kpts)[0], kmesh)
 
         rng = np.random.default_rng(9)
         coeff = (
@@ -154,7 +174,7 @@ class KnownValues(unittest.TestCase):
             reference = np.empty_like(cp.asnumpy(value))
             for k, neighbor in enumerate(neighbors):
                 neighbor_image = cell.get_abs_kpts(
-                    topology.scaled_kpts[neighbor] + shifts[k])
+                    topology.kpts_scaled[neighbor] + shifts[k])
                 raw = ft_ao_cpu.ft_aopair(
                     cell, (kpts[k] - neighbor_image).reshape(1, 3),
                     kpti_kptj=np.asarray([neighbor_image, kpts[k]]),
@@ -319,7 +339,7 @@ class KnownValues(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
-        topology = berry.KPointMesh(cell, kpts, kmesh)
+        topology = berry.KPointMesh.from_ksampling(cell, _normalize_kpts(cell, kpts)[0], kmesh)
         coeff_gpu = cp.asarray(coeff)
         positive_links = cp.asnumpy(berry.build_mmn(
             cell, coeff_gpu, kpts, kmesh, topology=topology))
@@ -408,17 +428,20 @@ class KnownValues(unittest.TestCase):
             basis={'H': [[0, (.45, 1.)]]}, precision=1e-10, verbose=0)
         cell.build()
         kmesh = np.asarray([2, 1, 2])
-        kpts = cell.make_kpts(kmesh, wrap_around=True, scaled_center=[.25, 0, 0])
-        topology = berry.KPointMesh(cell, kpts)
-        np.testing.assert_array_equal(_commensurate_bvkmesh(cell, kpts, kmesh), [4, 1, 2])
+        sampling = KPointSampling.from_mesh(
+            cell, kmesh, wrap_around=True, scaled_center=[.25, 0, 0])
+        kpts = sampling.kpts
+        topology = berry.KPointMesh.from_ksampling(cell, sampling)
+        np.testing.assert_array_equal(topology.kmesh, kmesh)
+        np.testing.assert_array_equal(_commensurate_bvkmesh(cell, sampling), [4, 1, 2])
         rng = np.random.default_rng(31)
         coeff = rng.normal(size=(4, 2, 2)) + 1j * rng.normal(size=(4, 2, 2))
-        values = berry.build_mmn(cell, coeff, kpts, kmesh)
+        values = berry.build_mmn(cell, coeff, sampling)
         for direction, value in enumerate(values):
             neighbors, shifts = topology.neighbors(direction)
             reference = []
             for k, neighbor in enumerate(neighbors):
-                image = cell.get_abs_kpts(topology.scaled_kpts[neighbor] + shifts[k])
+                image = cell.get_abs_kpts(topology.kpts_scaled[neighbor] + shifts[k])
                 raw = ft_ao_cpu.ft_aopair(
                     cell, (kpts[k] - image)[None],
                     kpti_kptj=[image, kpts[k]], q=np.zeros(3))[0]
@@ -436,13 +459,15 @@ class KnownValues(unittest.TestCase):
         mf = self._mock_mf()
         for kpts in (np.empty((0, 3)), mf.kpts[[0, 0, 2, 3]]):
             with self.subTest(kpts=kpts), self.assertRaises(ValueError):
-                berry.KPointMesh(mf.cell, kpts)
+                berry.KPointMesh.from_ksampling(mf.cell, _normalize_kpts(mf.cell, kpts)[0], [1, 4, 1])
         with self.assertRaises(ValueError):
-            berry.KPointMesh(mf.cell, mf.kpts, [1, 3, 1])
+            berry.KPointMesh.from_ksampling(mf.cell, _normalize_kpts(mf.cell, mf.kpts)[0], [1, 3, 1])
+        with self.assertRaises(NotImplementedError):
+            berry.KPointMesh.from_ksampling(mf.cell, _normalize_kpts(mf.cell, mf.kpts)[0])
 
         shifted = mf.cell.get_abs_kpts([[.25 + 4e-7, 0, 0]])
         with self.assertRaises(ValueError):
-            _commensurate_bvkmesh(mf.cell, shifted)
+            _commensurate_bvkmesh(mf.cell, KPointSampling.from_kpts(mf.cell, shifted))
 
     def test_principal_phase_contract_and_phase_only_path(self):
         mf = self._mock_mf()

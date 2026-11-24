@@ -26,7 +26,8 @@ import numpy as np
 import cupy as cp
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, _normalize_kpts, _get_kmesh
 
 __all__ = [
     'KPointMesh',
@@ -48,58 +49,32 @@ def _direction_index(direction):
     return direction
 
 
-def _commensurate_bvkmesh(cell, kpts, kmesh=None):
+def _commensurate_bvkmesh(cell, kpts):
     # FTOpt folds outer BvK images without a twist phase. Every absolute
     # k-point, not just the spacing of the mesh, must be commensurate.
-    scaled = np.asarray(cell.get_scaled_kpts(kpts))
-    if (kmesh is not None and
-            np.max(np.abs(scaled * kmesh - np.rint(scaled * kmesh))) <= 1e-8):
-        return kmesh
+    scaled = kpts.kpts_scaled
+    kmesh = kpts.kmesh
+    if kmesh is not None:
+        mesh_coords = scaled * kmesh
+        if np.max(np.abs(mesh_coords - np.rint(mesh_coords))) <= 1e-8:
+            return kmesh
+    # Infer from coordinates to include shifts in the periodicity check.
     try:
         return kpts_to_bvkmesh(
-            cell, kpts, precision=1e-10, bound_by_supmol=False)
+            cell, kpts.kpts, precision=1e-10, bound_by_supmol=False)
     except RuntimeError as err:
         raise ValueError(
             'The GPU Fourier transform requires k-points commensurate '
             'with a finite BvK mesh') from err
 
 
-def _periodic_axis_values(values, tol):
-    values = np.mod(values, 1.)
-    values[np.abs(values - 1.) < tol] = 0.
-    values[np.abs(values) < tol] = 0.
-    values = np.sort(values)
-
-    unique = []
-    for value in values:
-        if not unique or value - unique[-1] > tol:
-            unique.append(value)
-        else:
-            unique[-1] = .5 * (unique[-1] + value)
-    return np.asarray(unique)
-
-
-class KPointMesh:
+class KPointMesh(KPointSampling):
     '''Topology of a full, uniform Monkhorst-Pack mesh.
-
-    Args:
-        cell : pyscf.pbc.gto.Cell
-            Periodic cell defining the reciprocal lattice.
-        kpts : array_like, shape (nkpts, 3)
-            Cartesian k-points in Bohr^-1. Their order is preserved.
-            Shifted meshes and points outside the first Brillouin zone
-            are allowed; symmetry-reduced KPoints objects are unsupported.
-        kmesh : array_like of int, shape (3,), optional
-            Number of sampled points along each reciprocal lattice vector.
-            Inferred from kpts if omitted.
-        tol : float
-            Tolerance in fractional reciprocal coordinates for identifying
-            mesh points and checking uniform spacing.
 
     Attributes:
         kpts : numpy.ndarray, shape (nkpts, 3)
             Input Cartesian k-points in Bohr^-1.
-        scaled_kpts : numpy.ndarray, shape (nkpts, 3)
+        kpts_scaled : numpy.ndarray, shape (nkpts, 3)
             Input k-points in fractional reciprocal coordinates.
         kmesh : numpy.ndarray, shape (3,)
             Sampling mesh dimensions, not the phase-compatible BvK mesh.
@@ -109,64 +84,65 @@ class KPointMesh:
             Map from a mesh-address tuple to the corresponding input index.
     '''
 
-    def __init__(self, cell, kpts, kmesh=None, tol=1e-7):
+    @classmethod
+    def from_ksampling(cls, cell, kpts, kmesh=None, tol=1e-7):
+        '''Construct mesh addresses for Berry links and closed strings.
+
+        Args:
+            cell : pyscf.pbc.gto.Cell
+                Periodic cell passed to the mesh lookup helper.
+            kpts : KPointSampling
+                Full uniform sampling. Coordinates, input order, and generation
+                metadata are retained. Shifted and reordered meshes are allowed;
+                symmetry-reduced KPoints objects are unsupported.
+
+        Kwargs:
+            kmesh : array_like of int, shape (3,), optional
+                Sampling dimensions along the reciprocal lattice vectors.
+                If omitted, obtained from _get_kmesh(cell, kpts).
+                An unidentified mesh is unsupported.
+                These are sampling dimensions, not periodic BvK dimensions.
+            tol : float
+                Tolerance in fractional reciprocal coordinates for identifying
+                mesh points and checking uniform spacing. Default is 1e-7.
+
+        Returns:
+            KPointMesh with addresses and index_by_address initialized for
+            neighbors() and strings().
+        '''
         if isinstance(kpts, KPoints):
             raise NotImplementedError(
                 'Symmetry-reduced k-point meshes are not supported. '
                 'Run the SCF calculation on the full Monkhorst-Pack mesh.')
 
-        kpts = _asnumpy(kpts)
-        if kpts.ndim != 2 or kpts.shape[1] != 3 or len(kpts) == 0:
-            raise ValueError(f'kpts must have shape (nk, 3), got {kpts.shape}')
-
-        scaled_kpts = np.asarray(cell.get_scaled_kpts(kpts))
-        wrapped_kpts = np.mod(scaled_kpts, 1.)
-        wrapped_kpts[np.abs(wrapped_kpts - 1.) < tol] = 0.
-        wrapped_kpts[np.abs(wrapped_kpts) < tol] = 0.
-        axis_values = tuple(
-            _periodic_axis_values(wrapped_kpts[:, dim], tol)
-            for dim in range(3))
-
-        inferred_kmesh = np.asarray([len(values) for values in axis_values])
+        self = cls.__new__(cls)
+        self.__dict__.update(kpts.__dict__)
         if kmesh is None:
-            kmesh = inferred_kmesh
-        else:
-            kmesh = _asnumpy(kmesh)
-            if not np.array_equal(kmesh, inferred_kmesh):
-                raise ValueError(
-                    f'kmesh {kmesh.tolist()} is inconsistent with the '
-                    f'k-points ({inferred_kmesh.tolist()} unique coordinates)')
-            kmesh = inferred_kmesh
-
-        if np.prod(kmesh) != len(kpts):
+            kmesh, _ = _get_kmesh(cell, kpts)
+        if kmesh is None:
+            raise NotImplementedError('requires an explicit kmesh')
+        self.kmesh = kmesh
+        nkpts = len(self)
+        if np.prod(kmesh) != nkpts:
             raise ValueError(
                 'A full Monkhorst-Pack mesh is required: '
-                f'prod(kmesh)={np.prod(kmesh)}, nkpts={len(kpts)}')
+                f'prod(kmesh)={np.prod(self.kmesh)}, nkpts={nkpts}')
 
-        for dim, values in enumerate(axis_values):
-            if len(values) > 1:
-                gaps = np.diff(np.append(values, values[0] + 1.))
-                if np.max(np.abs(gaps - 1. / kmesh[dim])) > tol:
-                    raise ValueError(
-                        f'k-points are not uniformly spaced along direction {dim}')
-
-        addresses = np.empty((len(kpts), 3), dtype=int)
-        for dim, values in enumerate(axis_values):
-            distance = np.abs(
-                np.mod(wrapped_kpts[:, dim, None] - values[None, :] + .5, 1.) - .5)
-            addresses[:, dim] = np.argmin(distance, axis=1)
-
-        index_by_address = {
-            tuple(address): k for k, address in enumerate(addresses)}
-        if len(index_by_address) != len(kpts):
+        # Wrapped coordinates determine addresses even when input points have
+        # been reordered or shifted across reciprocal-lattice boundaries.
+        wrapped = np.mod(self.kpts_scaled, 1.)
+        wrapped[np.abs(wrapped - 1.) < tol] = 0.
+        wrapped[np.abs(wrapped) < tol] = 0.
+        mesh_coords = (wrapped - wrapped.min(axis=0)) * self.kmesh
+        addresses = np.rint(mesh_coords).astype(int)
+        if np.max(np.abs(mesh_coords - addresses) / self.kmesh) > tol:
+            raise ValueError('k-points are not uniformly spaced on kmesh')
+        self.addresses = addresses % self.kmesh
+        self.index_by_address = {
+            tuple(address): k for k, address in enumerate(self.addresses)}
+        if len(self.index_by_address) != nkpts:
             raise ValueError('A full Monkhorst-Pack mesh is required')
-
-        self.cell = cell
-        self.kpts = kpts
-        self.scaled_kpts = scaled_kpts
-        self.kmesh = kmesh
-        self.addresses = addresses
-        self.index_by_address = index_by_address
+        return self
 
     def neighbors(self, direction):
         '''Return neighbors along reciprocal axis direction (0, 1, or 2).
@@ -182,8 +158,9 @@ class KPointMesh:
         '''
         direction = _direction_index(direction)
 
-        neighbor_indices = np.empty(len(self.kpts), dtype=int)
-        image_shifts = np.empty((len(self.kpts), 3), dtype=int)
+        nkpts = len(self)
+        neighbor_indices = np.empty(nkpts, dtype=int)
+        image_shifts = np.empty((nkpts, 3), dtype=int)
         step = np.zeros(3)
         step[direction] = 1. / self.kmesh[direction]
 
@@ -194,8 +171,8 @@ class KPointMesh:
             neighbor = self.index_by_address[tuple(neighbor_address)]
             neighbor_indices[k] = neighbor
 
-            target = self.scaled_kpts[k] + step
-            shift = np.rint(target - self.scaled_kpts[neighbor]).astype(int)
+            target = self.kpts_scaled[k] + step
+            shift = np.rint(target - self.kpts_scaled[neighbor]).astype(int)
             image_shifts[k] = shift
 
         return neighbor_indices, image_shifts
@@ -233,7 +210,7 @@ class KPointMesh:
                 in Bohr^-1.
         '''
         direction = _direction_index(direction)
-        return (np.asarray(self.cell.reciprocal_vectors())[direction] /
+        return (self.reciprocal_vectors()[direction] /
                 self.kmesh[direction])
 
 
@@ -271,7 +248,7 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh=None, topology=None):
         mo_coeff_kpts : array_like, shape (nkpts, nao, nband)
             Bloch orbital coefficients in the same k-point order as kpts.
             Supply occupied orbitals for Berry phases and polarization.
-        kpts : array_like, shape (nkpts, 3)
+        kpts : array_like, shape (nkpts, 3), or KPointSampling
             Full uniform mesh in Cartesian coordinates, in Bohr^-1.
             Shifted meshes must be compatible with a finite BvK supercell.
         kmesh : array_like of int, shape (3,), optional
@@ -292,10 +269,9 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh=None, topology=None):
         raise NotImplementedError(
             'Wannier-center polarization currently supports 3D cells only')
     if topology is None:
-        topology = KPointMesh(cell, kpts, kmesh)
-    kpts = topology.kpts
-    kmesh = topology.kmesh
-    nkpts = len(kpts)
+        kpts, _ = _normalize_kpts(cell, kpts)
+        topology = KPointMesh.from_ksampling(cell, kpts, kmesh)
+    nkpts = len(topology)
 
     mo_coeff_kpts = cp.asarray(mo_coeff_kpts)
     if (mo_coeff_kpts.ndim != 3 or
@@ -309,10 +285,10 @@ def build_mmn(cell, mo_coeff_kpts, kpts, kmesh=None, topology=None):
     reciprocal_steps = np.asarray([
         topology.reciprocal_step(direction) for direction in range(3)])
 
-    bvkmesh = _commensurate_bvkmesh(cell, kpts, kmesh)
+    bvkmesh = _commensurate_bvkmesh(cell, topology)
     ft_opt = ft_ao.FTOpt(cell, bvkmesh)
     ft_opt.permutation_symmetry = False
-    ft_kernel = ft_opt.gen_ft_kernel(kpts=kpts)
+    ft_kernel = ft_opt.gen_ft_kernel(kpts=topology)
 
     # With k_j = k and Gv = -b, raw[k,d] is <f_mu,k+b | f_nu,k>.
     # Its adjoint gives the forward link while sharing kpts for all directions.

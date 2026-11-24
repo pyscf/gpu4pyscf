@@ -32,6 +32,8 @@ class KPointSampling:
     Args:
         lattice_vectors : array_like, shape (3, 3)
             Lattice vectors as rows, in Bohr.
+        kpts_scaled : array_like, shape (nkpts, 3)
+            Fractional reciprocal coordinates.
 
     Attributes:
         lattice_vectors : numpy.ndarray, shape (3, 3)
@@ -41,6 +43,8 @@ class KPointSampling:
             Cartesian k-points in Bohr^-1, in input order.
         kpts_scaled : numpy.ndarray, shape (nkpts, 3)
             Fractional reciprocal coordinates.
+        weights : numpy.ndarray, shape (nkpts,)
+            Equal integration weights, normalized to sum to one.
         kmesh : numpy.ndarray, shape (3,), or None
             Sampling dimensions passed to cell.make_kpts, not BvK dimensions.
             None for explicit coordinates.
@@ -53,13 +57,14 @@ class KPointSampling:
             Also None when the generation parameters are unknown.
     '''
 
-    def __init__(self, lattice_vectors):
-        self.lattice_vectors = np.array(lattice_vectors, dtype=np.float64, copy=True)
-        self.kpts_scaled = None
-        self.kmesh = None
-        self.wrap_around = None
-        self.with_gamma_point = None
-        self.scaled_center = None
+    kmesh = None
+    wrap_around = None
+    with_gamma_point = None
+    scaled_center = None
+
+    def __init__(self, lattice_vectors, kpts_scaled):
+        self.lattice_vectors = np.asarray(lattice_vectors, dtype=np.float64)
+        self.kpts_scaled = np.asarray(kpts_scaled, dtype=np.float64)
 
     @classmethod
     def from_mesh(cls, cell, kmesh, wrap_around=WRAP_AROUND,
@@ -73,33 +78,31 @@ class KPointSampling:
         '''
         if space_group_symmetry or time_reversal_symmetry:
             raise NotImplementedError('K-point symmetry reduction is not supported')
-        # cell may be an instance of GPU Cell, which overrides make_kpts method.
+        # Call the make_kpts function from pyscf module. cell may be an instance
+        # of GPU Cell, which overrides make_kpts method.
         kpts = make_kpts(cell, kmesh, wrap_around, with_gamma_point, scaled_center)
-        self = cls.from_kpts(cell, kpts)
+        self = cls(cell.lattice_vectors(), cell.get_scaled_kpts(kpts))
         self.kmesh = np.asarray(kmesh)
-        self.with_gamma_point = with_gamma_point
         self.wrap_around = wrap_around
+        self.with_gamma_point = with_gamma_point
         if scaled_center is not None:
-            self.scaled_center = np.asarray(scaled_center)
+            self.scaled_center = np.asarray(scaled_center, dtype=np.float64)
         return self
 
     @classmethod
     def gamma_point(cls, cell):
         '''Create a single Gamma-point sampling with kmesh (1, 1, 1).'''
-        kpts = cls(cell.lattice_vectors())
-        kpts.kpts_scaled = np.zeros((1, 3))
-        kpts.kmesh = np.asarray([1, 1, 1])
-        kpts.with_gamma_point = True
-        kpts.wrap_around = True
-        return kpts
+        self = cls(cell.lattice_vectors(), np.zeros((1, 3)))
+        self.kmesh = np.array([1, 1, 1])
+        self.with_gamma_point = True
+        self.wrap_around = True
+        return self
 
     @classmethod
     def from_kpts(cls, cell, kpts):
         if isinstance(kpts, KPointSampling):
             return kpts
-        self = cls(cell.lattice_vectors())
-        self.kpts_scaled = cell.get_scaled_kpts(np.asarray(kpts))
-        return self
+        return cls(cell.lattice_vectors(), cell.get_scaled_kpts(np.asarray(kpts)))
 
     @property
     def kpts(self):
@@ -112,6 +115,10 @@ class KPointSampling:
     @property
     def nkpts(self):
         return len(self.kpts_scaled)
+
+    @property
+    def weights(self):
+        return np.full(self.nkpts, 1.0 / self.nkpts)
 
     def __len__(self):
         return self.nkpts
@@ -147,12 +154,11 @@ class KPointSampling:
     @classmethod
     def loads(cls, text):
         state = json.loads(text)
-        self = cls(state['lattice_vectors'])
-        for key, dtype in (('kpts_scaled', float), ('kmesh', int),
-                           ('scaled_center', float)):
+        self = cls(state['lattice_vectors'], state['kpts_scaled'])
+        for key in ['kmesh', 'scaled_center']:
             value = state[key]
             if value is not None:
-                value = np.asarray(value, dtype=dtype)
+                value = np.asarray(value)
             setattr(self, key, value)
         self.wrap_around = state['wrap_around']
         self.with_gamma_point = state['with_gamma_point']

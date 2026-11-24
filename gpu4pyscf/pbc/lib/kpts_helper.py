@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
+from pyscf.pbc.gto.cell import make_kpts
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
@@ -370,8 +371,7 @@ def _get_kmesh(cell, kpts, bvkmesh=None):
         kmesh[kmesh % 2 == 0] //= 2
 
     if np.prod(kmesh) == len(kpts):
-        reference = cell.make_kpts(kmesh, with_gamma_point=with_gamma_point)
-        reference = _as_kpts_array(reference)
+        reference = make_kpts(cell, kmesh, with_gamma_point=with_gamma_point)
         diff = cell.get_scaled_kpts(reference - kpts)
         # Handle wrap_around=True. Equivalent k-points can differ by integer
         diff -= np.rint(diff)

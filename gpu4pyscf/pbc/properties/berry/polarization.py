@@ -26,6 +26,7 @@ import numpy as np
 import cupy as cp
 
 from pyscf.data import nist
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 from gpu4pyscf.pbc.properties.berry.berry_phase import (
     berry_phase,
     diagonal_wannier_centers,
@@ -199,7 +200,8 @@ def _sum_diagonal_centers(centers, kmesh, direction):
 
 
 def _prepare_input(mf, kmesh, wannier_gauge=None):
-    topology = KPointMesh(mf.cell, mf.kpts, kmesh)
+    kpts, _ = _normalize_kpts(mf.cell, mf.kpts)
+    topology = KPointMesh.from_ksampling(mf.cell, kpts, kmesh)
     coeff = _occupied_coefficients(mf)
     coeff = _apply_wannier_gauge(coeff, wannier_gauge)
     return topology, coeff
