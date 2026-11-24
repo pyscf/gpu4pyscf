@@ -25,10 +25,6 @@ from pyscf.gto import (
     conc_env)
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
-from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.lib.kpts_helper import (
-    kpts_to_bvkmesh, conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh,
-    _as_kpts_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, transpose_sum, ndarray, empty_aligned, hermi_triu,
@@ -37,7 +33,6 @@ from gpu4pyscf.lib.utils import splits_by_blocksize, nearest_power2
 from gpu4pyscf.gto.mole import (
     groupby, PTR_BAS_COORD, extract_pgto_params, SortedCell,
     PBCIntEnvVars, _scale_sp_ctr_coeff)
-from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import (
     get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern, libvhf_rys,
     int3c2e_scheme as mol_int3c2e_scheme)
@@ -45,6 +40,9 @@ from gpu4pyscf.pbc.df.ft_ao import (
     libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh,
+    _as_kpts_array)
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -64,23 +62,25 @@ THREADS = 256
 POOL_SIZE = 16384
 MAX_IMGS_PER_TASK = 31
 GOUT_WIDTH = 54
+SHM_SIZE = gpu_specs.shm_size - 1024
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
     r'''
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
-    kpts = _as_kpts_array(kpts)
+    input_kpts = kpts
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
     from gpu4pyscf.pbc.df.rsdf_builder import _unpack_cderi_v2
-    is_gamma_point = kpts is None or is_zero(kpts)
-    if kpts is not None and kpts.ndim == 1: # single k-point
+    is_gamma_point = kpts.is_gamma_only()
+    if is_single_kpt:
         assert is_gamma_point
 
     if bvkmesh is None:
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut*10)
 
     if not is_gamma_point:
-        kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
+        kmesh, with_gamma_point = _get_kmesh(cell, kpts.kpts, bvkmesh)
         assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
 
     nao = cell.nao
@@ -114,7 +114,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
 
     elif j_only:
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
-        kpts = cp.asarray(kpts).reshape(-1, 3)
+        kpts = cp.asarray(kpts.kpts)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         conj_mapping = cp.asarray(
             conj_kpts(kmesh, with_gamma_point), dtype=np.int32)
@@ -126,7 +126,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
     else:
         j3c = j3c.reshape(bvk_ncells, naux, len(pair_address))
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
-        kpts = cp.asarray(kpts).reshape(-1, 3)
+        kpts = cp.asarray(kpts.kpts)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
         conj_mapping = cp.asarray(
@@ -168,7 +168,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
         out = out.reshape(nkpts**2, -1)[order]
         out = out.reshape(nkpts, nkpts, naux, nao, nao).transpose(0,1,3,4,2)
 
-    if is_gamma_point and kpts is not None:
+    if is_gamma_point and input_kpts is not None:
         if j_only:
             out = out[None]
         else:
@@ -639,19 +639,20 @@ class SRInt3c2eOpt:
     pair_and_diag_indices = FTOpt.pair_and_diag_indices
 
     def contract_dm(self, dm, kpts=None, hermi=0, sort_output=True):
-        kpts = _as_kpts_array(kpts)
+        input_kpts = kpts
+        kpts, _ = _normalize_kpts(self.cell, kpts)
         assert dm.shape[1] == self.cell.nao
         if self.bvkmesh_Ls is None:
             self.build()
 
         if hermi != 1:
             dm = transpose_sum(dm, inplace=False)
-        if kpts is None:
+        if input_kpts is None:
             assert dm.dtype == np.float64
-        elif is_zero(kpts):
+        elif kpts.is_gamma_only():
             dm = cp.asarray(dm.real, order='C')
         else:
-            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts.kpts).T))
             dm = contract('Lk,kpq->Lpq', expLk, dm)
             dm = cp.asarray(dm.real, order='C')
             dm *= 1./len(kpts)
@@ -728,7 +729,6 @@ class SRInt3c2eOpt:
         """
         kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
         is_gamma_point = kpts.is_gamma_only()
-        kpts = kpts.kpts
         assert auxvec.dtype == np.float64
         assert auxvec.ndim == 1
         assert len(auxvec) == self.auxcell.nao
@@ -800,7 +800,7 @@ class SRInt3c2eOpt:
             vj = vj.reshape(1,nao,nao)
         else:
             nkpts = len(kpts)
-            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts.kpts).T))
             expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
             vj = contract('Lkz,pLq->kpqz', expLkz, vj)
             vj = vj.view(np.complex128)[:,:,:,0]

@@ -21,7 +21,6 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df import aft as aft_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -43,8 +42,7 @@ from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    fft_matrix, kk_adapted_iter, conj_kpts)
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+    fft_matrix, kk_adapted_iter, conj_kpts, kpts_to_bvkmesh, _normalize_kpts)
 from gpu4pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff
 
 
@@ -55,11 +53,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     Computes the first-order derivatives (nuclear gradients and strain
     derivatives) of the energy contributions from J and K terms per atom.
     '''
-    if kpts is None or kpts.ndim == 1:
+    kpts, is_single_kpt = _normalize_kpts(int3c2e_opt.cell, kpts)
+    if is_single_kpt:
         assert dm.ndim == 2
         assert dm.dtype == np.float64
-        if kpts is not None:
-            assert is_zero(kpts)
+        assert kpts.is_gamma_only()
         return rhf._get_ejk_derivatives(
             int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose,
             linear_dep_threshold)
@@ -107,6 +105,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     naux = int(aux_loc[-1])
 
     assert nkpts == len(kpts)
+    sampling = kpts
+    kpts = kpts.kpts
     expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
@@ -674,7 +674,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         # The k_factor was previously scaled by 1/nkpts^2.
         k_factor *= nkpts**2
         de_ewald = int1e.ovlp_derivatives(cell, k_dm, kpts, bvkmesh)
-        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, sampling, -omega)
         de_ewald *= -.5 * k_factor * exx_0 / nkpts
         ejk_sigma += de_ewald
 
@@ -689,6 +689,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
     Computes the first-order derivatives of the Coulomb energy
     '''
     cell = int3c2e_opt.cell
+    kpts, _ = _normalize_kpts(cell, kpts)
     auxcell = int3c2e_opt.auxcell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
@@ -709,7 +710,7 @@ def _get_ej_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
     nao = dm.shape[-1]
     naux = int(aux_loc[-1])
 
-    if kpts is None or is_zero(kpts):
+    if kpts.is_gamma_only():
         dm = cp.asarray(dm.real, order='C')
         nkpts = 1
     else:
@@ -1063,13 +1064,11 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
         int3c2e_opt, dm, kpts, hermi, omega, verbose, linear_dep_threshold)[:-3]
 
 def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbose=None):
+    kpts, _ = _normalize_kpts(cell, kpts)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
-    is_single_kpt = kpts is not None and kpts.ndim == 1
-    is_gamma_point = kpts is None or is_zero(kpts)
-    if is_single_kpt:
-        kpts = kpts.reshape(1, 3)
+    is_gamma_point = kpts.is_gamma_only()
     if is_gamma_point:
         bvkmesh = np.ones(3, dtype=int)
     else:
@@ -1101,7 +1100,7 @@ def get_pp_loc_part1_grad(cell, dm, kpts=None, hermi=0, with_pseudo=True, verbos
         dm = transpose_sum(dm, inplace=True)
         dm[:] *= .5
 
-    if kpts is None or is_zero(kpts):
+    if kpts.is_gamma_only():
         dm = cp.asarray(dm.real, order='C')
         nkpts = 1
     else:
