@@ -33,11 +33,13 @@ A chiatta node has 8 Max 1550 cards = 16 GPU tiles (`ONEAPI_DEVICE_SELECTOR=leve
 visible) and runs one pytest process per tile with `ZE_AFFINITY_MASK=<tile>`, so every
 process stays on the supported single-device code path. Each tile process is bound to its
 card's NUMA node with `numactl --cpunodebind` (taskset fallback), which also keeps the
-oneTBB/MKL thread arenas node-sized. Per-tile parallelism: `SYCL_TILE_WORKERS` (default 2
-pytest-xdist workers) and `SYCL_TILE_OMP` (default 4 OpenMP threads). Per-tile logs land in
+oneTBB/MKL thread arenas node-sized. **Never more than one test process on a tile at any
+time:** each tile runs a single sequential pytest (no pytest-xdist `-n`), because several
+processes sharing a tile caused GPU page faults and wrong results. `SYCL_TILE_OMP` (default 4)
+sets the OpenMP threads per tile process. Per-tile logs land in
 `ci-logs/test/60_pytest_tile<N>.log`; the job fails if any tile fails. Test selection is
 identical to the upstream single-GPU CUDA CI (`-m 'not slow and not benchmark and not
-special' -k 'not _high_cost'`).
+special' -k 'not _high_cost'`); only the parallelism differs (tiles, not xdist).
 
 ## Pull requests of the upstream GitHub repo
 
@@ -163,9 +165,9 @@ from the GitHub accounts noted below.
 
 Optional: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_ALLOWED_ASSOCIATIONS` (default
 OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `SYCL_TESTS`,
-`SYCL_TILES`, `SYCL_TILE_WORKERS`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `USE_MODULES`,
+`SYCL_TILES`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `USE_MODULES`,
 `SYCL_MODULES`, `SYCL_MODULE_PATH`, `SYCL_CI_ENV_FILE`, `CI_ROOT`,
-`ZE_DRIVER_DIR`, `PYTEST_WORKERS`.
+`ZE_DRIVER_DIR`.
 
 GitHub-side (optional, same-repo PRs only): secrets `JLSE_GITLAB_PROJECT` (project ID
 or URL-encoded path) and `JLSE_GITLAB_TRIGGER_TOKEN`, plus variables `JLSE_GITLAB_API`,
@@ -194,6 +196,15 @@ build/test jobs that execute untrusted PR code.** So:
   it, so keep tokens out of the logs (masked variables are redacted in job logs).
 
 ## Reporting behavior
+
+**Log visibility for PR viewers:** gitlab.jlse is Private-only, so GitLab pipeline/job
+links need a login. The public copy is the gist that the `SYCL CI` status's **Details**
+link opens: `00_SUMMARY.md` first -- **where it failed** (job + stage + reason, written by
+`ci_sycl.sh`'s `fail` into `ci-logs/<job>/00_failure.log`), device, per-tile test totals,
+crashes/timeouts, every failing test with **how it failed** (raising location + `E` lines),
+build errors with context, env-solve and import/sanity errors -- then each log. pytest logs keep their **full FAILURES section** (all tracebacks plus
+the short summary); other logs keep their last 400 lines. The status description itself says
+e.g. `SYCL CI failed: 3 failed tests`. Full logs stay in the GitLab job artifacts (2 weeks).
 
 One GitHub check per PR head: the poller posts a `pending` `SYCL CI` status when a
 pipeline starts (`poll_prs.py`), and the `report-*` jobs post the final

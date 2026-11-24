@@ -19,8 +19,8 @@
 #         NUMA node).
 #
 # CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_ARCHITECTURES, CI_ROOT,
-# ZE_DRIVER_DIR, PYTEST_WORKERS; SYCL_TILES (default: all visible GPU tiles), SYCL_TILE_WORKERS,
-# SYCL_TILE_OMP; USE_MODULES (default 1: toolchain from system modules), SYCL_MODULES,
+# ZE_DRIVER_DIR; SYCL_TILES (default: all visible GPU tiles; never more than one test process
+# per tile), SYCL_TILE_OMP; USE_MODULES (default 1: toolchain from system modules), SYCL_MODULES,
 # SYCL_MODULE_PATH, SYCL_CI_ENV_FILE; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
 # GITLAB_TRIGGER_TOKEN, GITHUB_GIST_TOKEN, GITHUB_STATUS_TOKEN, GITHUB_READ_TOKEN.
 # See .github/jlse/ci_sycl.sh, poll_prs.py and report_pr.py.
