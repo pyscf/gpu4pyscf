@@ -20,7 +20,7 @@ from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
 from gpu4pyscf.lib.cupy_helper import asarray, batched_vec_norm2
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_weights, get_SI
-from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 from gpu4pyscf.pbc.lib.kpts import KPointSampling
 
 def fft(f, mesh):
@@ -265,14 +265,11 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
         if kpts is None:
-            Nk = 1
-            kpts = np.zeros((1, 3))
             if mf is not None:
                 raise DeprecationWarning(
                     'Accessing kpts via mf.kpts is deprecated. '
                     'kpts should be passed to get_coulG explicitly.')
-        else:
-            assert isinstance(kpts, KPointSampling) or _as_kpts_array(kpts).ndim == 2
+        kpts, _ = _normalize_kpts(cell, kpts)
         Nk = len(kpts)
         coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega)
     return coulG
@@ -306,12 +303,11 @@ def madelung(cell, kpts=None, omega=None):
             Probe-charge correction in Hartree, used as the occupied-orbital
             energy shift for the Ewald exchange-divergence correction.
     '''
-    if kpts is None:
-        Nk = np.array([1,1,1])
-    elif isinstance(kpts, KPointSampling) and kpts.kmesh is not None:
+    kpts, _ = _normalize_kpts(cell, kpts)
+    if isinstance(kpts, KPointSampling) and kpts.kmesh is not None:
         Nk = kpts.kmesh
     else:
-        Nk = get_monkhorst_pack_size(cell, kpts.reshape(-1, 3))
+        Nk = get_monkhorst_pack_size(cell, kpts.kpts)
     ecell = cell.copy(deep=False)
     ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
     ecell._env = np.append(cell._env, [0., 0., 0.])

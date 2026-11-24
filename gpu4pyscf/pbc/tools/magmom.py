@@ -22,6 +22,7 @@ from pyscf import scf
 from pyscf import gto
 from pyscf.data import elements
 from gpu4pyscf.lib import logger
+from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array, _normalize_kpts
 
 
 __all__ = [
@@ -284,14 +285,7 @@ def get_init_guess_with_magmom(cell, kpts, magmoms_dict, method='spin_sad',
         raise TypeError('magmoms_dict must be a dict of atom indices and moments')
     magmoms = magmoms_dict
 
-    kpts = np.asarray(kpts)
-    if kpts.shape == (3,):
-        kpts = kpts.reshape(1, 3)
-    if kpts.ndim != 2 or kpts.shape[1] != 3 or len(kpts) == 0:
-        raise ValueError('kpts must have shape (nkpts, 3) with nkpts > 0')
-    if (not np.issubdtype(kpts.dtype, np.number) or np.iscomplexobj(kpts) or
-            not np.isfinite(kpts).all()):
-        raise ValueError('kpts must contain only finite real coordinates')
+    kpts, _ = _normalize_kpts(cell, kpts)
 
     for ia, magmom in magmoms.items():
         if isinstance(ia, (bool, np.bool_)) or not isinstance(ia, numbers.Integral):
@@ -301,8 +295,6 @@ def get_init_guess_with_magmom(cell, kpts, magmoms_dict, method='spin_sad',
         if (isinstance(magmom, (bool, np.bool_)) or
                 not isinstance(magmom, numbers.Real)):
             raise TypeError(f'Magnetic moment for atom {ia} must be a real number')
-        if not np.isfinite(magmom):
-            raise ValueError(f'Magnetic moment for atom {ia} must be finite')
 
     nkpts = len(kpts)
     nelectron = cell.tot_electrons(nkpts)
@@ -326,8 +318,6 @@ def get_init_guess_with_magmom(cell, kpts, magmoms_dict, method='spin_sad',
         if dm_init.shape != (2, nkpts, nao, nao):
             raise ValueError(
                 f'dm_init must have shape (2, {nkpts}, {nao}, {nao})')
-        if not cp.isfinite(dm_init).all():
-            raise ValueError('dm_init must contain only finite values')
 
     # Preserve the native initial guess exactly when no spin polarization was
     # requested. In particular, keep any tagged orbital information.

@@ -9,6 +9,7 @@ import pytest
 from pyscf.pbc import gto
 from pyscf.pbc.tools import pbc as cpu_tools
 from gpu4pyscf.pbc.tools import pbc
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 
 
 @pytest.mark.parametrize('omega', [0., .8, -.8])
@@ -72,3 +73,18 @@ def test_madelung_off_gamma():
     gamma_kpts = cell.make_kpts(sampling_mesh)
     np.testing.assert_allclose(actual, pbc.madelung(cell, gamma_kpts),
                                atol=1e-10, rtol=0)
+
+
+@pytest.mark.parametrize('omega', [0., .5, -.5])
+def test_madelung_sampling(omega):
+    cell = gto.M(atom='He 0 0 0', basis='sto-3g',
+                 a=[[5., 0., 0.], [1., 6., 0.], [0., 1., 7.]],
+                 unit='Bohr', precision=1e-10, verbose=0)
+    sampling = KPointSampling.from_mesh(
+        cell, [2, 3, 1], wrap_around=True, scaled_center=[.25, 0, 0])
+    reference = cpu_tools.madelung(cell, sampling.kpts, omega)
+    np.testing.assert_allclose(pbc.madelung(cell, sampling, omega),
+                               reference, atol=1e-10, rtol=0)
+    explicit = KPointSampling.from_kpts(cell, sampling.kpts)
+    np.testing.assert_allclose(pbc.madelung(cell, explicit, omega),
+                               reference, atol=1e-10, rtol=0)
