@@ -84,33 +84,12 @@ become public and may contain internal hostnames/paths.
 Variables: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_MAX_TRIGGERS` (default 2 per
 poll), `PR_ALLOWED_ASSOCIATIONS`, `GITLAB_TRIGGER_TOKEN` (default: the job token).
 
-## Triggering directly from GitHub (optional)
+## Triggering
 
-The poller is latency-bound (one schedule interval). `.github/workflows/sycl-jlse-ci.yml`
-additionally triggers a pipeline immediately on every PR open/update (and on an
-`@sycl-jlse` PR comment) via the GitLab trigger API, passing `PR_NUMBER`, `PR_SHA`
-and `PR_REPO`. It needs these GitHub secrets on the repo that receives the PR:
-
-- `JLSE_GITLAB_PROJECT` -- GitLab project ID or URL-encoded path on gitlab.jlse.anl.gov
-- `JLSE_GITLAB_TRIGGER_TOKEN` -- a project trigger token
-
-Optional variables: `JLSE_GITLAB_API` (default `https://gitlab.jlse.anl.gov/api/v4`),
-`JLSE_GITLAB_REF` (trusted ref to check out, default `main`).
-
-Fork PRs never receive secrets, so the workflow skips the API call there and the
-scheduled poller remains the path for them. Either way, the pipeline's `report-*`
-jobs publish the logs to GitHub (gist + commit status) when `GITHUB_GIST_TOKEN` /
-`GITHUB_STATUS_TOKEN` are set as GitLab CI/CD variables.
-
-Notes:
-
-- The `@sycl-jlse` comment trigger is gated to PR comments by
-  OWNER/MEMBER/COLLABORATOR authors, mirroring the poller's
-  `PR_ALLOWED_ASSOCIATIONS` default; anyone else is ignored.
-- For allowed authors the poller may trigger the same head SHA a second time
-  (it is keyed on SHA, not on how the pipeline was started), so a PR update can
-  build twice on chiatta. Harmless, just slower; raise the poll interval if it
-  becomes expensive.
+There is no GitHub-side workflow: GitHub cannot reach gitlab.jlse (private,
+behind ANL) and fork PRs get no repository secrets, so the scheduled poller is
+the single trigger path for every PR (forks and drafts included). The only
+SYCL check on a PR is the `SYCL CI` commit status posted back by the pipeline.
 
 ## Minimum setup: CI logs visible on the GitHub PR
 
@@ -160,7 +139,7 @@ from the GitHub accounts noted below.
 | `GITHUB_STATUS_TOKEN` | commit-status write on `pyscf/gpu4pyscf` (`repo` classic, or fine-grained Commit statuses: write on that repo) | an account with **write** access to `pyscf/gpu4pyscf` — a pyscf maintainer; NOT mintable by fork-only contributors | `curl -H "Authorization: Bearer $T" https://api.github.com/repos/pyscf/gpu4pyscf -q .permissions` → `push: true` |
 | `GITHUB_COMMENT_TOKEN` | `public_repo` (classic) or Issues: write (fine-grained) on the public repo | **any GitHub account** — commenting on a public repo needs no upstream write access. This is the fallback when no maintainer token is available: `report_pr.py` posts a PR comment with the result + log link | `curl -H "Authorization: Bearer $T" -X POST https://api.github.com/repos/pyscf/gpu4pyscf/issues/1/comments -d '{"body":"test"}' (then delete it) |
 | `GITHUB_READ_TOKEN` (optional) | public repo read | any account | raises the poller's anonymous API rate limit |
-| `GITLAB_TRIGGER_TOKEN` (optional) | project trigger token | create at project Settings > CI/CD > Pipeline trigger tokens; defaults to the job token | used by `poll_prs.py` and `sycl-jlse-ci.yml` |
+| `GITLAB_TRIGGER_TOKEN` (optional) | project trigger token | create at project Settings > CI/CD > Pipeline trigger tokens; defaults to the job token | used by `poll_prs.py` |
 | `POLL_PRS=true` | schedule variable | set on a CI/CD schedule (every 5-10 min) | poller runs, prints held/triggered PRs |
 
 Optional: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_ALLOWED_ASSOCIATIONS` (default
@@ -170,9 +149,6 @@ OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `PR_SKIP_
 `SYCL_MODULES`, `SYCL_MODULE_PATH`, `SYCL_CI_ENV_FILE`, `CI_ROOT`,
 `ZE_DRIVER_DIR`.
 
-GitHub-side (optional, same-repo PRs only): secrets `JLSE_GITLAB_PROJECT` (project ID
-or URL-encoded path) and `JLSE_GITLAB_TRIGGER_TOKEN`, plus variables `JLSE_GITLAB_API`,
-`JLSE_GITLAB_REF` -- used by `.github/workflows/sycl-jlse-ci.yml`.
 
 ## Security
 

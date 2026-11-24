@@ -25,8 +25,8 @@ name: SYCL CPU CI
 
 on:
   # DEACTIVATED: SYCL CI runs on JLSE chiatta (Intel PVC) via .gitlab-ci.yml on
-  # gitlab.jlse.anl.gov, triggered per PR by .github/workflows/sycl-jlse-ci.yml
-  # or by the scheduled PR poller (see .github/jlse/README.md). This CPU/OpenCL
+  # gitlab.jlse.anl.gov, triggered per PR by the scheduled GitLab PR poller
+  # (see .github/jlse/README.md). This CPU/OpenCL
   # build is kept for manual runs only (Actions tab -> Run workflow).
   workflow_dispatch: {}
 
