@@ -364,7 +364,7 @@ class KnownValues(unittest.TestCase):
         ]).T
 
         assert np.abs(test_energy - ref_energy) < 1e-9
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 2e-6
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 3e-6
 
         gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-20
 

@@ -42,6 +42,36 @@ def github(path):
         return json.load(r)
 
 
+def github_post(path, payload, token):
+    req = urllib.request.Request("https://api.github.com" + path,
+                                 json.dumps(payload).encode(), method="POST")
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Accept", "application/vnd.github+json")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def post_pending_status(sha, pipeline_url):
+    """Mark the PR head as 'pending' so GitHub shows the check running.
+
+    Same context ("SYCL CI") as the final status in report_pr.py, so GitHub
+    groups them into ONE check entry per PR head. Needs GITHUB_STATUS_TOKEN
+    (write access on the upstream repo -- a maintainer); skipped otherwise.
+    """
+    tok = os.environ.get("GITHUB_STATUS_TOKEN")
+    if not tok:
+        return
+    try:
+        github_post("/repos/%s/statuses/%s" % (REPO, sha), {
+            "state": "pending",
+            "context": "SYCL CI",
+            "description": "SYCL CI running (build + tests)",
+            "target_url": pipeline_url}, tok)
+        print("posted pending status on %s@%s" % (REPO, sha[:10]))
+    except Exception as e:
+        print("pending status failed (non-fatal): %s" % e)
+
+
 def trigger(pr, sha):
     api = os.environ["CI_API_V4_URL"]
     data = urllib.parse.urlencode({
@@ -53,7 +83,9 @@ def trigger(pr, sha):
     }).encode()
     url = "%s/projects/%s/trigger/pipeline" % (api, os.environ["CI_PROJECT_ID"])
     with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30) as r:
-        return json.load(r).get("web_url", "?")
+        web_url = json.load(r).get("web_url", "?")
+    post_pending_status(sha, web_url)
+    return web_url
 
 
 def main():
