@@ -3,6 +3,10 @@
 We welcome contributions from everyone. Please follow the guidelines below when
 adding features to the library for PySCF functions running on GPU devices.
 
+For changes to GPU kernels, backend dispatch, or build configuration, follow the
+[coding style recipe](agent-recipes/skills/gpu4pyscf-coding-style.template.md).
+See [Agent Recipes](agent-recipes/README.md) for how to use or customize the recipe.
+
 ## Principles
 
 * Functions in GPU4PySCF are meant to be performance-optimized versions of
