@@ -108,8 +108,7 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     if is_zero(kpts_band):
         vj_kpts = vj_kpts.real
-    return _format_jks(vj_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(vj_kpts, dm_kpts, input_band, input_kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
                omega=None, lr_factor=None, sr_factor=None):

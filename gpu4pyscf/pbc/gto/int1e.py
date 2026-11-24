@@ -21,7 +21,6 @@ from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc.gto import Cell
 from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.tools.pbc import super_cell
-from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.lib.cupy_helper import (
@@ -32,7 +31,7 @@ from gpu4pyscf.gto.mole import (
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kpts_to_bvkmesh, _normalize_kpts, _format_kpts_array)
+    kpts_to_bvkmesh, _normalize_kpts)
 
 L_AUX_MAX = 6
 THREADS = 256
@@ -216,8 +215,10 @@ class _Int1eOpt:
               out=None, buf=None, shls_slice=None):
         if isinstance(self.cell, Mole):
             kpts, is_single_kpt = np.zeros((1, 3)), True
+            is_gamma_point = True
         else:
             kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+            is_gamma_point = kpts.is_gamma_only()
             kpts = kpts.kpts
         if comp == 1:
             gout_width = 36
@@ -262,7 +263,6 @@ class _Int1eOpt:
         if err != 0:
             raise RuntimeError(f'{kern} failed')
 
-        is_gamma_point = is_zero(kpts)
         if isinstance(cell, Mole) or is_gamma_point:
             if ncells > 1: # corresponding to self.bvkmesh is None
                 mat = mat.sum(axis=0)
@@ -302,8 +302,11 @@ class _Int1eOpt:
     def _derivatives_intor(self, dm, kern, deriv, kpts=None):
         if isinstance(self.cell, Mole):
             kpts = np.zeros((1, 3))
+            is_gamma_point = True
         else:
-            kpts, _ = _format_kpts_array(kpts)
+            kpts, _ = _normalize_kpts(self.cell, kpts)
+            is_gamma_point = kpts.is_gamma_only()
+            kpts = kpts.kpts
         cell = self.cell
         dm = cell.apply_C_mat_CT(dm)
         nkpts = len(kpts)
@@ -314,7 +317,6 @@ class _Int1eOpt:
         else:
             dm = dm.sum(axis=0)
 
-        is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dm.dtype == np.float64
         else:

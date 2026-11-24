@@ -26,7 +26,9 @@ from pyscf.gto import (
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh,
+    _as_kpts_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, transpose_sum, ndarray, empty_aligned, hermi_triu,
@@ -42,8 +44,6 @@ from gpu4pyscf.df.int3c2e_bdiv import (
 from gpu4pyscf.pbc.df.ft_ao import (
     libpbc, most_diffuse_pgto, FTOpt, ft_ao_scheme)
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.lib.kpts_helper import (
-    conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -70,6 +70,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
+    kpts = _as_kpts_array(kpts)
     from gpu4pyscf.pbc.df.rsdf_builder import _unpack_cderi_v2
     is_gamma_point = kpts is None or is_zero(kpts)
     if kpts is not None and kpts.ndim == 1: # single k-point
@@ -135,7 +136,8 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
         # Auxiliary momentum q = kj - ki. It includes Gamma even when the
         # orbital kpoints mesh is shifted. bvkmesh is the larger BvK mesh.
         # len(bvkmesh_Ls) != len(qpts) for off-gamma kpts
-        qpts = cp.asarray(auxcell.make_kpts(kmesh, with_gamma_point=True))
+        qpts = cp.asarray(_as_kpts_array(
+            auxcell.make_kpts(kmesh, with_gamma_point=True)))
         expLq_conj = cp.exp(-1j*bvkmesh_Ls.dot(qpts.T))
         expLq_conjz = expLq_conj.view(np.float64).reshape(nL,nkpts,2)
         j3c = contract('Lqt,LKz->Kqtz', j3c, expLq_conjz)
@@ -637,6 +639,7 @@ class SRInt3c2eOpt:
     pair_and_diag_indices = FTOpt.pair_and_diag_indices
 
     def contract_dm(self, dm, kpts=None, hermi=0, sort_output=True):
+        kpts = _as_kpts_array(kpts)
         assert dm.shape[1] == self.cell.nao
         if self.bvkmesh_Ls is None:
             self.build()
@@ -723,7 +726,9 @@ class SRInt3c2eOpt:
         kpts follows the PySCF kpts convention; see
         gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
         """
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         assert auxvec.dtype == np.float64
         assert auxvec.ndim == 1
         assert len(auxvec) == self.auxcell.nao
@@ -790,7 +795,7 @@ class SRInt3c2eOpt:
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
-        if is_zero(kpts):
+        if is_gamma_point:
             vj = vj.sum(axis=1)
             vj = vj.reshape(1,nao,nao)
         else:

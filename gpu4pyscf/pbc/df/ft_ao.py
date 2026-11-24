@@ -86,7 +86,7 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
             Shape (nGv, nao, nao) for single-point input or
             (nkpts, nGv, nao, nao) for batched input.
     '''
-    kptjs, is_single_kpt = _normalize_kpts(kptjs)
+    kptjs, is_single_kpt = _normalize_kpts(cell, kptjs)
     if q is None:
         q = np.zeros(3)
     ft_kernel = gen_ft_kernel(cell, kptjs)
@@ -154,7 +154,7 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
     The output tensor is saved in the shape [nGv, nao, nao] for single k-point
     case and [nkpts, nGv, nao, nao] for multiple k-points
     '''
-    normalized_kpts, _ = _normalize_kpts(kpts)
+    normalized_kpts, _ = _normalize_kpts(cell, kpts)
     bvkmesh = kpts_to_bvkmesh(cell, normalized_kpts, bound_by_supmol=True)
     opt = FTOpt(cell, bvkmesh)
     opt.permutation_symmetry = False
@@ -513,7 +513,8 @@ class FTOpt:
             image_conj_mapping = cp.asarray(image_conj_mapping, dtype=np.int32)
 
         cell = self.cell
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        kpts = kpts.kpts
         kmesh_cached, with_gamma_point_cached = _get_kmesh(cell, kpts, self.bvkmesh)
         conj_mapping = None
         if self.permutation_symmetry:
@@ -559,8 +560,9 @@ class FTOpt:
                 Gv = cp.asarray(Gv) + cp.asarray(q)
 
             assert kpts is None or kpts is kpts_cached
-            kpts, is_single_kpt = _normalize_kpts(kpts_cached)
-            kpts_is_gamma_point = is_zero(kpts)
+            kpts, is_single_kpt = _normalize_kpts(cell, kpts_cached)
+            kpts_is_gamma_point = kpts.is_gamma_only()
+            kpts = kpts.kpts
             kmesh = kmesh_cached
             with_gamma_point = with_gamma_point_cached
 
@@ -666,7 +668,9 @@ class FTOpt:
         gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
         '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         cell = self.cell
         nsp_per_block, gout_stride, shm_size = ft_ao_scheme(nGv_per_block=16)
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -705,7 +709,7 @@ class FTOpt:
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 
-        if is_zero(kpts):
+        if is_gamma_point:
             if bvk_ncells != 1:
                 vj = vj.sum(axis=1)[None]
             else:

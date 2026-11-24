@@ -92,8 +92,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
                 aow = ao * vR[i,p0:p1,None]
                 vj_kpts[i,k] += ao.conj().T.dot(aow)
 
-    return _format_jks(vj_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, kpts)
+    return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
@@ -207,8 +206,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
             for i in range(nset):
                 vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
 
-    return _format_jks(vk_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(vk_kpts, dm_kpts, input_band, input_kpts)
 
 def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
            with_j=True, with_k=True, exxdiv=None):
@@ -432,11 +430,9 @@ def _format_kpts_band(kpts_band, kpts):
     return np.reshape(kpts_band, (-1, 3))
 
 def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
-    '''Restore density dimensions using kpts in its original input form.
+    '''Restore output dimensions using the original sampling and band inputs.
 
     kpts_band must be None or a normalized (N, 3) array.
-    KPointSampling is always batched, including Gamma-only sampling; None
-    and a (3,) kpts array follow the single-point convention.
     '''
     if kpts_band is None or kpts_band is kpts:
         return v_kpts.reshape(dm_kpts.shape)
