@@ -20,7 +20,8 @@
 #
 # CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_ARCHITECTURES, CI_ROOT,
 # ZE_DRIVER_DIR, PYTEST_WORKERS; SYCL_TILES (default: all visible GPU tiles), SYCL_TILE_WORKERS,
-# SYCL_TILE_OMP; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
+# SYCL_TILE_OMP; USE_MODULES (default 1: toolchain from system modules), SYCL_MODULES,
+# SYCL_MODULE_PATH, SYCL_CI_ENV_FILE; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
 # GITLAB_TRIGGER_TOKEN, GITHUB_GIST_TOKEN, GITHUB_STATUS_TOKEN, GITHUB_READ_TOKEN.
 # See .github/jlse/ci_sycl.sh, poll_prs.py and report_pr.py.
 
@@ -40,6 +41,10 @@ stages:
 # same pieces its other runners use (id token, batch tag, ALCF proxy).
 .chiatta-runner:
   extends: .batch-runner
+  # If a PR pipeline is cancelled/superseded, report_pr.py posts an "error"
+  # status so the SYCL CI check on the PR does not stay pending forever.
+  after_script:
+    - '[ "$CI_JOB_STATUS" = canceled ] && [ -n "${PR_NUMBER:-}" ] && python3 .github/jlse/report_pr.py canceled || true'
   variables:
     # --jobname shows up in qstat, e.g. gpu4pyscf-sycl-build-p42.
     JLSE_SCHEDULER_PARAMETERS: "-n 1 -t 120 -q chiatta --jobname gpu4pyscf-$CI_JOB_NAME-p$CI_PIPELINE_IID"
@@ -70,6 +75,8 @@ stages:
 .pr-only-rules:
   rules:
     - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+    # manual smoke test: Run pipeline (web) with PR_NUMBER/PR_SHA/PR_REPO set
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PR_NUMBER'
 
 pr-poller:
   stage: poll

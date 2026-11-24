@@ -8,9 +8,22 @@ deactivated (manual `workflow_dispatch` only) in favor of real PVC GPU runs here
 | File | Role |
 |---|---|
 | `ci_sycl.sh` | `build` (fresh conda env per pipeline, PVC AOT build, tile 0) and `test <paths>` sharded over all tiles |
-| `env.yml` | conda env: nightly dpnp, dpctl, oneAPI 2026.2.0, test deps as in the CUDA CI |
+| `env.yml` | conda env (modules mode, default): **only** python + nightly dpnp/dpctl + test deps; toolchain from system modules |
+| `env-conda.yml` | fallback full conda env incl. oneAPI 2026.2.0 toolchain (`USE_MODULES=0`) |
 | `poll_prs.py` | scheduled job: finds new/updated upstream PRs and starts a pipeline for each |
 | `report_pr.py` | end of a PR pipeline: publishes logs (gist) and a commit status on the PR |
+
+## Toolchain: system modules (default) vs conda
+
+By default (`USE_MODULES=1`) the compiler toolchain comes from the node's system
+modules, loaded in `ci_sycl.sh setup_env`: `module use $SYCL_MODULE_PATH` (default
+`/soft/modulefiles`) then `module load $SYCL_MODULES` (default
+`intel/oneapi/release/2026.2.0 compiler mkl cmake`), which provides icx/icpx/ifx,
+MKL, TBB, cmake, the level-zero loader and ocloc. The conda env (`env.yml`) then
+only carries python 3.13, nightly dpnp/dpctl (`dppy/label/dev` + conda-forge), and
+small build/test tools. The GPU driver (`libze_intel_gpu`) always comes from the
+node via `ZE_DRIVER_DIR`. Set `USE_MODULES=0` to use the full conda toolchain from
+`env-conda.yml` instead; override the env file with `SYCL_CI_ENV_FILE`.
 
 ## Multi-tile testing
 
@@ -150,7 +163,8 @@ from the GitHub accounts noted below.
 
 Optional: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_ALLOWED_ASSOCIATIONS` (default
 OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `SYCL_TESTS`,
-`SYCL_TILES`, `SYCL_TILE_WORKERS`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `CI_ROOT`,
+`SYCL_TILES`, `SYCL_TILE_WORKERS`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `USE_MODULES`,
+`SYCL_MODULES`, `SYCL_MODULE_PATH`, `SYCL_CI_ENV_FILE`, `CI_ROOT`,
 `ZE_DRIVER_DIR`, `PYTEST_WORKERS`.
 
 GitHub-side (optional, same-repo PRs only): secrets `JLSE_GITLAB_PROJECT` (project ID

@@ -1,0 +1,42 @@
+# Conda environment for .gitlab-ci.yml (JLSE chiatta, Intel PVC) — MODULES MODE
+# (default, USE_MODULES=1): the toolchain (icx/icpx/ifx, MKL, TBB, cmake, level-zero
+# loader, IGC/ocloc) comes from the node's system modules loaded in ci_sycl.sh
+# (SYCL_MODULES, default "intel/oneapi/release/2026.2.0 compiler mkl cmake"), so this
+# env only carries python, the nightly dpnp/dpctl the SYCL port needs
+# (dpctl >= 0.23 for dpctl.compiler; nightly dpnp needs Python >= 3.13, and dpctl
+# must stay on conda-forge — its rc builds don't solve against oneAPI 2026.2.0),
+# and small build/test tools. Test deps match the CUDA CI (unittest.yml +
+# dockerfiles/ubuntu_devel): requirements.txt minus CUDA-only packages, plus MCFun,
+# pytest-xdist, pytest-cov, pytest-benchmark. The GPU driver (libze_intel_gpu)
+# still comes from the node via ZE_DRIVER_DIR in ci_sycl.sh.
+# Fallback with the full toolchain in conda: env-conda.yml (USE_MODULES=0).
+# Re-solved for every pipeline by ci_sycl.sh build into a per-pipeline prefix under
+# $CI_ROOT/envs; test jobs reuse the build job's env.
+name: sycl-jlse
+channels:
+  - dppy/label/dev
+  - conda-forge
+dependencies:
+  - python=3.13
+  - dppy/label/dev::dpnp>=0.21.0dev0
+  - dpctl>=0.23.0
+  - level-zero
+  - cmake
+  - ninja
+  - ccache
+  - patchelf
+  - numpy
+  - scipy
+  - h5py
+  - pytest
+  - pytest-benchmark
+  - pip
+  - pip:
+      - pyscf==2.14.0
+      - basis-set-exchange==0.11
+      - pyscf-dispersion==1.5.0
+      - geometric==1.1.0
+      - packaging~=24.0
+      - MCFun
+      - pytest-xdist
+      - pytest-cov

@@ -71,11 +71,13 @@ jobs:
               prNumber = context.payload.pull_request.number;
               sha = context.payload.pull_request.head.sha;
               baseRepo = context.payload.pull_request.base.repo.full_name;
+              ref = context.payload.pull_request.base.repo.default_branch;
             } else if (context.payload.issue && context.payload.issue.pull_request) {
               const pr = (await github.rest.pulls.get({
                 owner: context.repo.owner, repo: context.repo.repo,
                 pull_number: context.payload.issue.number})).data;
               prNumber = pr.number; sha = pr.head.sha; baseRepo = pr.base.repo.full_name;
+              ref = pr.base.repo.default_branch;
             } else {
               core.setFailed('@sycl-jlse only works in pull request comments.');
               return;
@@ -83,6 +85,7 @@ jobs:
             core.setOutput('number', prNumber);
             core.setOutput('sha', sha);
             core.setOutput('repo', baseRepo);
+            core.setOutput('ref', ref);
 
       - name: Trigger SYCL CI pipeline on gitlab.jlse
         id: trig
@@ -92,7 +95,7 @@ jobs:
         run: |
           resp=$(curl -fsS -X POST "$API/projects/$JLSE_PROJECT/trigger/pipeline" \
             --data-urlencode "token=$JLSE_TOKEN" \
-            --data-urlencode "ref=${{ vars.JLSE_GITLAB_REF || 'main' }}" \
+            --data-urlencode "ref=${{ steps.pr.outputs.ref || vars.JLSE_GITLAB_REF || 'main' }}" \
             --data-urlencode "variables[PR_NUMBER]=${{ steps.pr.outputs.number }}" \
             --data-urlencode "variables[PR_SHA]=${{ steps.pr.outputs.sha }}" \
             --data-urlencode "variables[PR_REPO]=${{ steps.pr.outputs.repo }}")

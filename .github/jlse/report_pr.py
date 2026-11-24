@@ -97,9 +97,9 @@ def main():
     status_token = os.environ.get("GITHUB_STATUS_TOKEN")
     if status_token and repo and sha:
         post("https://api.github.com/repos/%s/statuses/%s" % (repo, sha), {
-            "state": "success" if result == "success" else "failure",
+            "state": {"success": "success", "canceled": "error"}.get(result, "failure"),
             "context": "SYCL CI",
-            "description": "SYCL CI %s" % ("passed" if result == "success" else "failed"),
+            "description": "SYCL CI %s" % {"success": "passed", "canceled": "canceled"}.get(result, "failed"),
             "target_url": details}, status_token)
         print("posted commit status on %s@%s" % (repo, sha[:10]))
     elif not status_token:
