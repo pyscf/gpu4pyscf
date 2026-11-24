@@ -16,6 +16,7 @@
 import unittest
 from pyscf import lib
 from pyscf.pbc import gto
+from gpu4pyscf.gto.mole import Cell
 from gpu4pyscf.pbc.df import AFTDF
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
@@ -150,7 +151,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
     def test_df_kuhf_grad(self):
-        cell = gto.Cell()
+        cell = Cell()
         cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
         cell.a = '''
         0.00, 3.37, 3.37

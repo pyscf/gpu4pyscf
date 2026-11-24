@@ -43,6 +43,7 @@ from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.pbc.lib.kpts_helper import (
     kpts_to_bvkmesh, conj_images_in_bvk_cell, conj_kpts, _normalize_kpts, _get_kmesh,
     _as_kpts_array)
+from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -62,16 +63,16 @@ THREADS = 256
 POOL_SIZE = 16384
 MAX_IMGS_PER_TASK = 31
 GOUT_WIDTH = 54
-SHM_SIZE = gpu_specs.shm_size - 1024
+SHM_SIZE = __config__.shm_size - 1024
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvkmesh=None, j_only=False):
     r'''
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
+    from gpu4pyscf.pbc.df.rsdf_builder import _unpack_cderi_v2
     input_kpts = kpts
     kpts, is_single_kpt = _normalize_kpts(cell, kpts)
-    from gpu4pyscf.pbc.df.rsdf_builder import _unpack_cderi_v2
     is_gamma_point = kpts.is_gamma_only()
     if is_single_kpt:
         assert is_gamma_point

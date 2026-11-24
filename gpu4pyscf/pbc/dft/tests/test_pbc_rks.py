@@ -23,6 +23,7 @@ from pyscf.lib import unpack_tril, temporary_env
 from gpu4pyscf.pbc import dft as pbcdft
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
+from gpu4pyscf.gto.mole import Cell
 from packaging import version
 
 def setUpModule():
@@ -270,7 +271,7 @@ class KnownValues(unittest.TestCase):
     def test_kpts_gga_gdf(self):
         from gpu4pyscf.pbc.df.df import GDF
         L = 4.
-        cell = pbcgto.Cell()
+        cell = Cell()
         cell.a = np.eye(3)*L
         cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
                     ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]

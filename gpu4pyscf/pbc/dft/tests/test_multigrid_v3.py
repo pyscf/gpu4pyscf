@@ -37,6 +37,7 @@ from gpu4pyscf.pbc.dft import RKS as RKS_gpu
 from gpu4pyscf.pbc.dft import KRKS as KRKS_gpu
 from gpu4pyscf.pbc.dft import KUKS as KUKS_gpu
 from gpu4pyscf.pbc.lib.kpts_helper import fft_matrix
+from gpu4pyscf.gto.mole import Cell
 
 import pytest
 
@@ -1107,7 +1108,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(v-ref).max().get(), 0, 10)
 
     def test_nr_uks_fxc(self):
-        cell = cell_he
+        cell = cell_he.view(Cell)
         np.random.seed(9)
         nao = cell.nao
         dm_he = np.random.rand(2, nao, nao)

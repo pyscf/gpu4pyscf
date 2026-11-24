@@ -72,10 +72,9 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     # TODO: support non-symmetric density matrix
     assert (hermi == 1)
 
-    max_memory = ks.max_memory - lib.current_memory()[0]
     ni = ks._numint
     n, exc, vxc = ni.get_vxc(cell, ks.grids, ks.xc, dm, hermi=hermi, kpts=kpts,
-                             kpts_band=kpts_band, max_memory=max_memory)
+                             kpts_band=kpts_band)
     logger.info(ks, 'nelec by numeric integration = %s', n)
     t0 = logger.timer(ks, 'vxc', *t0)
 

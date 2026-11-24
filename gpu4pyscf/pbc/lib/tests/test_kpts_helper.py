@@ -41,7 +41,8 @@ def test_is_gamma_only():
 def test_sampling_object_normalization():
     from pyscf.pbc.lib.kpts import KPoints
 
-    cell = pyscf.pbc.gto.Cell(a=np.eye(3) * 4, verbose=0).build()
+    cell = pyscf.pbc.gto.Cell(atom='He 0 0 0', basis='sto3g',
+                             a=np.eye(3) * 4, verbose=0).build()
     for mesh in ([1, 1, 1], [2, 1, 2]):
         sampling = KPointSampling.from_mesh(cell, mesh)
         normalized, single = kpts_helper._normalize_kpts(cell, sampling)
@@ -63,10 +64,12 @@ def test_sampling_object_normalization():
         else:
             assert sampling.kmesh is None
 
-    symmetry_kpts = KPoints(cell, cell.make_kpts([2, 1, 1]))
+    symmetry_kpts = KPoints(cell, cell.make_kpts([2, 1, 1])).build()
     normalized, single = kpts_helper._normalize_kpts(cell, symmetry_kpts)
     assert normalized is symmetry_kpts
     assert not single
+    np.testing.assert_array_equal(
+        kpts_helper.kpts_to_bvkmesh(cell, symmetry_kpts), [2, 1, 1])
 
 
 def test_sampling_mesh_and_bvkmesh():
@@ -77,8 +80,11 @@ def test_sampling_mesh_and_bvkmesh():
     np.testing.assert_array_equal(sampling.kmesh, [2, 1, 2])
     np.testing.assert_array_equal(
         kpts_helper.kpts_to_bvkmesh(cell, sampling), [4, 1, 2])
-    # Conjugate/FFT shortcuts require an unshifted mesh in make_kpts order.
-    assert kpts_helper._get_kmesh(cell, sampling) == (None, None)
+    mesh, with_gamma = kpts_helper._get_kmesh(cell, sampling)
+    np.testing.assert_array_equal(mesh, [2, 1, 2])
+    assert with_gamma
+    # Coordinate-only inference does not support the additional shift.
+    assert kpts_helper._get_kmesh(cell, sampling.kpts) == (None, None)
     mesh, with_gamma = kpts_helper._get_kmesh(cell, cell.make_kpts([2, 1, 2]))
     np.testing.assert_array_equal(mesh, [2, 1, 2])
     assert with_gamma

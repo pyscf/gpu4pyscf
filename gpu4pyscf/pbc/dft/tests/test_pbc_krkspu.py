@@ -20,6 +20,7 @@ from pyscf import lib
 from pyscf.pbc import gto as pgto
 from gpu4pyscf.pbc import dft as pdft
 from gpu4pyscf.pbc.dft import krkspu
+from gpu4pyscf.gto.mole import Cell
 import pytest
 
 def setUpModule():
@@ -59,7 +60,7 @@ class KnownValues(unittest.TestCase):
 
     def test_get_veff(self):
         kmesh = [2, 1, 1]
-        kpts = cell.make_kpts(kmesh, wrap_around=True)
+        kpts = cell.view(Cell).make_kpts(kmesh, wrap_around=True)
         U_idx = ["1 C 2p"]
         U_val = [5.0]
 

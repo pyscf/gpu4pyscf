@@ -217,7 +217,6 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
         log = logger.new_logger(self, verbose)
         mo_energy, mo_coeff = self.get_canonical_mo()
         mo_occ = self.mo_occ.get()
-        cell = self.cell
         kpts = self.kpts
         if log.verbose >= logger.NOTE:
             self.dump_scf_summary(log)

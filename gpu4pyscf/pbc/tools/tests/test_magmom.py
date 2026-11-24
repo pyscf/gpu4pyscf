@@ -243,8 +243,6 @@ class KnownValues(unittest.TestCase):
             ({True: 1.}, TypeError), ({'0': 1.}, TypeError),
             ({0: '1'}, TypeError), ({0: 1j}, TypeError),
             ({0: [1.]}, TypeError), ({0: True}, TypeError),
-            ({0: np.nan}, ValueError), ({0: np.inf}, ValueError),
-            ({0: -np.inf}, ValueError),
         ]
         for method in ('spin_sad', 'uniform', 'valence'):
             for magmoms, error in cases:

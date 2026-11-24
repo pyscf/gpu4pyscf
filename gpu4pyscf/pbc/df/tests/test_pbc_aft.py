@@ -101,7 +101,7 @@ class KnownValues(unittest.TestCase):
         mydf = aft.AFTDF(cell, cell.get_abs_kpts(scaled))
         mydf.mesh = np.array([13, 15, 17])
         original_mesh = mydf.mesh.copy()
-        original_kpts = mydf.kpts.copy()
+        original_kpts = mydf.kpts.kpts.copy()
         with mydf.range_coulomb(.4) as cached:
             self.assertIsNot(cached, mydf)
             self.assertEqual(cached.cell.omega, .4)
@@ -118,7 +118,7 @@ class KnownValues(unittest.TestCase):
                                    atol=1e-14, rtol=0)
         np.testing.assert_allclose(mydf.kpts, moved.get_abs_kpts(scaled),
                                    atol=1e-14, rtol=0)
-        self.assertGreater(np.max(abs(mydf.kpts-original_kpts)), 1e-4)
+        self.assertGreater(np.max(abs(mydf.kpts.kpts-original_kpts)), 1e-4)
         # reset preserves the explicitly configured quadrature, as on CPU.
         np.testing.assert_array_equal(mydf.mesh, original_mesh)
         with mydf.range_coulomb(.4) as rebuilt:

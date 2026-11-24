@@ -18,6 +18,7 @@ import numpy as np
 import pyscf
 from pyscf import lib
 from pyscf.pbc import gto
+from gpu4pyscf.gto.mole import Cell
 from gpu4pyscf.pbc.dft import multigrid_v2
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
@@ -407,7 +408,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(3)
         cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
                       a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
-                      basis=[[0,[3.3, 1]], [1,[ .4, 1]]])
+                      basis=[[0,[3.3, 1]], [1,[ .4, 1]]]).view(Cell)
         kpts = cell.make_kpts([1,1,3])
         mf = cell.KRKS(kpts=kpts, exxdiv='ewald', xc='pbe').to_gpu()
         mf = mf.multigrid_numint()

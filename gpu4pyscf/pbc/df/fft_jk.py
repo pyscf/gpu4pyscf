@@ -24,6 +24,7 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.lib.kpts_helper import is_zero, member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
@@ -381,6 +382,12 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
 
     kpts, is_single_kpt = _normalize_kpts(cell, kpts)
 
+    if is_single_kpt:
+        if kpts_band is None or is_zero(kpts_band-kpts.kpts[0]):
+            for i,dm in enumerate(dms):
+                vk[i] += m * s.dot(dm).dot(s)
+        return vk
+
     if kpts_band is None:
         for k in range(len(kpts)):
             for i,dm in enumerate(dms):
@@ -388,12 +395,6 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
         return vk
 
     kpts = kpts.kpts
-    if is_single_kpt:
-        if kpts_band is None or is_zero(kpts_band-kpts[0]):
-            for i,dm in enumerate(dms):
-                vk[i] += m * s.dot(dm).dot(s)
-        return vk
-
     if np.array_equal(kpts, kpts_band):
         for k in range(len(kpts)):
             for i,dm in enumerate(dms):
@@ -432,7 +433,7 @@ def _format_kpts_band(kpts_band, kpts):
 def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
     '''Restore output dimensions using the original sampling and band inputs.
 
-    kpts_band must be None or a normalized (N, 3) array.
+    kpts_band must be None or an (N, 3) array.
     '''
     if kpts_band is None or kpts_band is kpts:
         return v_kpts.reshape(dm_kpts.shape)

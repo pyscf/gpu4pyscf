@@ -20,6 +20,7 @@ from pyscf.pbc import gto as pgto
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
+from gpu4pyscf.gto.mole import Cell
 from gpu4pyscf.pbc.df import ft_ao, int2c2e, int3c2e
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, fill_triu_bvk
@@ -518,7 +519,7 @@ def test_auxiliary_metric_kpoint_shapes():
 def test_contract_rhoG_with_kpts():
     cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
-                    mesh=[15]*3, precision=1e-8, verbose=0)
+                    mesh=[15]*3, precision=1e-8, verbose=0).view(Cell)
     kpts = cell.make_kpts([3, 1, 1])
     opt = ft_ao.FTOpt(cell, [3, 1, 1]).build()
     Gv = cell.get_Gv([3]*3)
@@ -527,10 +528,10 @@ def test_contract_rhoG_with_kpts():
     args = (rhoG, Gv)
     gamma = opt.contract_rhoG(*args)
     gamma_batch = opt.contract_rhoG(*args, kpts=np.zeros((1, 3)))
-    single = opt.contract_rhoG(*args, kpts=kpts[1])
-    one = opt.contract_rhoG(*args, kpts=kpts[1:2])
+    single = opt.contract_rhoG(*args, kpts=kpts.kpts[1])
+    one = opt.contract_rhoG(*args, kpts=kpts.kpts[1:2])
     batch = opt.contract_rhoG(*args, kpts=kpts)
-    sampling = opt.contract_rhoG(*args, kpts=KPoints(cell, kpts))
+    sampling = opt.contract_rhoG(*args, kpts=KPoints(cell, kpts.kpts).build())
     cp.testing.assert_allclose(sampling, batch, atol=1e-10, rtol=0)
     assert gamma.shape == single.shape == (cell.nao, cell.nao)
     assert gamma_batch.shape == one.shape == (1, cell.nao, cell.nao)
@@ -546,16 +547,16 @@ def test_contract_rhoG_with_kpts():
 def test_contract_auxvec_with_kpts():
     cell = pgto.M(atom='He .2 .3 .4', a=np.eye(3)*5, unit='Bohr',
                     basis=[[0, [1., 1.]], [0, [.4, 1.]]], pseudo='gth-pade',
-                    mesh=[15]*3, precision=1e-8, verbose=0)
+                    mesh=[15]*3, precision=1e-8, verbose=0).view(Cell)
     kpts = cell.make_kpts([3, 1, 1])
     opt = int3c2e.SRInt3c2eOpt(cell, cell, omega=-.4, bvkmesh=[3, 1, 1]).build()
     args = (cp.ones(opt.auxcell.nao),)
     gamma = opt.contract_auxvec(*args)
     gamma_batch = opt.contract_auxvec(*args, kpts=np.zeros((1, 3)))
-    single = opt.contract_auxvec(*args, kpts=kpts[1])
-    one = opt.contract_auxvec(*args, kpts=kpts[1:2])
+    single = opt.contract_auxvec(*args, kpts=kpts.kpts[1])
+    one = opt.contract_auxvec(*args, kpts=kpts.kpts[1:2])
     batch = opt.contract_auxvec(*args, kpts=kpts)
-    sampling = opt.contract_auxvec(*args, kpts=KPoints(cell, kpts))
+    sampling = opt.contract_auxvec(*args, kpts=KPoints(cell, kpts.kpts).build())
     cp.testing.assert_allclose(sampling, batch, atol=1e-10, rtol=0)
     assert gamma.shape == single.shape == (cell.nao, cell.nao)
     assert gamma_batch.shape == one.shape == (1, cell.nao, cell.nao)
