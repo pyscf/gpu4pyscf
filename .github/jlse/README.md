@@ -164,7 +164,8 @@ from the GitHub accounts noted below.
 | `POLL_PRS=true` | schedule variable | set on a CI/CD schedule (every 5-10 min) | poller runs, prints held/triggered PRs |
 
 Optional: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_ALLOWED_ASSOCIATIONS` (default
-OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `SYCL_TESTS`,
+OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `PR_SKIP_DRAFTS`
+(default off: draft PRs are built too, like the CUDA CI), `SYCL_TESTS`,
 `SYCL_TILES`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `USE_MODULES`,
 `SYCL_MODULES`, `SYCL_MODULE_PATH`, `SYCL_CI_ENV_FILE`, `CI_ROOT`,
 `ZE_DRIVER_DIR`.
