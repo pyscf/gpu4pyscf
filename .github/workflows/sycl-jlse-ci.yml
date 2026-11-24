@@ -119,6 +119,15 @@ jobs:
                 'scheduled GitLab PR poller picks this PR up within ~10 min instead ' +
                 '(PR_REPO=${{ steps.pr.outputs.repo }}). Results are posted back as a gist ' +
                 '(link-shareable) + commit status.';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: n, body});
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: n, body});
+            } catch (e) {
+              if (e.status === 403) {
+                // fork PRs get a read-only GITHUB_TOKEN: the trigger step was
+                // skipped, and the poller's pipeline report (status/gist) is
+                // the reporting path there. Skip quietly.
+                core.info('PR comment skipped (403, read-only token on a fork PR); the GitLab pipeline report stage posts the result instead.');
+              } else { throw e; }
+            }
