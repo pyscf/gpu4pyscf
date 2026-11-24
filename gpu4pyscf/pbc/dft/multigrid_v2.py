@@ -25,7 +25,6 @@ import pyscf.pbc.gto as gto
 from pyscf import lib
 from pyscf.pbc.dft.multigrid import multigrid
 from pyscf.pbc.lib.kpts import KPoints
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.gto.mole import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
@@ -34,7 +33,8 @@ from pyscf.pbc.lib.kpts_helper import is_gamma_point
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc.df.aft import _get_ZSI
-from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.pbc.df.fft_jk import (
+    _format_dms, _format_jks, _format_kpts_band)
 from gpu4pyscf.pbc.gto.cell import get_Gv
 from gpu4pyscf.pbc.tools import pbc as pbc_tools
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
@@ -1508,8 +1508,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     xc_for_fock = convert_xc_on_g_mesh_to_fock(ni, coulomb_on_g_mesh, hermi, kpts_band)
     t0 = log.timer("vj", *t0)
-    return _format_jks(xc_for_fock, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(xc_for_fock, dm_kpts, input_band, input_kpts)
 
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, with_j=False, verbose=None):
@@ -1605,8 +1604,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1711,8 +1709,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff

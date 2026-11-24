@@ -37,7 +37,6 @@ import cupyx.scipy.fft as fft
 from pyscf import lib
 from pyscf.gto import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, PTR_COEFF, gto_norm
 from pyscf.pbc.lib.kpts import KPoints
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
@@ -353,7 +352,8 @@ _eval_density = _eval_density_v2
 def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     assert xctype == 'LDA'
     assert not ni.allow_mesh_reduction
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
+    kpts = kpts.kpts
     dm_sc = _wannier_transform_dm(ni, dm_kpts, kpts, hermi=1)
     n_dm, nkpts, nao = dm_sc.shape[:3]
     rhoG = cp.array([_eval_density(ni, dm_sc[i])[0] for i in range(n_dm)])
@@ -1655,7 +1655,8 @@ def get_rho(ni, dm_kpts, kpts=None):
             k points. If not specified, gamma point is assumed
     '''
     assert dm_kpts.ndim < 4
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
+    kpts = kpts.kpts
     cell = ni.cell
     mesh = ni.mesh
 
@@ -1677,7 +1678,8 @@ def get_nuc(ni, kpts=None):
     gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     """
     cell = ni.cell
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(ni.cell, kpts)
+    kpts = kpts.kpts
 
     ni._ensure_initialized(kpts, 'LDA')
 
@@ -1705,7 +1707,9 @@ def get_pp(ni, kpts=None):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(ni.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
 
     ni._ensure_initialized(kpts, 'LDA')
 
@@ -1718,7 +1722,7 @@ def get_pp(ni, kpts=None):
     t1 = log.timer_debug1("vpploc", *t0)
 
     vppnl = get_pp_nl(cell, kpts)
-    if is_zero(kpts):
+    if is_gamma_point:
         vpp += vppnl.real
     else:
         vpp += vppnl
@@ -1780,7 +1784,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     t0 = log.init_timer()
 
     input_kpts = kpts
-    kpts, _ = _normalize_kpts(kpts)
+    input_band = kpts_band
+    kpts, _ = _normalize_kpts(cell, kpts)
+    kpts = kpts.kpts
 
     xctype = ni._xc_type(xc_code)
     nvar = _xc_var_length(xctype)
@@ -1858,7 +1864,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _eval_xc_mat(ni, xc_for_fock, out=dm_sc)
         veff = _inverse_wannier_transform_fock(ni, veff, kpts)
     else:
-        kpts_band, _ = _normalize_kpts(kpts_band)
+        kpts_band = np.asarray(kpts_band).reshape(-1, 3)
         bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
         ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
@@ -1867,7 +1873,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _eval_xc_mat(ni, xc_for_fock)
         veff = _inverse_wannier_transform_fock(ni, veff, kpts_band)
 
-    veff = _format_jks(veff, dm_kpts, kpts_band, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1901,7 +1907,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     t0 = log.init_timer()
 
     input_kpts = kpts
-    kpts, _ = _normalize_kpts(kpts)
+    input_band = kpts_band
+    kpts, _ = _normalize_kpts(cell, kpts)
+    kpts = kpts.kpts
 
     xctype = ni._xc_type(xc_code)
     nvar = _xc_var_length(xctype)
@@ -1994,7 +2002,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             _inverse_wannier_transform_fock(ni, veff_b, kpts)])
 
     else:
-        kpts_band, _ = _normalize_kpts(kpts_band)
+        kpts_band = np.asarray(kpts_band).reshape(-1, 3)
         bvkmesh = kpts_to_bvkmesh(cell, kpts_band, bound_by_supmol=True)
         ni = ni.copy().reset().build(bvkmesh=bvkmesh, xctype=xctype)
         # ni.build may alter the mesh. vxc was created with mesh different to
@@ -2006,7 +2014,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             _inverse_wannier_transform_fock(ni, veff_a, kpts_band),
             _inverse_wannier_transform_fock(ni, veff_b, kpts_band)])
 
-    veff = _format_jks(veff, dm_kpts, kpts_band, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=ecoul, exc=xc_energy_sum)
     t0 = log.timer_debug1("xc matrix", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -2203,7 +2211,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                    kpts=None, with_j=False):
         if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(cell, kpts)
+        kpts = kpts.kpts
 
         assert dms.ndim == 4
         n_dm, nkpts, nao = dms.shape[:3]
@@ -2265,7 +2274,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                    kpts=None, with_j=False):
         if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(cell, kpts)
+        kpts = kpts.kpts
 
         assert dms.ndim == 5
         n_dm, nkpts, nao = dms.shape[1:4]
@@ -2327,7 +2337,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def cache_xc_kernel1(self, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=None):
         if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(cell, kpts)
+        kpts = kpts.kpts
 
         xctype = self._xc_type(xc_code)
         nvar = _xc_var_length(xctype)
@@ -2414,7 +2425,8 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
                 Whether to include the contribution from the local part of
                 pseudo-potential or electron-nuclear Coulomb interactions
         '''
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        kpts = kpts.kpts
         cell = self.cell
         log = logger.new_logger(cell)
         t0 = log.init_timer()

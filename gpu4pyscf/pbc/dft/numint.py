@@ -18,7 +18,6 @@ import cupy as cp
 from pyscf import lib
 from pyscf.gto import ANG_OF, ATOM_OF, PTR_COORD
 from pyscf.pbc.dft import numint as numint_cpu
-from pyscf.pbc.df.fft_jk import _format_kpts_band
 from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts import KPoints
@@ -26,10 +25,9 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.gto.eval_gto import get_lattice_Ls
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, extract_pgto_params
-from gpu4pyscf.pbc.df.aft import _check_kpts
-from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_kpts_band
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, _normalize_kpts
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids, BeckeGrids
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff
 from gpu4pyscf.dft import numint
@@ -88,16 +86,14 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
             axis follow the PySCF kpts convention; see
             gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
     assert deriv <= 2
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    if kpts is not None and kpts.ndim == 1:
-        kpts = kpts.reshape(1, 3)
     if opt is None:
         opt = _GTOvalOpt(cell, kpts, deriv=deriv)
     else:
-        assert kpts is opt.kpts
+        assert kpts is opt.kpts or np.array_equal(kpts.kpts, opt.kpts.kpts)
     bvkcell = opt.bvkcell
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     ngrids = len(coords)
@@ -133,8 +129,8 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
 
 class _GTOvalOpt:
     def __init__(self, cell, kpts=None, bvkmesh=None, deriv=0):
+        kpts, _ = _normalize_kpts(cell, kpts)
         self.cell = cell
-        assert kpts is None or kpts.ndim == 2
         self.kpts = kpts
         self.bvkmesh = bvkmesh
         self.deriv = deriv
@@ -152,10 +148,7 @@ class _GTOvalOpt:
         self.bas_rcut = cp.asarray(rcut)
 
         if bvkmesh is None:
-            if kpts is None:
-                bvkmesh = np.ones(3, dtype=np.int32)
-            else:
-                bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
             self.bvkmesh = bvkmesh
         bvk_ncells = np.prod(bvkmesh)
         if bvk_ncells == 1:
@@ -166,7 +159,7 @@ class _GTOvalOpt:
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             bvkmesh_Ls = translation_vectors_for_kmesh(sorted_cell, bvkmesh, True)
-            expLk = cp.exp(1j * asarray(bvkmesh_Ls).dot(asarray(kpts).T))
+            expLk = cp.exp(1j * asarray(bvkmesh_Ls).dot(asarray(kpts.kpts).T))
         self.bvk_ncells = bvk_ncells
         self.bvkcell = bvkcell
         self.expLk = expLk
@@ -355,13 +348,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     """Integrate XC at Gamma for None, preserving the input density layout."""
     if kpts is None:
         kpts = np.zeros(3) if dm_kpts.ndim == 2 else np.zeros((1,3))
-    elif isinstance(kpts, KPoints):
-        kpts = kpts.kpts
-
-    is_single_kpt = kpts.ndim == 1
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
     if is_single_kpt:
         assert dm_kpts.ndim == 2
-        kpts = kpts.reshape(1, 3)
         dm_kpts = dm_kpts[None]
     assert dm_kpts.ndim == 3
     nao = dm_kpts.shape[-1]
@@ -435,13 +424,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     """Integrate XC at Gamma for None, preserving the input density layout."""
     if kpts is None:
         kpts = np.zeros(3) if dm_kpts.ndim == 3 else np.zeros((1,3))
-    elif isinstance(kpts, KPoints):
-        kpts = kpts.kpts
-
-    is_single_kpt = kpts.ndim == 1
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
     if is_single_kpt:
         assert dm_kpts.ndim == 3
-        kpts = kpts.reshape(1, 3)
         dm_kpts = dm_kpts[:,None]
     assert dm_kpts.ndim == 4 and len(dm_kpts) == 2
     nao = dm_kpts.shape[-1]
@@ -535,19 +520,16 @@ def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
         fxc = ni.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
                                   is_rhf=True)[2]
 
-    if kpts is None:
-        kpts = np.zeros((1,3))
-    elif isinstance(kpts, KPoints):
+    if isinstance(kpts, KPoints):
         kpts = kpts.kpts_ibz
-
-    assert kpts.ndim == 2
+    kpts, _ = _normalize_kpts(cell, kpts)
     assert dms.ndim == 4
     nset, nkpts, nao = dms.shape[:3]
     assert len(kpts) == nkpts
 
     dtype = np.complex128
     v_hermi = 0
-    if is_zero(kpts) and dms.dtype == np.float64:
+    if kpts.is_gamma_only() and dms.dtype == np.float64:
         # for real orbitals and real matrix, K_{ia,bj} = K_{ia,jb}
         # The output matrix v = K*x_{ia} is symmetric
         v_hermi = 1
@@ -607,19 +589,16 @@ def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None,
         spin = 1
         fxc = ni.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
                                   is_rhf=False)[2]
-    if kpts is None:
-        kpts = np.zeros((1,3))
-    elif isinstance(kpts, KPoints):
+    if isinstance(kpts, KPoints):
         kpts = kpts.kpts_ibz
-
-    assert kpts.ndim == 2
+    kpts, _ = _normalize_kpts(cell, kpts)
     assert dms.ndim == 5
     nset, nkpts, nao = dms.shape[1:4]
     assert len(kpts) == nkpts
 
     dtype = np.complex128
     v_hermi = 0
-    if is_zero(kpts) and dms.dtype == np.float64:
+    if kpts.is_gamma_only() and dms.dtype == np.float64:
         # for real orbitals and real matrix, K_{ia,bj} = K_{ia,jb}
         # The output matrix v = K*x_{ia} is symmetric
         v_hermi = 1
@@ -663,7 +642,7 @@ def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None, is_rhf=Non
         ao_deriv = 0
         nvar = 1
 
-    kpts, _ = _check_kpts(kpts)
+    kpts, _ = _normalize_kpts(cell, kpts)
     dms = _format_dms(dm, kpts)
     if is_rhf is None:
         is_rhf = len(dms) == 1
@@ -723,7 +702,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3))):
         '''Density in real space
         '''
-        kpts = kpts.reshape(-1, 3)
+        kpts, _ = _normalize_kpts(cell, kpts)
         assert dm.ndim == 2 or len(dm) == len(kpts)
         if dm.ndim == 2:
             dm = dm.reshape(1, *dm.shape)
@@ -763,8 +742,33 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         return rho
 
     def block_loop(self, cell, grids, deriv=0, kpts=None, sort_grids=False):
-        '''Define this macro to loop over grids by blocks.
+        '''Yield AO values, integration weights, and coordinates in grid blocks.
+
+        Args:
+            cell : Cell
+                Periodic cell defining the AO basis and lattice.
+            grids : UniformGrids or BeckeGrids
+                Integration grid with initialized coordinates and weights.
+
+        Kwargs:
+            deriv : int
+                AO derivative order, from 0 to 2.
+            kpts :
+                KPointSampling, CPU KPoints, or None, or Cartesian coordinates
+                with shape (3,) or (nkpts, 3). None selects Gamma point.
+            sort_grids : bool
+                Reorder uniform-grid coordinates and weights into spatial tiles.
+
+        Yields:
+            ao_ks : cupy.ndarray
+                Shape (nkpts, ngrid, nao) for deriv=0, or
+                (nkpts, ncomp, ngrid, nao) otherwise.
+            weight : ndarray
+                Integration weights of shape (ngrid,).
+            coords : ndarray
+                Grid coordinates in Bohr, of shape (ngrid, 3).
         '''
+        kpts, _ = _normalize_kpts(cell, kpts)
         nao = cell.nao
         grids_coords = grids.coords
         grids_weights = grids.weights
@@ -785,11 +789,6 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
             blksize = min(blksize, MIN_BLK_SIZE)
             if blksize < ALIGNED:
                 raise RuntimeError('Not enough GPU memory')
-
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        else:
-            kpts = kpts.reshape(-1, 3)
 
         eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv)
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
