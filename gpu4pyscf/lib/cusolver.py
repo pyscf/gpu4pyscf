@@ -20,11 +20,12 @@ from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib.utils import load_library
 
 from ctypes.util import find_library
 # On ROCm/HIP, hipSOLVER is loaded in place of cuSOLVER (see below).
-if not cupy.cuda.runtime.is_hip:
+if BACKEND == 'cuda':
     libcusolver = find_library('cusolver')
     if libcusolver is not None:
         libcusolver = ctypes.CDLL(libcusolver)
@@ -47,7 +48,7 @@ CUSOLVER_EIG_MODE_VECTOR = 1
 # (cusolverDn*). The Dn symbols have identical signatures, but the enum values
 # differ between the two libraries, so both the library handle/symbol prefix and
 # the enum constants are selected per backend below. The CUDA path is unchanged.
-if cupy.cuda.runtime.is_hip:
+if BACKEND == 'hip':
     libcusolver = ctypes.CDLL(find_library('hipsolver') or 'libhipsolver.so')
     _DN_PREFIX = 'hipsolverDn'
     CUSOLVER_EIG_TYPE_1 = 211         # HIPSOLVER_EIG_TYPE_1
@@ -164,17 +165,17 @@ for _name in ('Dsyevd', 'Zheevd'):
 
 # hipSOLVER's Dn eigensolvers (syevd/heevd) leave the *shared* cusolver handle
 # in a state that makes cupy's own subsequent cusolver calls (e.g.
-# cupy.linalg.solve -> getrs) fail with rocblas_status_memory_error. syevd below
-# therefore uses its own dedicated handle and never touches cupy's shared handle.
-# (Irrelevant on CUDA, where eigh_std routes to cupy.linalg.eigh and syevd is
-# unused.)
+# cupy.linalg.solve -> getrs) fail with rocblas_status_memory_error. syevd below,
+# and eigh (sygvd/hegvd) on HIP, therefore use their own dedicated handle and
+# never touch cupy's shared handle. (eigh keeps cupy's handle on CUDA, where
+# eigh_std routes to cupy.linalg.eigh and syevd is unused.)
 _dn('Create').restype = int
 _dn('Create').argtypes = [ctypes.c_void_p]
 _dn('SetStream').restype = int
 _dn('SetStream').argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-_syevd_handle = ctypes.c_void_p()
-if _dn('Create')(ctypes.byref(_syevd_handle)) != 0:
-    raise RuntimeError('failed to create dedicated cusolver handle for syevd')
+_dn_handle = ctypes.c_void_p()
+if _dn('Create')(ctypes.byref(_dn_handle)) != 0:
+    raise RuntimeError('failed to create dedicated cusolver handle')
 
 
 def eigh(h, s, overwrite=False):
@@ -195,8 +196,12 @@ def eigh(h, s, overwrite=False):
     else:
         A = h.copy()
         B = s.copy()
-    _handle = device.get_cusolver_handle()
-    cusolver.setStream(_handle, cupy.cuda.get_current_stream().ptr)
+    if BACKEND == 'hip':
+        _handle = _dn_handle
+        _dn('SetStream')(_handle, ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
+    else:
+        _handle = device.get_cusolver_handle()
+        cusolver.setStream(_handle, cupy.cuda.get_current_stream().ptr)
     w = cupy.zeros(n)
 
     # TODO: reuse workspace
@@ -280,7 +285,7 @@ def syevd(a, overwrite=False):
         A = a
     else:
         A = a.copy()
-    _handle = _syevd_handle
+    _handle = _dn_handle
     _dn('SetStream')(_handle, ctypes.c_void_p(cupy.cuda.get_current_stream().ptr))
     w = cupy.zeros(n)
 
@@ -316,9 +321,12 @@ def eigh_std(a):
     its divide-and-conquer binding is unimplemented there; syevj is ~15-80x slower
     for large matrices and can even OOM. Route HIP through hipSOLVER's syevd/heevd
     (divide-and-conquer) instead. On NVIDIA/CUDA, cupy.linalg.eigh already uses the
-    fast syevd, so it is left byte-for-byte unchanged.
+    fast syevd, so it is left byte-for-byte unchanged. Batched (ndim > 2) and
+    single-precision inputs, which syevd does not take, also stay on
+    cupy.linalg.eigh.
     '''
-    if cupy.cuda.runtime.is_hip:
+    if (BACKEND == 'hip' and a.ndim == 2 and
+            a.dtype in (np.float64, np.complex128)):
         return syevd(a)
     return cupy.linalg.eigh(a)
 

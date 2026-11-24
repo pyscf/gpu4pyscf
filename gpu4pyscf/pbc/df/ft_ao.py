@@ -50,11 +50,6 @@ from gpu4pyscf.__config__ import props as gpu_specs
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
 libpbc.build_ft_aopair.restype = ctypes.c_int
-libpbc.PBC_warp_size.restype = ctypes.c_int
-# Effective wavefront width of the running GPU (32 on RDNA/NVIDIA, 64 on
-# GCN/CDNA). Used as the default nGv_per_block so the host-side shm_size matches
-# the per-arch device WARP_SIZE stride in a single multi-arch build.
-WARP_SIZE = libpbc.PBC_warp_size()
 
 LMAX = 4
 GOUT_WIDTH = 30
@@ -129,12 +124,25 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         GvT = asarray(Gv.T).ravel()
     else:
         GvT = (asarray(Gv.T) + asarray(kpt[:,None])).ravel()
+
+    # Split each (l, nprim) group into batches without mixing shell patterns.
+    group_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+    shl_offsets = [np.arange(sh0, sh1, 16, dtype=np.int32)
+                   for sh0, sh1 in zip(group_offsets[:-1], group_offsets[1:])]
+    shl_offsets.append(np.int32(group_offsets[-1]))
+    shl_offsets = cp.asarray(np.hstack(shl_offsets, dtype=np.int32))
+    nbatches_shell = len(shl_offsets) - 1
+
+    head = cp.empty(1, dtype=np.int32)
     nao = ao_loc[-1]
     out = ndarray((nao, ngrids), dtype=np.complex128, buffer=out)
     err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nbatches_shell),
+        ctypes.cast(head.data.ptr, ctypes.c_void_p),
         ctypes.c_void_p(cp.cuda.get_current_stream().ptr))
     if err != 0:
         raise RuntimeError('build_ft_ao failed')
@@ -728,10 +736,7 @@ class FTOpt:
         return vj
 
 def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,
-                 nGv_per_block=None, cache_cart_idx=False):
-    if nGv_per_block is None:
-        # Match the device kernel's nGv_per_block (= WARP_SIZE, per-arch).
-        nGv_per_block = WARP_SIZE
+                 nGv_per_block=32, cache_cart_idx=False):
     if deriv is None:
         deriv = (0, 0)
     i_inc, j_inc = deriv

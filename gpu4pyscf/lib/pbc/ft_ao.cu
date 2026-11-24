@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "../warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
+#include "warp_size.h"   // WARP_SIZE (per-arch) + gpu4pyscf_effective_warp_size()
 #include "ft_ao.cuh"
 
 #define THREADS         256
@@ -27,162 +27,181 @@
 #define POOL_SIZE       65536
 
 __global__ static
-void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
+void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv,
+                      const int *shl_offsets, int nbatches_shell, int *head)
 {
-    int sh_block_id = gridDim.y - blockIdx.y - 1;
-    int Gv_block_id = blockIdx.x;
-    int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
-    int sh_id_in_block = threadIdx.y;
-    int Gv_id_in_block = threadIdx.x;
-    int sh_id = sh_block_id * nsh_per_block + sh_id_in_block;
-    if (sh_id >= envs.nbas) {
-        return;
-    }
-
-    int *atm = envs.atm;
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int li = bas[sh_id*BAS_SLOTS+ANG_OF];
-    int nfi = c_nf[li];
-    int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
-    int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
-    double kx = 0;
-    double ky = 0;
-    double kz = 0;
-    if (Gv_id < nGv) {
-        kx = Gv[Gv_id];
-        ky = Gv[Gv_id + nGv];
-        kz = Gv[Gv_id + nGv * 2];
-    }
-    double kk = kx * kx + ky * ky + kz * kz;
-
-    int gx_len = (AUXL+1) * FT_AO_THREADS;
-    __shared__ double g[(AUXL+1)*FT_AO_THREADS * 6];
-    double *gxR = g + (AUXL+1) * NG_PER_BLOCK * sh_id_in_block + Gv_id_in_block;
-    double *gxI = gxR + gx_len;
-    double *gyR = gxR + gx_len*2;
-    double *gyI = gxR + gx_len*3;
-    double *gzR = gxR + gx_len*4;
-    double *gzI = gxR + gx_len*5;
-    const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-
-    double goutR[AUXNF];
-    double goutI[AUXNF];
-#pragma unroll
-    for (int n = 0; n < AUXNF; ++n) {
-        goutR[n] = 0.;
-        goutI[n] = 0.;
-    }
-    double s0xR, s1xR, s2xR;
-    double s0xI, s1xI, s2xI;
-    double s0yR, s1yR, s2yR;
-    double s0yI, s1yI, s2yI;
-    double s0zR, s1zR, s2zR;
-    double s0zI, s1zI, s2zI;
-
-    int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
-    double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
-    for (int ip = 0; ip < iprim; ++ip) {
+    setup_context();
+    DECLARE_SHARED(double, g, [(AUXL+1)*FT_AO_THREADS * 6]);
+    DECLARE_SHARED(int, batch_id);
+    constexpr int nGv_per_block = WARP_SIZE;
+    constexpr int nsh_per_block = FT_AO_THREADS / nGv_per_block;
+    int thread_id = threadIdx_x;
+    int sh_id_in_block = thread_id / nGv_per_block;
+    int Gv_id_in_block = thread_id % nGv_per_block;
+    while (1) {
         __syncthreads();
-        double ai = expi[ip];
-        double xi = ri[0];
-        double yi = ri[1];
-        double zi = ri[2];
-        double kR = kx * xi + ky * yi + kz * zi;
-        sincos(-kR, gzI, gzR);
-        double Kab = exp(-.25/ai*kk);
-        gxR[0] = OVERLAP_FAC * ci[ip] / (ai * sqrt(ai));
-        gxI[0] = 0.;
-        gyR[0] = 1.;
-        gyI[0] = 0.;
-        gzR[0] *= Kab;
-        gzI[0] *= Kab;
-
-        if (li > 0) {
-            double a2 = .5 / ai;
-            double xpaI = -a2 * kx;
-            double ypaI = -a2 * ky;
-            double zpaI = -a2 * kz;
-            s0xR = gxR[0];
-            s0xI = gxI[0];
-            s0yR = gyR[0];
-            s0yI = gyI[0];
-            s0zR = gzR[0];
-            s0zI = gzI[0];
-            s1xR = -xpaI * s0xI;
-            s1xI =  xpaI * s0xR;
-            s1yR = -ypaI * s0yI;
-            s1yI =  ypaI * s0yR;
-            s1zR = -zpaI * s0zI;
-            s1zI =  zpaI * s0zR;
-            gxR[NG_PER_BLOCK] = s1xR;
-            gxI[NG_PER_BLOCK] = s1xI;
-            gyR[NG_PER_BLOCK] = s1yR;
-            gyI[NG_PER_BLOCK] = s1yI;
-            gzR[NG_PER_BLOCK] = s1zR;
-            gzI[NG_PER_BLOCK] = s1zI;
-            for (int i = 2; i <= AUXL; i++) {
-                if (i > li) break;
-                double ia2 = (i-1) * a2;
-                s2xR = ia2 * s0xR - xpaI * s1xI;
-                s2xI = ia2 * s0xI + xpaI * s1xR;
-                s2yR = ia2 * s0yR - ypaI * s1yI;
-                s2yI = ia2 * s0yI + ypaI * s1yR;
-                s2zR = ia2 * s0zR - zpaI * s1zI;
-                s2zI = ia2 * s0zI + zpaI * s1zR;
-                gxR[i*NG_PER_BLOCK] = s2xR;
-                gxI[i*NG_PER_BLOCK] = s2xI;
-                gyR[i*NG_PER_BLOCK] = s2yR;
-                gyI[i*NG_PER_BLOCK] = s2yI;
-                gzR[i*NG_PER_BLOCK] = s2zR;
-                gzI[i*NG_PER_BLOCK] = s2zI;
-                s0xR = s1xR;
-                s0xI = s1xI;
-                s0yR = s1yR;
-                s0yI = s1yI;
-                s0zR = s1zR;
-                s0zI = s1zI;
-                s1xR = s2xR;
-                s1xI = s2xI;
-                s1yR = s2yR;
-                s1yI = s2yI;
-                s1zR = s2zR;
-                s1zI = s2zI;
+        if (thread_id == 0) {
+            batch_id = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        int Gv_block_id = batch_id / nbatches_shell;
+        int shell_batch_id = batch_id % nbatches_shell;
+        if (Gv_block_id * nGv_per_block >= nGv) {
+            return;
+        }
+        int sh0 = shl_offsets[shell_batch_id];
+        int sh1 = shl_offsets[shell_batch_id+1];
+        for (int sh = sh0; sh < sh1; sh += nsh_per_block) {
+            bool active_shell = sh + sh_id_in_block < sh1;
+            // All lanes must reach the primitive-loop barriers. A spare lane
+            // uses a valid shell from the same (l, nprim) group without writing.
+            int sh_id = active_shell ? sh + sh_id_in_block : sh0;
+            int *atm = envs.atm;
+            int *bas = envs.bas;
+            double *env = envs.env;
+            int li = bas[sh_id*BAS_SLOTS+ANG_OF];
+            int nfi = c_nf[li];
+            int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
+            int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
+            double kx = 0;
+            double ky = 0;
+            double kz = 0;
+            if (Gv_id < nGv) {
+                kx = Gv[Gv_id];
+                ky = Gv[Gv_id + nGv];
+                kz = Gv[Gv_id + nGv * 2];
             }
-        }
-        __syncthreads();
-#pragma unroll
-        for (int n = 0; n < AUXNF; ++n) {
-            if (n >= nfi) break;
-            int addrx = idx[n*3+0] * NG_PER_BLOCK;
-            int addry = idx[n*3+1] * NG_PER_BLOCK;
-            int addrz = idx[n*3+2] * NG_PER_BLOCK;
-            double xR = gxR[addrx];
-            double xI = gxI[addrx];
-            double yR = gyR[addry];
-            double yI = gyI[addry];
-            double zR = gzR[addrz];
-            double zI = gzI[addrz];
-            double xyR = xR * yR - xI * yI;
-            double xyI = xR * yI + xI * yR;
-            goutR[n] += xyR * zR - xyI * zI;
-            goutI[n] += xyR * zI + xyI * zR;
-        }
-    }
+            double kk = kx * kx + ky * ky + kz * kz;
 
-    if (Gv_id < nGv) {
-        size_t stride = (size_t)nGv * OF_COMPLEX;
-        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
-#pragma unroll
-        for (int n = 0; n < AUXNF; ++n) {
-            if (n >= nfi) break;
-            aft_tensor[n*stride  ] = goutR[n];
-            aft_tensor[n*stride+1] = goutI[n];
+            int gx_len = (AUXL+1) * FT_AO_THREADS;
+            double *gxR = g + (AUXL+1) * nGv_per_block * sh_id_in_block + Gv_id_in_block;
+            double *gxI = gxR + gx_len;
+            double *gyR = gxR + gx_len*2;
+            double *gyI = gxR + gx_len*3;
+            double *gzR = gxR + gx_len*4;
+            double *gzI = gxR + gx_len*5;
+            const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+
+            double goutR[AUXNF];
+            double goutI[AUXNF];
+        #pragma unroll
+            for (int n = 0; n < AUXNF; ++n) {
+                goutR[n] = 0.;
+                goutI[n] = 0.;
+            }
+            double s0xR, s1xR, s2xR;
+            double s0xI, s1xI, s2xI;
+            double s0yR, s1yR, s2yR;
+            double s0yI, s1yI, s2yI;
+            double s0zR, s1zR, s2zR;
+            double s0zI, s1zI, s2zI;
+
+            int ia = bas[sh_id*BAS_SLOTS+ATOM_OF];
+            double *expi = env + bas[sh_id*BAS_SLOTS+PTR_EXP];
+            double *ci = env + bas[sh_id*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
+            for (int ip = 0; ip < iprim; ++ip) {
+                __syncthreads();
+                double ai = expi[ip];
+                double xi = ri[0];
+                double yi = ri[1];
+                double zi = ri[2];
+                double kR = kx * xi + ky * yi + kz * zi;
+                sincos(-kR, gzI, gzR);
+                double Kab = exp(-.25/ai*kk);
+                gxR[0] = OVERLAP_FAC * ci[ip] / (ai * sqrt(ai));
+                gxI[0] = 0.;
+                gyR[0] = 1.;
+                gyI[0] = 0.;
+                gzR[0] *= Kab;
+                gzI[0] *= Kab;
+
+                if (li > 0) {
+                    double a2 = .5 / ai;
+                    double xpaI = -a2 * kx;
+                    double ypaI = -a2 * ky;
+                    double zpaI = -a2 * kz;
+                    s0xR = gxR[0];
+                    s0xI = gxI[0];
+                    s0yR = gyR[0];
+                    s0yI = gyI[0];
+                    s0zR = gzR[0];
+                    s0zI = gzI[0];
+                    s1xR = -xpaI * s0xI;
+                    s1xI =  xpaI * s0xR;
+                    s1yR = -ypaI * s0yI;
+                    s1yI =  ypaI * s0yR;
+                    s1zR = -zpaI * s0zI;
+                    s1zI =  zpaI * s0zR;
+                    gxR[nGv_per_block] = s1xR;
+                    gxI[nGv_per_block] = s1xI;
+                    gyR[nGv_per_block] = s1yR;
+                    gyI[nGv_per_block] = s1yI;
+                    gzR[nGv_per_block] = s1zR;
+                    gzI[nGv_per_block] = s1zI;
+                    for (int i = 2; i <= AUXL; i++) {
+                        if (i > li) break;
+                        double ia2 = (i-1) * a2;
+                        s2xR = ia2 * s0xR - xpaI * s1xI;
+                        s2xI = ia2 * s0xI + xpaI * s1xR;
+                        s2yR = ia2 * s0yR - ypaI * s1yI;
+                        s2yI = ia2 * s0yI + ypaI * s1yR;
+                        s2zR = ia2 * s0zR - zpaI * s1zI;
+                        s2zI = ia2 * s0zI + zpaI * s1zR;
+                        gxR[i*nGv_per_block] = s2xR;
+                        gxI[i*nGv_per_block] = s2xI;
+                        gyR[i*nGv_per_block] = s2yR;
+                        gyI[i*nGv_per_block] = s2yI;
+                        gzR[i*nGv_per_block] = s2zR;
+                        gzI[i*nGv_per_block] = s2zI;
+                        s0xR = s1xR;
+                        s0xI = s1xI;
+                        s0yR = s1yR;
+                        s0yI = s1yI;
+                        s0zR = s1zR;
+                        s0zI = s1zI;
+                        s1xR = s2xR;
+                        s1xI = s2xI;
+                        s1yR = s2yR;
+                        s1yI = s2yI;
+                        s1zR = s2zR;
+                        s1zI = s2zI;
+                    }
+                }
+                __syncthreads();
+        #pragma unroll
+                for (int n = 0; n < AUXNF; ++n) {
+                    if (n >= nfi) break;
+                    int addrx = idx[n*3+0] * nGv_per_block;
+                    int addry = idx[n*3+1] * nGv_per_block;
+                    int addrz = idx[n*3+2] * nGv_per_block;
+                    double xR = gxR[addrx];
+                    double xI = gxI[addrx];
+                    double yR = gyR[addry];
+                    double yI = gyI[addry];
+                    double zR = gzR[addrz];
+                    double zI = gzI[addrz];
+                    double xyR = xR * yR - xI * yI;
+                    double xyI = xR * yI + xI * yR;
+                    goutR[n] += xyR * zR - xyI * zI;
+                    goutI[n] += xyR * zI + xyI * zR;
+                }
+            }
+
+            if (active_shell && Gv_id < nGv) {
+                size_t stride = (size_t)nGv * OF_COMPLEX;
+                double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
+        #pragma unroll
+                for (int n = 0; n < AUXNF; ++n) {
+                    if (n >= nfi) break;
+                    aft_tensor[n*stride  ] = goutR[n];
+                    aft_tensor[n*stride+1] = goutI[n];
+                }
+            }
         }
     }
 }
+
 
 __global__ static
 void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pair_offsets,
@@ -191,12 +210,29 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                       double *Gv, int nGv, int *ao_loc, int compressing, int to_sph,
                       int *head, int nbatches_shl_pair)
 {
-    constexpr int nGv_per_block = WARP_SIZE;
-    int thread_id = threadIdx.x;
+    setup_context();
+    DECLARE_SHARED(int, Gv_block_id);
+    DECLARE_SHARED(int, sp_block_id);
+    DECLARE_SHARED(int, shl_pair0);
+    DECLARE_SHARED(int, shl_pair1);
+    DECLARE_SHARED(int, li);
+    DECLARE_SHARED(int, lj);
+    DECLARE_SHARED(int, iprim);
+    DECLARE_SHARED(int, jprim);
+    DECLARE_SHARED(int, nao);
+    DECLARE_SHARED(int, gout_stride);
+    DECLARE_SHARED(int, nsp_per_block);
+    DECLARE_SHARED(int, img_max);
+    DECLARE_SHARED(int, img_counts, [WARPS]);
+    DYNAMIC_SHARED_PTR(double, shared_memory);
+
+    // WARPS groups of nGv_per_block threads, independent of the hardware
+    // wavefront width; ft_ao_scheme in ft_ao.py assumes the same layout.
+    constexpr int nGv_per_block = THREADS / WARPS;
+    int thread_id = threadIdx_x;
     int Gv_id_in_block = thread_id % nGv_per_block;
     int warp_id = thread_id / nGv_per_block;
-    __shared__ int Gv_block_id, sp_block_id;
-    double *c2s_pool = pool + blockIdx.x * POOL_SIZE;
+    double *c2s_pool = pool + blockIdx_x * POOL_SIZE;
 while (1) {
     __syncthreads();
     if (thread_id == 0) {
@@ -214,11 +250,6 @@ while (1) {
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj;
-    __shared__ int iprim, jprim;
-    __shared__ int nao;
-    __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -246,7 +277,6 @@ while (1) {
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nGsp_per_block;
-    extern __shared__ double shared_memory[];
     double *gxR = shared_memory + nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxR + gx_len*2;
@@ -286,12 +316,23 @@ while (1) {
         int jsh = bas_ij % bvk_nbas;
         int img0 = img_offsets[pair_ij];
         int img1 = img_offsets[pair_ij+1];
-        __shared__ int img_max;
-        __shared__ int img_counts[WARPS];
         if (Gv_id_in_block == 0) {
             img_counts[warp_id] = img1 - img0;
         }
         __syncthreads();
+#ifdef USE_SYCL
+        // Serial scan (not a sub-group shuffle): only thread_id < WARPS lanes
+        // hold valid counts, so a shuffle would have partial sub-group
+        // participation, which is UB in SYCL. Integer max is bit-identical
+        // on both backends.
+        if (thread_id == 0) {
+            int count = img_counts[0];
+            for (int w = 1; w < WARPS; ++w) {
+                count = max(count, img_counts[w]);
+            }
+            img_max = count;
+        }
+#else
         if (thread_id < WARPS) {
             int count = img_counts[thread_id];
             unsigned mask = (1u << WARPS) - 1;
@@ -302,6 +343,7 @@ while (1) {
                 img_max = count;
             }
         }
+#endif
         __syncthreads();
 
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -1138,25 +1180,21 @@ while (1) {
 }
 
 extern "C" {
-// Effective wavefront width of the running device (32 on RDNA/NVIDIA, 64 on
-// GCN/CDNA). ft_ao.py queries this so the host-side nGv_per_block / shm_size it
-// passes to build_ft_aopair match the per-arch device WARP_SIZE in a single
-// multi-arch (fat-binary) build.
-int PBC_warp_size()
+int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids,
+                int *shl_offsets, int nbatches_shell, int *head, cudaStream_t stream)
 {
-    return gpu4pyscf_effective_warp_size();
-}
-
-int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, cudaStream_t stream)
-{
-    // NG_PER_BLOCK and FT_AO_THREADS are fixed (ft_ao.cuh), so this host launch
-    // matches the device kernel on every arch of a multi-arch build.
-    int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
-    dim3 threads(NG_PER_BLOCK, nsh_per_block);
-    int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
-    int nbatches_shls = (envs->nbas + nsh_per_block - 1) / nsh_per_block;
-    dim3 blocks(nbatches_grids, nbatches_shls);
-    ft_ao_bdiv_kernel<<<blocks, threads, 0, stream>>>(out, *envs, ngrids, grids);
+    if (nbatches_shell == 0 || ngrids == 0) {
+        return 0;
+    }
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    cudaMemsetAsync(head, 0, sizeof(int), stream);
+    auto threads = make_block(FT_AO_THREADS);
+    auto blocks = make_grid(prop.multiProcessorCount);
+    LAUNCH_KERNEL(ft_ao_bdiv_kernel, blocks, threads, 0, stream,
+            out, *envs, ngrids, grids, shl_offsets, nbatches_shell, head);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_ao_bdiv_kernel: %s\n", cudaGetErrorString(err));
@@ -1171,12 +1209,20 @@ int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool, int *head,
                     int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph, cudaStream_t stream)
 {
+#ifdef USE_SYCL
+    // No tasks: the persistent workers would compute batch_id / 0.
+    if (nbatches_shl_pair <= 0 || ngrids <= 0) {
+        return 0;
+    }
+#endif
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     cudaMemsetAsync(head, 0, sizeof(int), stream);
-    ft_aopair_kernel<<<workers, THREADS, shm_size, stream>>>(
+    auto blocks = make_grid(workers);
+    auto threads = make_block(THREADS);
+    LAUNCH_KERNEL( ft_aopair_kernel, blocks, threads, shm_size, stream,
         out, *envs, pool, shl_pair_offsets, bas_ij_idx, img_idx, img_offsets,
         gout_stride_lookup, ao_pair_loc, ao_pair_offset, grids, ngrids,
         ao_loc, compressing, to_sph, head, nbatches_shl_pair);

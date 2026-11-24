@@ -8,6 +8,9 @@
 #define Ey_at(i,j,t)    Ey[(i)*stride1+(j)*stride2+t]
 #define Ez_at(i,j,t)    Ez[(i)*stride1+(j)*stride2+t]
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void get_E_cart_components(double *Ecart, int li, int lj, double ai, double aj,
                            double *Ra, double *Rb)
 {
@@ -128,7 +131,7 @@ void Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
         size_t nao = ao_loc[nbas];
         size_t nao2 = nao * nao;
@@ -181,7 +184,7 @@ void Et_dot_auxvec(double *Et_auxvec, double *auxvec, int n_dm, int *aux_xyz_loc
 {
         int Et_size = (L_AUX_MAX+1)*(L_AUX_MAX+2)*(L_AUX_MAX+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*L_AUX_MAX+1)*(L_AUX_MAX+1)*(L_AUX_MAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
         int naux = aux_loc[nbas];
         int Et_auxvec_size = aux_xyz_loc[nbas];
@@ -217,7 +220,7 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
         size_t nao = ao_loc[nbas];
         size_t nao2 = nao * nao;
@@ -284,7 +287,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
         double rjL[3];
         size_t nao = ao_loc[c_nbas]; // for the unit cell
@@ -361,7 +364,7 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
         double rjL[3];
         size_t nao = ao_loc[c_nbas];
@@ -422,3 +425,7 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
         free(Et);
 }
 }
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

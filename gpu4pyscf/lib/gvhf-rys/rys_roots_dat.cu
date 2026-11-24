@@ -1,4 +1,6 @@
-__device__
+#include "gpu_compat.h"
+
+DEVICE_CONST
 double ROOT_SMALLX_R0[] = {
 // nroots = 1
 3.3333333333333333e-01,
@@ -67,7 +69,7 @@ double ROOT_SMALLX_R0[] = {
 9.8630441451934892e-01,
 };
 
-__device__
+DEVICE_CONST
 double ROOT_SMALLX_R1[] = {
 // nroots = 1
 -8.8888888888888888e-02,
@@ -136,7 +138,7 @@ double ROOT_SMALLX_R1[] = {
 -6.5892763019479263e-04,
 };
 
-__device__
+DEVICE_CONST
 double ROOT_SMALLX_W0[] = {
 // nroots = 1
 1.0000000000000000e+00,
@@ -205,7 +207,7 @@ double ROOT_SMALLX_W0[] = {
 1.7614007139152118e-02,
 };
 
-__device__
+DEVICE_CONST
 double ROOT_SMALLX_W1[] = {
 // nroots = 1
 -3.3333333333333331e-01,
@@ -274,7 +276,7 @@ double ROOT_SMALLX_W1[] = {
 -1.6531204416842745e-02,
 };
 
-__device__ double ROOT_LARGEX_R_DATA[] = {
+DEVICE_CONST double ROOT_LARGEX_R_DATA[] = {
 // nroots = 1
 5.0000000000000000e-01,
 // nroots = 2
@@ -342,7 +344,7 @@ __device__ double ROOT_LARGEX_R_DATA[] = {
 6.0192063149587915e-02,
 };
 
-__device__ double ROOT_LARGEX_W_DATA[] = {
+DEVICE_CONST double ROOT_LARGEX_W_DATA[] = {
 // nroots = 1
 1.0000000000000000e+00,
 // nroots = 2
@@ -410,7 +412,7 @@ __device__ double ROOT_LARGEX_W_DATA[] = {
 5.2158612689910977e-01,
 };
 
-__device__ double ROOT_RW_DATA[] = {
+DEVICE_CONST double ROOT_RW_DATA[] = {
 // nroots = 1
 // root 0
  2.44302310464373174e-01,

@@ -40,6 +40,7 @@ from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.pbc import super_cell
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
+from gpu4pyscf import BACKEND
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, transpose_sum, ndarray, asarray, tag_array, load_library, absmax,
@@ -2563,7 +2564,7 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
         t0 = log.timer("xc integration", *t0)
         return grad_sigma.get()
 
-    if cp.cuda.runtime.is_hip:
+    if BACKEND == 'hip':
         def to_cpu(self):
             # No GPU libXC on HIP: the XC-on-CPU fallback in gpu4pyscf/dft/numint.py
             # calls to_cpu().eval_xc_eff(...). Supply a CPU numint for that without

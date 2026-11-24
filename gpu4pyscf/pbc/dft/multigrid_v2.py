@@ -28,6 +28,7 @@ from pyscf.pbc.lib.kpts import KPoints
 from pyscf.gto.mole import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
+from gpu4pyscf import BACKEND
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 from gpu4pyscf.lib import logger, utils
@@ -1980,8 +1981,6 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
                                      rho1_sf, grids, with_j, with_nuc)
     return out
 
-_MULTIGRID_HIP_WARNED = False
-
 def _warn_multigrid_on_hip():
     '''Advise against multigrid on ROCm/HIP (once per process).
 
@@ -1992,10 +1991,8 @@ def _warn_multigrid_on_hip():
     get_hcore optimization already falls back to FFTDF on HIP; this only warns
     when a user explicitly selects multigrid.
     '''
-    global _MULTIGRID_HIP_WARNED
-    if _MULTIGRID_HIP_WARNED or not cp.cuda.runtime.is_hip:
+    if BACKEND != 'hip':
         return
-    _MULTIGRID_HIP_WARNED = True
     warnings.warn(
         'multigrid (v2) on ROCm/HIP: the collocation kernels are currently slow '
         '(often slower than the default FFTDF path) and can hard-hang the GPU '
@@ -2005,6 +2002,7 @@ def _warn_multigrid_on_hip():
 class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     def __init__(self, cell):
         _warn_multigrid_on_hip()
+        assert BACKEND == 'cuda', 'multigrid_v2 requires the CUDA backend'
         self.cell = cell
         self.mesh = cell.mesh
         self.tasks = None
@@ -2237,12 +2235,4 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
     device = utils.device
 
     def to_cpu(self):
-        if not cp.cuda.runtime.is_hip:
-            raise RuntimeError('Not available')
-        # No HIP libXC: on AMD the XC-on-CPU fallback (gpu4pyscf/dft/numint.py)
-        # calls to_cpu().eval_xc_eff(...) each SCF cycle. There is no CPU<->GPU
-        # bridge for the multigrid grid machinery, so return a lightweight CPU
-        # numint sufficient for that functional evaluation. Removable once a
-        # HIP libXC keeps XC on the GPU.
-        from pyscf.pbc.dft import numint as numint_cpu
-        return numint_cpu.NumInt()
+        raise RuntimeError('Not available')

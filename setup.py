@@ -34,6 +34,20 @@ DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
 
+# Backend selection is explicit and independent of installed toolkits.
+def build_backend():
+    backend = os.getenv('GPU4PYSCF_BACKEND', 'cuda').strip().lower()
+    if backend not in ('cuda', 'hip', 'sycl'):
+        raise ValueError('GPU4PYSCF_BACKEND must be cuda, hip, or sycl')
+    return backend
+
+
+def get_sycl_version():
+    icpx_out = subprocess.check_output(["icpx", "--version"]).decode('utf-8')
+    m = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", icpx_out)
+    return m.group(0)
+
+
 def get_cuda_version():
     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
     m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
@@ -43,18 +57,6 @@ def get_cuda_version():
         # code compiled by 12.4+ may not run on 12.1-12.3
         return major_version + '1'
     return major_version + 'x'
-
-# ---------------------------------------------------------------------------
-# GPU backend selection: NVIDIA CUDA (default) or AMD HIP/ROCm.
-# The CUDA path is unchanged; the HIP path is only taken when explicitly
-# requested (USE_HIP=1) or auto-detected on a ROCm-only machine (no nvcc).
-# ---------------------------------------------------------------------------
-def _env_flag(name):
-    """True/False for an explicitly set env var, or None if it is unset."""
-    val = os.getenv(name)
-    if val is None:
-        return None
-    return val.strip().lower() in ('1', 'on', 'true', 'yes')
 
 def find_rocm_path():
     """Best-effort location of a ROCm/HIP install (env first, then hipconfig)."""
@@ -69,21 +71,6 @@ def find_rocm_path():
         except Exception:
             pass
     return None
-
-def use_hip():
-    """Select the AMD HIP/ROCm backend instead of NVIDIA CUDA.
-
-    An explicit ``USE_HIP`` environment variable (1/0) always wins. Otherwise
-    the backend is auto-detected: CUDA when ``nvcc`` is on PATH, else HIP when a
-    ROCm install is found. On machines with a CUDA toolkit the default (CUDA) is
-    unchanged.
-    """
-    flag = _env_flag('USE_HIP')
-    if flag is not None:
-        return flag
-    if shutil.which('nvcc'):
-        return False
-    return find_rocm_path() is not None
 
 def get_rocm_version():
     """ROCm major-version tag for the package name, e.g. '7x'. Best-effort."""
@@ -101,7 +88,7 @@ def _hip_missing(summary, *hints):
     """Build an actionable error for a missing HIP/ROCm build prerequisite."""
     lines = ['', summary]
     lines += [f'  * {h}' for h in hints]
-    lines.append('To build the NVIDIA/CUDA backend instead, set USE_HIP=0.')
+    lines.append('To build the NVIDIA/CUDA backend instead, set GPU4PYSCF_BACKEND=cuda.')
     lines.append('')
     return RuntimeError('\n'.join(lines))
 
@@ -121,37 +108,7 @@ def get_version():
 
 VERSION = get_version()
 
-USE_HIP = use_hip()
-
-
-# AMD GPU build presets. GPU_TARGET selects what hardware to build for; an
-# explicit GPU_ARCHITECTURES always overrides it. CDNA lists specific datacenter
-# chips (best perf); RDNA uses per-generation "generic" targets (one code object
-# per family, covers member GPUs incl. APUs). Edit these to add hardware.
-HIP_CDNA_ARCHS = 'gfx908;gfx90a;gfx942;gfx950'
-HIP_RDNA_ARCHS = 'gfx10-3-generic;gfx11-generic;gfx12-generic'
-
-
-def resolve_gpu_architectures():
-    """Resolve the AMD GPU target to a GPU_ARCHITECTURES list (or None to autodetect).
-
-    An explicit GPU_ARCHITECTURES wins. Otherwise GPU_TARGET is a convenience
-    selector: native/auto (default) -> autodetect the installed GPU(s);
-    all/cdna/rdna -> curated family lists; anything else -> an explicit gfx arch
-    or ';'-list (e.g. gfx942 or "gfx942;gfx1100").
-    """
-    explicit = os.getenv('GPU_ARCHITECTURES')
-    if explicit:
-        return explicit
-    target = os.getenv('GPU_TARGET', 'native').strip()
-    key = target.lower()
-    if key in ('', 'native', 'auto'):
-        return None
-    return {
-        'all': f'{HIP_CDNA_ARCHS};{HIP_RDNA_ARCHS}',
-        'cdna': HIP_CDNA_ARCHS,
-        'rdna': HIP_RDNA_ARCHS,
-    }.get(key, target)
+BACKEND = build_backend()
 
 
 class CMakeBuildPy(build_py):
@@ -165,11 +122,16 @@ class CMakeBuildPy(build_py):
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
         cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
-        if USE_HIP:
+        if BACKEND == 'hip':
             cmd.extend(self._setup_hip_build())
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
         if configure_args:
             cmd.extend(configure_args.split(' '))
+        cmd.append(f'-DGPU4PYSCF_BACKEND={BACKEND}')
+        # CMake expands architecture presets for both setup.py and direct builds.
+        arch_var = f'{BACKEND.upper()}_ARCHITECTURES'
+        if os.getenv(arch_var):
+            cmd.append(f'-D{arch_var}={os.environ[arch_var]}')
         self.spawn(cmd)
 
         self.announce('Building binaries', level=3)
@@ -187,9 +149,8 @@ class CMakeBuildPy(build_py):
     def _setup_hip_build(self):
         """Environment and CMake flags for an AMD HIP/ROCm build.
 
-        Locate ROCm, export its paths, and select the HIP language via
-        -DUSE_HIP=ON. The GPU architecture is auto-detected (rocm_agent_enumerator)
-        or chosen with GPU_TARGET / GPU_ARCHITECTURES. Missing prerequisites raise
+        Locate ROCm and export its paths. The GPU architecture is auto-detected
+        (rocm_agent_enumerator) or chosen with HIP_ARCHITECTURES. Missing prerequisites raise
         an actionable error before CMake runs.
         """
         rocm_path = find_rocm_path()
@@ -222,39 +183,13 @@ class CMakeBuildPy(build_py):
                 "install the ROCm LLVM/clang toolchain,",
                 "or set CMAKE_HIP_COMPILER to a HIP-capable clang++ "
                 "(e.g. $ROCM_PATH/llvm/bin/clang++)")
-        args = ['-DUSE_HIP=ON', f'-DCMAKE_HIP_COMPILER={hip_compiler}']
+        args = [f'-DCMAKE_HIP_COMPILER={hip_compiler}']
 
         # Default to an optimized Release build (overridable via
         # CMAKE_CONFIGURE_ARGS="-DCMAKE_BUILD_TYPE=...", which is appended later).
         args.append('-DCMAKE_BUILD_TYPE=Release')
 
-        # GPU architecture: an explicit GPU_ARCHITECTURES / GPU_TARGET preset wins;
-        # otherwise pre-flight the auto-detection so a missing enumerator / invisible
-        # GPU gives a clear message here instead of a mid-configure CMake fatal error.
-        gpu_arch = resolve_gpu_architectures()
-        if gpu_arch:
-            args.append(f'-DGPU_ARCHITECTURES={gpu_arch}')
-        elif not os.getenv('CMAKE_HIP_ARCHITECTURES'):
-            if not self._detect_hip_archs(rocm_path):
-                raise _hip_missing(
-                    "Could not determine the AMD GPU architecture automatically.",
-                    "pass GPU_TARGET=all|rdna|cdna or GPU_ARCHITECTURES=gfxXXXX "
-                    "(e.g. gfx90a, gfx942, gfx1100, gfx1151),",
-                    "or make 'rocm_agent_enumerator' available with a GPU visible")
         return args
-
-    @staticmethod
-    def _detect_hip_archs(rocm_path):
-        """Installed AMD GPU gfx targets via rocm_agent_enumerator (best-effort)."""
-        enumerator = shutil.which('rocm_agent_enumerator') \
-            or os.path.join(rocm_path, 'bin', 'rocm_agent_enumerator')
-        if not os.path.exists(enumerator):
-            return []
-        try:
-            out = subprocess.check_output([enumerator]).decode('utf-8')
-        except Exception:
-            return []
-        return [a for a in out.split() if a.startswith('gfx') and a != 'gfx000']
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
@@ -279,7 +214,22 @@ try:
 except ImportError:
     pass
 
-if USE_HIP and 'sdist' not in sys.argv:
+if any(arg in sys.argv for arg in ('--help', '-h', '--help-commands')):
+    # Help needs no backend dependencies or installed GPU toolkit.
+    package_name = NAME
+    install_requires = []
+elif 'sdist' in sys.argv:
+    # Source releases declare common dependencies without probing a GPU toolkit.
+    package_name = NAME
+    install_requires = [
+        'pyscf>=2.8.0',
+        'geometric',
+        'packaging',
+    ]
+elif BACKEND == 'sycl':
+    package_name = NAME + '-sycl' + get_sycl_version()
+    install_requires = ['pyscf>=2.8.0', 'dpnp', 'geometric', 'packaging']
+elif BACKEND == 'hip':
     # AMD ROCm/HIP build. CuPy for ROCm and (optionally) PyTorch-ROCm are
     # provided by the environment -- there is no cupy-rocm / gpu4pyscf-libxc-rocm
     # wheel to depend on -- so only the backend-agnostic requirements are declared.
@@ -290,14 +240,11 @@ if USE_HIP and 'sdist' not in sys.argv:
         'packaging',
     ]
 else:
-    # NVIDIA CUDA build, and the backend-agnostic sdist source release.
+    # NVIDIA CUDA build.
     package_name = NAME
-    if 'sdist' in sys.argv:
-        CUDA_VERSION = '12x'
-    else:
-        CUDA_VERSION = get_cuda_version()
-        if os.getenv('GPU4PYSCF_BUILD_CUDA_WHEEL'):
-            package_name = NAME + '-cuda' + CUDA_VERSION
+    CUDA_VERSION = get_cuda_version()
+    if os.getenv('GPU4PYSCF_BUILD_CUDA_WHEEL'):
+        package_name = NAME + '-cuda' + CUDA_VERSION
     install_requires = [
         'pyscf>=2.8.0',
         f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
