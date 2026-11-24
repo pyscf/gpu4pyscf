@@ -21,17 +21,16 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, ndarray
 from gpu4pyscf.pbc.df.fft_jk import (
-    _ewald_exxdiv_for_G0, _format_dms, _format_jks, _factorize_dm)
+    _ewald_exxdiv_for_G0, _format_dms, _format_jks, _factorize_dm, _format_kpts_band)
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, fft_matrix, conj_kpts, _get_kmesh)
+    kk_adapted_iter, fft_matrix, conj_kpts, _get_kmesh, _normalize_kpts)
 
 def density_fit(mf, auxbasis=None, with_df=None):
     '''Generate density-fitting SCF object
@@ -58,14 +57,24 @@ def density_fit(mf, auxbasis=None, with_df=None):
     mf.with_df = with_df
     return mf
 
+def _check_df_kpts(mydf, kpts):
+    """Validate the requested sampling and return the DF sampling object."""
+    if kpts is not mydf.kpts:
+        kpts, _ = _normalize_kpts(mydf.cell, kpts)
+        df_scaled_k = mydf.kpts.kpts_scaled
+        assert (df_scaled_k.shape == kpts.kpts_scaled.shape and
+                is_zero(df_scaled_k - kpts.kpts_scaled)), \
+                'kpts must match the DF sampling in the same order'
+    return mydf.kpts
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
+    '''Coulomb matrices for coordinate arrays or KPointSampling.'''
     log = logger.new_logger(mydf)
     t0 = log.init_timer()
     assert kpts_band is None or kpts_band is kpts
-    assert mydf.has_kpts(kpts)
+    kpts, input_kpts = _check_df_kpts(mydf, kpts), kpts
     if mydf._cderi is None:
-        mydf.build(j_only=True, kpts_band=kpts_band)
+        mydf.build(j_only=True)
         t0 = log.timer_debug1('Init get_j_kpts', *t0)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
@@ -77,7 +86,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
     pair_address, _ = mydf._cderi_idx
     pair_address = cp.asarray(pair_address, dtype=np.int32)
-    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts, mydf.bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts.kpts, mydf.bvkmesh)
     assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     expLk = fft_matrix(kmesh, with_gamma_point)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
@@ -118,11 +127,10 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj = rsdf_builder._unpack_cderi_v2(
         vj_packed, pair_address, kj_idx, conj_mapping, expLk, nao)
     vj = vj.transpose(1,0,2,3)
-    if is_zero(kpts_band) and not np.iscomplexobj(dms):
+    if kpts.is_gamma_only() and not np.iscomplexobj(dms):
         vj = vj.real
     vj *= 1./nkpts
-    return _format_jks(vj, dm_kpts,
-                       kpts_band if input_band is not None else None, kpts)
+    return _format_jks(vj, dm_kpts, input_band, input_kpts)
 
 
 def get_j_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None):
@@ -130,6 +138,7 @@ def get_j_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
+    '''Exchange matrices for coordinate arrays or KPointSampling.'''
     cell = mydf.cell
     log = logger.new_logger(mydf)
 
@@ -140,10 +149,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     t0 = (logger.process_clock(), logger.perf_counter())
     assert kpts_band is None or kpts_band is kpts
-    assert mydf.has_kpts(kpts)
+    kpts, input_kpts = _check_df_kpts(mydf, kpts), kpts
     # J-only integrals omit the k-point pairs required for exchange.
     if mydf._cderi is None or mydf._j_only:
-        mydf.build(j_only=False, kpts_band=kpts_band)
+        mydf.build(j_only=False)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
@@ -202,7 +211,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     for p0, p1 in lib.prange(0, naux, blksize)
                     for kp in mydf._cderi])
     k_adapt_dic = {}
-    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts, mydf.bvkmesh)
+    kmesh, with_gamma_point = _get_kmesh(mydf.cell, kpts.kpts, mydf.bvkmesh)
     assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(kmesh, with_gamma_point):
         # ki_idx is already sorted
@@ -211,8 +220,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     assert len(mydf._cderi) == len(k_adapt_dic), \
             'cderi should be initialized with j_only=False'
 
-    if (is_zero(kpts) and is_zero(kpts_band) and
-        not np.iscomplexobj(dm_kpts)):
+    if kpts.is_gamma_only() and not np.iscomplexobj(dm_kpts):
         dtype = np.float64
     else:
         dtype = np.complex128
@@ -267,8 +275,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     if exxdiv == 'ewald':
         _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band)
     log.timer('get_k_kpts', *t0)
-    return _format_jks(vk, dm_kpts,
-                       kpts_band if input_band is not None else None, kpts)
+    return _format_jks(vk, dm_kpts, input_band, input_kpts)
 
 def get_k_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None,
                       exxdiv=None):
@@ -288,6 +295,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     assert kpts_band is None
     if not is_zero(kpt):
         raise NotImplementedError(f'get_jk for single k-point {kpt}')
+    assert mydf.kpts.is_gamma_only(), 'kpt must match the DF sampling'
 
     if mydf._cderi is None:
         mydf.build(j_only=not with_k)

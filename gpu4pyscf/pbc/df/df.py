@@ -31,8 +31,6 @@ from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.df.gdf_builder import libpbc
-from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
@@ -42,8 +40,8 @@ from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import AFTDF
 from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    _as_kpts_array, kpts_to_bvkmesh, reset_kpts, fft_matrix, conj_kpts,
-    _normalize_kpts, _get_kmesh)
+    kpts_to_bvkmesh, reset_kpts, fft_matrix, conj_kpts, _normalize_kpts,
+    _get_kmesh)
 
 
 class GDF(lib.StreamObject):
@@ -77,13 +75,7 @@ class GDF(lib.StreamObject):
 
     @kpts.setter
     def kpts(self, val):
-        if val is None:
-            self._kpts = KPointSampling.gamma_point(self.cell)
-        elif isinstance(val, (KPoints, KPointSampling)):
-            self._kpts = val
-        else:
-            self._kpts = KPointSampling.from_kpts(
-                self.cell, np.asarray(val).reshape(-1, 3))
+        self._kpts, _ = _normalize_kpts(self.cell, val)
 
     def reset(self, cell=None):
         if cell is not None:
@@ -128,9 +120,9 @@ class GDF(lib.StreamObject):
         self.nao = cell.nao
         self._omega = cell.omega
 
-        kpts = _as_kpts_array(self.kpts)
+        kpts = self.kpts
         if self.is_gamma_point:
-            assert kpts is None or is_zero(kpts)
+            assert kpts.is_gamma_only()
             self.bvkmesh = [1] * 3
         else:
             self.bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
@@ -145,10 +137,6 @@ class GDF(lib.StreamObject):
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
 
-    def has_kpts(self, kpts):
-        cpu_df = self.view(df_cpu.GDF)
-        cpu_df.kpts = _as_kpts_array(self.kpts)
-        return df_cpu.GDF.has_kpts(cpu_df, _as_kpts_array(kpts))
     weighted_coulG = AFTDF.weighted_coulG
     pw_loop = NotImplemented
     ft_loop = NotImplemented
@@ -176,15 +164,16 @@ class GDF(lib.StreamObject):
             self.build(j_only=self._j_only)
         nkpts = len(self.kpts)
         if kpts is None:
-            kpts = _as_kpts_array(self.kpts)
+            kpts = self.kpts
         else:
+            kpts, _ = _normalize_kpts(cell, kpts)
             assert len(kpts) == nkpts
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
         pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
-            kmesh, with_gamma_point = _get_kmesh(cell, kpts, self.bvkmesh)
+            kmesh, with_gamma_point = _get_kmesh(cell, kpts.kpts, self.bvkmesh)
             assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
             expLk = fft_matrix(kmesh, with_gamma_point)
             nao = cell.nao
@@ -253,9 +242,9 @@ class GDF(lib.StreamObject):
         if self.is_gamma_point:
             return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
         else:
-            kpts, is_single_kpt = _normalize_kpts(kpts)
+            kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
             if is_single_kpt:
-                return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
+                return df_jk.get_jk(self, dm, hermi, kpts.kpts[0], kpts_band, with_j,
                                     with_k, exxdiv)
         vj = vk = None
         if with_k:
@@ -287,7 +276,7 @@ class GDF(lib.StreamObject):
                 Allows multiple GPU executors to share the producer, dynamically
                 loading the tesnor blocks as needed.
         '''
-        assert is_zero(_as_kpts_array(self.kpts))
+        assert self.kpts.is_gamma_only()
         cell = self.cell
         cderi_sparse = self._cderi[0]
         naux, npairs = cderi_sparse.shape
