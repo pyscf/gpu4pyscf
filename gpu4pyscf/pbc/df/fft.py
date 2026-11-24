@@ -30,7 +30,7 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk, aft
-from gpu4pyscf.pbc.df.aft import _check_kpts, get_SI, _get_ZSI
+from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
@@ -52,8 +52,7 @@ def get_nuc(mydf, kpts=None):
         cupy.ndarray
             AO matrix with dimensions following the kpts convention.
     '''
-    from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -65,11 +64,10 @@ def get_nuc(mydf, kpts=None):
 
     nkpts = len(kpts)
     nao = cell.nao
-    if is_zero(kpts):
+    if kpts.is_gamma_only():
         vne = cp.zeros((nkpts,nao,nao))
     else:
         vne = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
-    kpts = np.asarray(kpts)
 
     ni = mydf._numint
     deriv = 0
@@ -100,8 +98,7 @@ def get_pp(mydf, kpts=None):
         cupy.ndarray
             AO matrix with dimensions following the kpts convention.
     '''
-    from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -116,11 +113,10 @@ def get_pp(mydf, kpts=None):
     ngrids = len(vpplocG)
     nkpts = len(kpts)
     nao = cell.nao
-    if is_zero(kpts):
+    if kpts.is_gamma_only():
         vpp = cp.zeros((nkpts,nao,nao))
     else:
         vpp = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
-    kpts = np.asarray(kpts)
 
     ni = mydf._numint
     deriv = 0
@@ -187,7 +183,7 @@ def get_pp(mydf, kpts=None):
                         vppnl += contract('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
         return vppnl * (1./cell.vol)
 
-    for k, kpt in enumerate(kpts):
+    for k, kpt in enumerate(kpts.kpts):
         vppnl = vppnl_by_k(kpt)
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl.real)
@@ -281,9 +277,9 @@ class FFTDF(lib.StreamObject):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
         if is_single_kpt:
-            vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
+            vj, vk = fft_jk.get_jk(self, dm, hermi, kpts.kpts[0], kpts_band,
                                    with_j, with_k, exxdiv)
         else:
             vj = vk = None

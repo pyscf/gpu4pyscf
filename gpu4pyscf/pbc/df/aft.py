@@ -46,7 +46,9 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
     kpt_allow = np.zeros(3)
     if cell.dimension > 0:
         ke_guess = aft_cpu.estimate_ke_cutoff(cell, cell.precision)
@@ -76,7 +78,7 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     for Gpq, p0, p1 in mydf.ft_loop(mesh, kpt_allow, kpts):
         vj += contract('kGpq,G->kpq', Gpq, vpplocG[p0:p1].conj())
 
-    if is_zero(kpts):
+    if is_gamma_point:
         vj = vj.real
     if is_single_kpt:
         vj = vj[0]
@@ -100,7 +102,8 @@ def get_pp(mydf, kpts=None):
             AO matrix with dimensions following the kpts convention.
     '''
     cell = mydf.cell
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
+    kpts = kpts.kpts
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
@@ -242,7 +245,8 @@ class AFTDF(lib.StreamObject):
         if kpts is None:
             assert is_zero(q)
             kpts = self.kpts
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        kpts = kpts.kpts
         if bvkmesh is None:
             bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
@@ -316,9 +320,9 @@ class AFTDF(lib.StreamObject):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
         if is_single_kpt:
-            return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
+            return aft_jk.get_jk(self, dm, hermi, kpts.kpts[0], kpts_band, with_j,
                                   with_k, exxdiv, omega)
 
         vj = vk = None
@@ -353,37 +357,6 @@ class AFTDF(lib.StreamObject):
         out = utils.to_cpu(self, out=out)
         out.kpts = kpts
         return out
-
-def _check_kpts(kpts, dm=None):
-    '''Normalize k-point sampling and optionally validate the density layout.
-
-    kpts follows the PySCF kpts convention; see
-    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
-
-    If dm is supplied, single-point sampling requires an RHF (nao, nao)
-    or UHF (2, nao, nao) density. Batched sampling requires KRHF
-    (nkpts, nao, nao) or KUHF (2, nkpts, nao, nao) densities.
-
-    Returns an (nkpts, 3) k-point array and is_single_kpt.
-    '''
-    kpts, is_single_kpt = _normalize_kpts(kpts)
-    if dm is None:
-        return kpts, is_single_kpt
-
-    if is_single_kpt:
-        assert (dm.ndim == 2 or # RHF
-                (dm.ndim == 3 and len(dm) == 2)) # UHF
-        return kpts.reshape(1, 3), is_single_kpt
-
-    is_single_kpt = False
-    nkpts = len(kpts)
-    if dm.ndim == 2:
-        raise RuntimeError('dm.ndim == 2, incompatible with kpts')
-    elif dm.ndim == 3: # KRHF
-        assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
-    else:
-        assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
-    return kpts, is_single_kpt
 
 def _fake_nuc(cell, with_pseudo=True):
     '''A fake cell with steep gaussians to mimic nuclear density
