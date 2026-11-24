@@ -19,8 +19,8 @@ name: SYCL CI (GitLab runner)
 # runs that build untrusted PR code on JLSE.
 #
 # Pull requests from forks do not receive repo secrets, so the trigger step is
-# skipped there and a comment explains that the scheduled GitLab poller covers
-# them instead (PR_REPO defaults to pyscf/gpu4pyscf). No GitHub-side
+# skipped there and the job summary notes that the scheduled GitLab poller
+# covers them instead (PR_REPO defaults to pyscf/gpu4pyscf). No GitHub-side
 # credentials are needed for that path.
 #
 # Required GitHub secrets (optional):
@@ -35,15 +35,22 @@ on:
     types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to run SYCL CI on (maintainers only)'
+        required: true
+        type: string
 
 permissions:
+  contents: read
   pull-requests: write
   issues: write
 
 concurrency:
   # key on the event name too, so a plain comment cannot cancel an in-flight
   # pull_request trigger run
-  group: sycl-jlse-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: sycl-jlse-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
@@ -60,22 +67,27 @@ jobs:
       # the secrets context is not allowed in step `if:`, so pass them via env
       JLSE_PROJECT: ${{ secrets.JLSE_GITLAB_PROJECT }}
       JLSE_TOKEN: ${{ secrets.JLSE_GITLAB_TRIGGER_TOKEN }}
+      # fork pull_request runs get no secrets and a read-only GITHUB_TOKEN
+      IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
     steps:
       - name: Resolve PR number, head SHA and base repo
         id: pr
         uses: actions/github-script@v7
         with:
           script: |
-            let prNumber, sha, baseRepo;
+            let prNumber, sha, baseRepo, ref;
             if (context.eventName === 'pull_request') {
               prNumber = context.payload.pull_request.number;
               sha = context.payload.pull_request.head.sha;
               baseRepo = context.payload.pull_request.base.repo.full_name;
               ref = context.payload.pull_request.base.repo.default_branch;
-            } else if (context.payload.issue && context.payload.issue.pull_request) {
+            } else if (context.eventName === 'workflow_dispatch' ||
+                       (context.payload.issue && context.payload.issue.pull_request)) {
+              const num = context.eventName === 'workflow_dispatch'
+                ? Number(context.payload.inputs.pr_number) : context.payload.issue.number;
               const pr = (await github.rest.pulls.get({
                 owner: context.repo.owner, repo: context.repo.repo,
-                pull_number: context.payload.issue.number})).data;
+                pull_number: num})).data;
               prNumber = pr.number; sha = pr.head.sha; baseRepo = pr.base.repo.full_name;
               ref = pr.base.repo.default_branch;
             } else {
@@ -100,11 +112,23 @@ jobs:
             --data-urlencode "variables[PR_SHA]=${{ steps.pr.outputs.sha }}" \
             --data-urlencode "variables[PR_REPO]=${{ steps.pr.outputs.repo }}")
           echo "$resp"
-          echo "url=$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["web_url"])')" >> "$GITHUB_OUTPUT"
+          url=$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["web_url"])')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=SYCL CI (GitLab)::triggered for PR #${{ steps.pr.outputs.number }}: $url"
+          echo "SYCL CI (GitLab): triggered for PR #${{ steps.pr.outputs.number }} -> $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report skip (no JLSE secrets; GitLab poller covers this PR)
+        if: ${{ steps.pr.outputs.number != '' && (env.JLSE_PROJECT == '' || env.JLSE_TOKEN == '') }}
+        run: |
+          if [ "$IS_FORK_PR" = "true" ]; then why="fork PR has no JLSE secrets"; else why="no JLSE trigger secrets configured on this repo"; fi
+          msg="SYCL CI (GitLab): skipped here -- $why; the scheduled poller on gitlab.jlse runs PR #${{ steps.pr.outputs.number }} within ~10 min and posts the 'SYCL CI' commit status."
+          echo "::notice title=SYCL CI (GitLab)::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment on the PR
-        if: ${{ steps.pr.outputs.number != '' }}
-        continue-on-error: true   # fork PRs get a read-only token (403)
+        # fork PRs: read-only token, the step summary above is the report
+        if: ${{ steps.pr.outputs.number != '' && env.IS_FORK_PR != 'true' }}
+        continue-on-error: true   # e.g. Dependabot PRs also get a read-only token (403)
         uses: actions/github-script@v7
         with:
           script: |
