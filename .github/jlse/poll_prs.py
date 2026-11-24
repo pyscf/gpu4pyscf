@@ -60,6 +60,8 @@ def post_pending_status(sha, pipeline_url):
     """
     tok = os.environ.get("GITHUB_STATUS_TOKEN")
     if not tok:
+        print("GITHUB_STATUS_TOKEN not set (ref %s protected=%s): no pending status"
+              % (os.environ.get("CI_COMMIT_REF_NAME"), os.environ.get("CI_COMMIT_REF_PROTECTED")))
         return
     try:
         github_post("/repos/%s/statuses/%s" % (REPO, sha), {
@@ -69,7 +71,9 @@ def post_pending_status(sha, pipeline_url):
             "target_url": pipeline_url}, tok)
         print("posted pending status on %s@%s" % (REPO, sha[:10]))
     except Exception as e:
-        print("pending status failed (non-fatal): %s" % e)
+        body = e.read()[:300] if hasattr(e, "read") else ""
+        print("WARNING: pending status failed on %s@%s: %s %s (token needs push access on %s)"
+              % (REPO, sha[:10], e, body, REPO))
 
 
 def trigger(pr, sha):
@@ -90,6 +94,7 @@ def trigger(pr, sha):
 
 def main():
     first_poll = not os.path.exists(STATE)
+    print("state file: %s (first poll: %s)" % (STATE, first_poll))
     try:
         with open(STATE) as f:
             state = json.load(f)
@@ -111,8 +116,10 @@ def main():
         num, sha = str(pr["number"]), pr["head"]["sha"]
         assoc = pr.get("author_association", "NONE")
         if pr.get("draft"):
+            print("PR #%s skipped: draft" % num)
             continue
         if state.get(num) == sha:
+            print("PR #%s unchanged at %s (already triggered or baselined)" % (num, sha[:10]))
             continue
         if assoc not in ALLOWED:
             print("PR #%s held: author_association=%s (allowed: %s)"

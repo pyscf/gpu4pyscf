@@ -55,10 +55,12 @@ concurrency:
 
 jobs:
   trigger:
+    # workflow_dispatch (manual pr_number input) and same-repo PRs run the
+    # trigger; fork PRs get no secrets and are covered by the GitLab poller,
+    # so the job is skipped there (shows neutral, not a misleading green).
+    # NOTE: keep comments out of the `if: >-` block scalar -- GitHub parses the
+    # scalar as one expression and '#' inside it breaks workflow loading.
     if: >-
-      # workflow_dispatch (manual pr_number input) and same-repo PRs run the
-      # trigger; fork PRs get no secrets and are covered by the GitLab poller,
-      # so the job is skipped there (shows neutral, not a misleading green).
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||

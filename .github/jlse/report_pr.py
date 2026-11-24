@@ -25,6 +25,7 @@ import glob
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 TAIL_LINES = 400
@@ -95,15 +96,26 @@ def main():
             print("gist upload failed (status/comment still posted): %s" % e)
 
     status_token = os.environ.get("GITHUB_STATUS_TOKEN")
+    print("tokens present: status=%s gist=%s comment=%s (ref %s, protected=%s)" % (
+        bool(status_token), bool(gist_token), bool(os.environ.get("GITHUB_COMMENT_TOKEN")),
+        os.environ.get("CI_COMMIT_REF_NAME"), os.environ.get("CI_COMMIT_REF_PROTECTED")))
+    status_failed = False
     if status_token and repo and sha:
-        post("https://api.github.com/repos/%s/statuses/%s" % (repo, sha), {
-            "state": {"success": "success", "canceled": "error"}.get(result, "failure"),
-            "context": "SYCL CI",
-            "description": "SYCL CI %s" % {"success": "passed", "canceled": "canceled"}.get(result, "failed"),
-            "target_url": details}, status_token)
-        print("posted commit status on %s@%s" % (repo, sha[:10]))
+        try:
+            post("https://api.github.com/repos/%s/statuses/%s" % (repo, sha), {
+                "state": {"success": "success", "canceled": "error"}.get(result, "failure"),
+                "context": "SYCL CI",
+                "description": "SYCL CI %s" % {"success": "passed", "canceled": "canceled"}.get(result, "failed"),
+                "target_url": details}, status_token)
+            print("posted commit status on %s@%s" % (repo, sha[:10]))
+        except urllib.error.HTTPError as e:
+            status_failed = True
+            print("ERROR: commit status POST failed: HTTP %s %s -- token needs push access on %s"
+                  % (e.code, e.read()[:300], repo))
     elif not status_token:
-        print("GITHUB_STATUS_TOKEN not set: no status posted to GitHub")
+        print("GITHUB_STATUS_TOKEN not set: no status posted to GitHub "
+              "(Protected variable on unprotected ref %s?)" % os.environ.get("CI_COMMIT_REF_NAME"))
+        status_failed = bool(pr) and os.environ.get("SYCL_CI_REQUIRE_STATUS", "1") == "1"
 
     comment_token = os.environ.get("GITHUB_COMMENT_TOKEN")
     if comment_token and repo and pr:
@@ -131,6 +143,9 @@ def main():
             print("PR comment failed (needs public_repo scope on public %s): %s" % (repo, e))
     elif not comment_token:
         print("GITHUB_COMMENT_TOKEN not set: no PR comment posted")
+
+    if status_failed and result != "canceled":
+        sys.exit("SYCL CI result was NOT published as a commit status (see above)")
 
 
 if __name__ == "__main__":

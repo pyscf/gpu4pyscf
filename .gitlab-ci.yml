@@ -139,12 +139,20 @@ sycl-test:
 
 report-success:
   extends: .report
-  when: on_success
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+      when: on_success
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PR_NUMBER'
+      when: on_success
   script:
     - python3 .github/jlse/report_pr.py success
 
 report-failure:
   extends: .report
-  when: on_failure
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+      when: on_failure
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PR_NUMBER'
+      when: on_failure
   script:
     - python3 .github/jlse/report_pr.py failure
