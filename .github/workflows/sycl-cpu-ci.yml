@@ -24,15 +24,11 @@ name: SYCL CPU CI
 # broken kernel build or import regression is still caught early.
 
 on:
+  # DEACTIVATED: SYCL CI runs on JLSE chiatta (Intel PVC) via .gitlab-ci.yml on
+  # gitlab.jlse.anl.gov, triggered per PR by .github/workflows/sycl-jlse-ci.yml
+  # or by the scheduled PR poller (see .github/jlse/README.md). This CPU/OpenCL
+  # build is kept for manual runs only (Actions tab -> Run workflow).
   workflow_dispatch: {}
-  # Run on every push and every pull request, the way lint.yml does, so the
-  # SYCL build is checked on each commit rather than only on the sycl branch.
-  # unittest.yml restricts itself to master because its runners are costly;
-  # this job is a build plus smoke test on a stock GitHub runner.
-  push:
-  pull_request:
-  issue_comment:
-    types: [created]
 
 permissions:
   # contents: write lets the always-run log step push build/test logs to a

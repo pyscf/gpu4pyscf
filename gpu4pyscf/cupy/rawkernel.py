@@ -178,6 +178,11 @@ static inline T atomicAdd(T *addr, T val) {
     return ref.fetch_add(val);
 }
 
+// __activemask(): upstream HIP-aware sources pass it as the shuffle mask. The
+// mask is ignored by the SYCL sub-group shuffles below, so a full-warp 32-bit
+// mask is the correct value here.
+static inline unsigned __activemask() { return 0xffffffffu; }
+
 // CUDA warp-shuffle-down -> SYCL sub-group shuffle-down. The mask argument
 // is accepted for source compatibility and ignored (matches full-warp use
 // in every embedded kernel; sub-group size is fixed by the compiled device).
@@ -186,10 +191,21 @@ static inline T __shfl_down_sync(unsigned mask, T val, unsigned delta) {
     (void)mask;
     return sycl::shift_group_left(g4p_compat::_it().get_sub_group(), val, delta);
 }
+// 4-arg form with explicit width (CUDA __shfl_*_sync(mask, val, delta, width)).
+template <typename T>
+static inline T __shfl_down_sync(unsigned mask, T val, unsigned delta, unsigned width) {
+    (void)width;
+    return __shfl_down_sync(mask, val, delta);
+}
 template <typename T>
 static inline T __shfl_up_sync(unsigned mask, T val, unsigned delta) {
     (void)mask;
     return sycl::shift_group_right(g4p_compat::_it().get_sub_group(), val, delta);
+}
+template <typename T>
+static inline T __shfl_up_sync(unsigned mask, T val, unsigned delta, unsigned width) {
+    (void)width;
+    return __shfl_up_sync(mask, val, delta);
 }
 template <typename T>
 static inline T __shfl_xor_sync(unsigned mask, T val, int lane_mask) {
@@ -197,9 +213,19 @@ static inline T __shfl_xor_sync(unsigned mask, T val, int lane_mask) {
     return sycl::permute_group_by_xor(g4p_compat::_it().get_sub_group(), val, lane_mask);
 }
 template <typename T>
+static inline T __shfl_xor_sync(unsigned mask, T val, int lane_mask, unsigned width) {
+    (void)width;
+    return __shfl_xor_sync(mask, val, lane_mask);
+}
+template <typename T>
 static inline T __shfl_sync(unsigned mask, T val, int src_lane) {
     (void)mask;
     return sycl::select_from_group(g4p_compat::_it().get_sub_group(), val, src_lane);
+}
+template <typename T>
+static inline T __shfl_sync(unsigned mask, T val, int src_lane, unsigned width) {
+    (void)width;
+    return __shfl_sync(mask, val, src_lane);
 }
 '''
 

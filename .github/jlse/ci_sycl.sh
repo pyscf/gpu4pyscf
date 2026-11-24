@@ -1,6 +1,7 @@
 #!/bin/bash
-# SYCL CI on a JLSE chiatta node (Intel PVC), run inside a GitLab CI job on the
-# Jacamar `batch` runner. Single GPU (level_zero:0).
+# SYCL CI on a GitLab `batch`-runner GPU node (Jacamar). The actual device is
+# printed at the top of every job log (dpctl device list / sycl-ls --verbose).
+# Single GPU per process (level_zero:0 via ZE_AFFINITY_MASK).
 #
 #   ci_sycl.sh build              build the SYCL backend, publish the built tree
 #                                 to $CI_ROOT/builds/$CI_PIPELINE_ID
@@ -80,7 +81,9 @@ toolchain_check() {
     env | grep -E '^(ZE_|ONEAPI_DEVICE_SELECTOR|OMP_NUM_THREADS)' | sort
     icpx --version | head -1
     python -c "import dpctl, dpnp; print('dpctl', dpctl.__version__, '| dpnp', dpnp.__version__); dpctl.lsplatform()"
-    python -c "import dpctl; d = dpctl.get_devices(device_type='gpu'); print(d); assert d, 'no SYCL GPU device'"
+    # Identify the actual device running this CI at the top of the log.
+    python -c "import dpctl; d = dpctl.get_devices(device_type='gpu'); print('GPU devices:', *d, sep='\n  '); assert d, 'no SYCL GPU device'"
+    sycl-ls --verbose 2>/dev/null | head -20 || true
   } 2>&1 | tee "$LOG_DIR/10_toolchain.log"
   if [ "${PIPESTATUS[0]}" -ne 0 ]; then
     echo "toolchain check failed; diagnostics:"
@@ -173,14 +176,93 @@ do_test() {
   [ -e "$BUILD_DIR/.build_ok" ] || { echo "no build for pipeline ${CI_PIPELINE_ID:-local} at $BUILD_DIR (did the build job run?)"; exit 1; }
   ENV_PREFIX="$(cat "$BUILD_DIR/.env_prefix")"
   [ -d "$ENV_PREFIX" ] || { echo "env $ENV_PREFIX from the build is gone"; exit 1; }
+
+  # How many GPU tiles to spread the tests over. Detected with the affinity
+  # mask removed (setup_env defaults it to 0 = single tile). Each test process
+  # gets exactly one tile via ZE_AFFINITY_MASK, so this stays on the supported
+  # single-device-per-process code path; the parallelism is across processes.
+  local tiles="${SYCL_TILES:-}"
+  if [ -z "$tiles" ]; then
+    tiles=$(env -u ZE_AFFINITY_MASK ONEAPI_DEVICE_SELECTOR=level_zero:gpu \
+      python3 -c 'import dpctl; print(len(dpctl.get_devices(device_type="gpu")))' 2>/dev/null || echo 1)
+  fi
+  [ "$tiles" -ge 1 ] 2>/dev/null || tiles=1
+
   setup_env || { echo "environment setup failed"; exit 1; }
   cd "$BUILD_DIR"
   export PYTHONPATH="$BUILD_DIR"
   toolchain_check || exit 1
-  # Same pytest invocation as upstream unittest.yml.
-  pytest -n "${PYTEST_WORKERS:-4}" --dist loadfile -m 'not slow and not benchmark and not special' \
-    --cov="$BUILD_DIR" --durations=50 "$@" 2>&1 | tee "$LOG_DIR/60_pytest.log"
-  exit "${PIPESTATUS[0]}"
+
+  # Same pytest invocation as upstream unittest.yml (.github/workflows/unittest.yml),
+  # including -k 'not _high_cost': the *_high_cost tests carry CUDA-tuned bounds
+  # (e.g. GDM cycle counts) and are excluded from upstream CI.
+  local pytest_args=(-n "${PYTEST_WORKERS:-4}" --dist loadfile
+    -m 'not slow and not benchmark and not special' -k 'not _high_cost'
+    --cov="$BUILD_DIR" --durations=50)
+
+  if [ "$tiles" -le 1 ]; then
+    pytest "${pytest_args[@]}" "$@" 2>&1 | tee "$LOG_DIR/60_pytest.log"
+    status="${PIPESTATUS[0]}"
+    rm -rf .pytest_cache
+    exit "$status"
+  fi
+
+  # Multi-tile: shard the test files round-robin over the tiles and run one
+  # pytest process per tile. Tile t lives on card t/2; on chiatta each of the
+  # 8 cards owns one NUMA node (node n = cpus n*8..n*8+7 and 64+n*8..71+n*8),
+  # so bind each tile process to its card's node with numactl (taskset
+  # fallback). This also keeps oneTBB/MKL thread arenas sized to the node
+  # instead of the whole 128-core machine.
+  echo "running tests on $tiles GPU tiles (ZE_FLAT_DEVICE_HIERARCHY=FLAT)" | tee "$LOG_DIR/60_pytest.log"
+  local shard_dir="$LOG_DIR/shards"
+  rm -rf "$shard_dir"; mkdir -p "$shard_dir"
+  : > "$shard_dir/all.txt"
+  for p in "$@"; do
+    if [ -d "$p" ]; then find "$p" -name 'test_*.py' -type f | sort >> "$shard_dir/all.txt"
+    else echo "$p" >> "$shard_dir/all.txt"; fi
+  done
+  split -n "r/$tiles" -d "$shard_dir/all.txt" "$shard_dir/shard_"
+  local tile_workers="${SYCL_TILE_WORKERS:-2}" tile_omp="${SYCL_TILE_OMP:-4}"
+  local pids=() t status=0 shard
+  for t in $(seq 0 $((tiles - 1))); do
+    shard="$shard_dir/shard_$(printf '%02d' "$t")"
+    [ -s "$shard" ] || continue
+    local node=$(( t / 2 ))
+    local bind=""
+    if command -v numactl >/dev/null 2>&1; then
+      bind="numactl --cpunodebind=$node --membind=$node"
+    else
+      local c1 c2
+      c1=$(seq -s, $((node * 8)) $((node * 8 + 7)))
+      c2=$(seq -s, $((64 + node * 8)) $((64 + node * 8 + 7)))
+      bind="taskset -c $c1,$c2"
+    fi
+    (
+      export ZE_AFFINITY_MASK="$t"
+      {
+        # Identify the actual device (tile) running this shard at the top of its log.
+        echo "tile=$t host=$(hostname)"
+        python -c "import dpctl; print('device:', dpctl.get_devices(device_type='gpu'))" 2>/dev/null || true
+        $bind env OMP_NUM_THREADS="$tile_omp" \
+          pytest -n "$tile_workers" --dist loadfile \
+          -m 'not slow and not benchmark and not special' -k 'not _high_cost' \
+          --durations=50 $(cat "$shard")
+      } > "$LOG_DIR/60_pytest_tile$t.log" 2>&1
+      echo "$?" > "$shard_dir/rc_$t"
+    ) &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do
+    wait "$p" || true
+  done
+  for t in $(seq 0 $((tiles - 1))); do
+    [ -f "$shard_dir/rc_$t" ] && [ "$(cat "$shard_dir/rc_$t")" != "0" ] && status=1
+  done
+  grep -hE "passed|failed|error" "$LOG_DIR"/60_pytest_tile*.log | tail -n "$tiles" | tee -a "$LOG_DIR/60_pytest.log"
+  rm -rf .pytest_cache
+  [ "$status" -eq 0 ] && echo "ALL TILES PASSED" | tee -a "$LOG_DIR/60_pytest.log" \
+    || echo "SOME TILES FAILED (see $LOG_DIR/60_pytest_tile*.log)" | tee -a "$LOG_DIR/60_pytest.log"
+  exit "$status"
 }
 
 case "$MODE" in
