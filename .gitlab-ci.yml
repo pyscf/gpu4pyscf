@@ -37,6 +37,14 @@ stages:
   - test
   - report
 
+# Every PR pipeline runs on ref master (the trusted CI checkout; the PR code is
+# fetched as pull/N/merge), so GitLab's "auto-cancel redundant pipelines" would
+# let a new master push -- or another PR's pipeline -- cancel a running PR
+# pipeline (jobs are interruptible). Never auto-cancel on new commits.
+workflow:
+  auto_cancel:
+    on_new_commit: none
+
 # ci-resources/defaults has no chiatta runner yet, so define it here from the
 # same pieces its other runners use (id token, batch tag, ALCF proxy).
 .chiatta-runner:
