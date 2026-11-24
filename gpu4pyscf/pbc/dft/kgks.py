@@ -24,6 +24,7 @@ from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.pbc.scf import kghf
 from gpu4pyscf.pbc.dft import rks, krks, gks, multigrid
 from gpu4pyscf.pbc.dft.numint2c import KNumInt2C
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
@@ -45,6 +46,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     if dm is None: dm = ks.make_rdm1()
     dm = cp.asarray(dm)
     if kpts is None: kpts = ks.kpts
+    kpts, _ = _normalize_kpts(cell, kpts)
     t0 = (logger.process_clock(), logger.perf_counter())
 
     ni = ks._numint
@@ -128,7 +130,7 @@ class KGKS(rks.KohnShamDFT, kghf.KGHF):
                  exxdiv=getattr(__config__, 'pbc_scf_SCF_exxdiv', 'ewald')):
         kghf.KGHF.__init__(self, cell, kpts, exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
-        self._numint = KNumInt2C(self.kpts)
+        self._numint = KNumInt2C()
 
     def dump_flags(self, verbose=None):
         kghf.KGHF.dump_flags(self, verbose)
@@ -148,4 +150,5 @@ class KGKS(rks.KohnShamDFT, kghf.KGHF):
     to_gks = gks.GKS.to_gks
 
     def to_cpu(self):
-        return utils.to_cpu(self, out=kgks_cpu.KGKS(self.cell, self.kpts))
+        return utils.to_cpu(self, out=kgks_cpu.KGKS(
+            self.cell, self.kpts.kpts))

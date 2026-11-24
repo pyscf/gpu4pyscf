@@ -224,7 +224,7 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
             log.note('**** MO energy ****')
             log.note('                           alpha                               | beta')
             log.note('k-point                    nocc    HOMO/AU         LUMO/AU     | nocc    HOMO/AU         LUMO/AU')
-            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+            for k, kpt in enumerate(kpts.kpts_scaled):
                 nocca = np.count_nonzero(mo_occ[0,k])
                 noccb = np.count_nonzero(mo_occ[1,k])
                 homoa = mo_energy[0,k,nocca-1]
