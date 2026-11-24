@@ -15,6 +15,7 @@
 import json
 import numpy as np
 from pyscf.pbc.gto.cell import make_kpts
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf import __config__
 
 WRAP_AROUND = getattr(__config__, 'pbc_gto_cell_make_kpts_wrap_around', False)
@@ -114,6 +115,10 @@ class KPointSampling:
 
     def __len__(self):
         return self.nkpts
+
+    def is_gamma_only(self):
+        '''Whether all Cartesian k-points are zero within PySCF's tolerance.'''
+        return is_zero(self.kpts_scaled)
 
     def __array__(self, dtype=None, copy=None):
         '''Return Cartesian coordinates as a NumPy array.'''
