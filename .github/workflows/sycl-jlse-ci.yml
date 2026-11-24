@@ -56,8 +56,14 @@ concurrency:
 jobs:
   trigger:
     if: >-
-      github.event_name != 'issue_comment' ||
-      (github.event.issue.pull_request &&
+      # workflow_dispatch (manual pr_number input) and same-repo PRs run the
+      # trigger; fork PRs get no secrets and are covered by the GitLab poller,
+      # so the job is skipped there (shows neutral, not a misleading green).
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
        contains(github.event.comment.body, '@sycl-jlse') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
                 github.event.comment.author_association))
