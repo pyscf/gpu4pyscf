@@ -444,9 +444,21 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
                 contract('skijG,skpi->skpjG', dm_ooG, dm_factor_r, out=tmp)
                 contract('skpjG,skqj->kpqG', tmp, dm_factor_l[:,kj_idx], -k_factor, out=dm_vG)
                 LpqG = ndarray((bvk_ncells,nao,nao,nGv), dtype=np.complex128, buffer=scratch2)
-                contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG, out=LpqG)
-                if ft_opt.permutation_symmetry:
-                    contract('Lk,kpqG->LpqG', expLk_conj, dm_vG, beta=1, out=LpqG)
+                if (ft_ao.COMPLEX_GEMM_MAX_N is not None and
+                    nao*nao*nGv > ft_ao.COMPLEX_GEMM_MAX_N):
+                    blocks = list(ft_ao.complex_gemm_blocks(nao, nao, nGv))
+                    expLk_j = expLk[:,kj_idx]
+                    for i0, i1, g0, g1 in blocks:
+                        contract('Lk,kpqG->LqpG', expLk_j, dm_vG[:,i0:i1,:,g0:g1],
+                                 out=LpqG[:,:,i0:i1,g0:g1])
+                    if ft_opt.permutation_symmetry:
+                        for i0, i1, g0, g1 in blocks:
+                            contract('Lk,kpqG->LpqG', expLk_conj, dm_vG[:,i0:i1,:,g0:g1],
+                                     beta=1, out=LpqG[:,i0:i1,:,g0:g1])
+                else:
+                    contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG, out=LpqG)
+                    if ft_opt.permutation_symmetry:
+                        contract('Lk,kpqG->LpqG', expLk_conj, dm_vG, beta=1, out=LpqG)
                 if j_factor != 0 and kp == 0:
                     vG = auxvec.dot(auxG_conj) * j_factor
                     if ft_opt.permutation_symmetry:

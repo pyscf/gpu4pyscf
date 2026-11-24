@@ -32,6 +32,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero, conj_mapping as get_conj_mapping
+from gpu4pyscf import BACKEND
 from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, fft_matrix
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
@@ -55,6 +56,25 @@ LMAX = 4
 GOUT_WIDTH = 30
 THREADS = 256
 POOL_SIZE = 65536
+
+# On gfx12 GPUs, rocBLAS complex GEMM with n > 2**21 leaves the result's
+# columns from 2**21 on unwritten and still reports success: the kernel indexes
+# its n tiles with a 16-bit work-group ID (ROCm/rocm-libraries#14983). The
+# k-point transforms here and in grad/krhf.py and grad/kuhf.py, and the products
+# in aft_jk.get_ek_derivatives, can be wider than that and are split below it.
+# Remove this and its uses once rocBLAS is fixed.
+COMPLEX_GEMM_MAX_N = None
+if BACKEND == 'hip' and gpu_specs.get('gcnArchName', b'').startswith(b'gfx12'):
+    COMPLEX_GEMM_MAX_N = 1 << 21
+
+def complex_gemm_blocks(n0, n1, n2):
+    '''Blocks (i0, i1, k0, k1) of axes 0 and 2 of an (n0, n1, n2) array, each
+    with at most COMPLEX_GEMM_MAX_N elements'''
+    blk0 = max(1, COMPLEX_GEMM_MAX_N // (n1 * n2))
+    blk2 = min(n2, COMPLEX_GEMM_MAX_N // n1)
+    for i0, i1 in lib.prange(0, n0, blk0):
+        for k0, k1 in lib.prange(0, n2, blk2):
+            yield i0, i1, k0, k1
 
 def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
     if kpti_kptj is None:
@@ -611,7 +631,13 @@ class FTOpt:
                     expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
                 nkpts = expLk.shape[1]
                 tmp = ndarray((nkpts,nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
-                out = contract('Lk,pLqG->kpqG', expLk, out, out=tmp)
+                if COMPLEX_GEMM_MAX_N is not None and nao*nao*nGv > COMPLEX_GEMM_MAX_N:
+                    for p0, p1, g0, g1 in complex_gemm_blocks(nao, nao, nGv):
+                        contract('Lk,pLqG->kpqG', expLk, out[p0:p1,:,:,g0:g1],
+                                 out=tmp[:,p0:p1,:,g0:g1])
+                    out = tmp
+                else:
+                    out = contract('Lk,pLqG->kpqG', expLk, out, out=tmp)
                 if (kj_idx is not None and
                     self.permutation_symmetry and not ki_kj_identical):
                     # Using the identity FW(i[ki], j[kj], G+q) == FW(j[-kj], i[-ki], G+q),
