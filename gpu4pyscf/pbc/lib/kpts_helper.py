@@ -64,9 +64,9 @@ def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False
         return np.ones(3, dtype=int)
 
     if isinstance(kpts, KPointSampling):
-        if kpts.kmesh is not None:
+        if kpts.kmesh is not None and kpts.scaled_center is None:
             bvkmesh = kpts.kmesh.copy()
-            bvkmesh[bvkmesh // 2 == 1] *= 2
+            bvkmesh[bvkmesh % 2 == 0] *= 2
             return bvkmesh
     elif is_zero(_as_kpts_array(kpts)):
         return np.ones(3, dtype=int)
