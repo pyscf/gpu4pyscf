@@ -22,7 +22,7 @@ from pyscf import scf
 from pyscf import gto
 from pyscf.data import elements
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array, _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 __all__ = [

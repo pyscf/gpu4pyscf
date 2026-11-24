@@ -22,6 +22,7 @@ import cupy as cp
 from pyscf import lib, __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.scf.slabdipole import _slab_length, _dipole_grids, _slab_charge
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 # Dipole-plane separation as a fraction of the cell length along z.
@@ -350,7 +351,7 @@ class SlabGateCharge:
     def _gate_matrices(self, cell, kpts):
         from gpu4pyscf.pbc.dft import numint
         length, zgate, start, end, height, width = self._gate_parameters(cell)
-        kpts = np.asarray(kpts).reshape(-1, 3)
+        kpts, _ = _normalize_kpts(cell, kpts)
         grids = _dipole_grids(self, cell)
         qc = -_slab_charge(self, cell)
         charge_matrix = barrier_matrix = None

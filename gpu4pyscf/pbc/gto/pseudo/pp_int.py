@@ -18,7 +18,6 @@ import cupy as cp
 from pyscf import gto, lib
 from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl
-from pyscf.pbc.lib.kpts_helper import gamma_point
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.gto.mole import most_diffuse_pgto, SortedGTO
 from gpu4pyscf.pbc.gto import int1e
@@ -75,13 +74,13 @@ def _sorted_fake_cell_vnl(cell, type='scalar'):
 
 def get_pp_nl(cell, kpts=None):
     kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
     kpts = kpts.kpts
     nkpts = len(kpts)
 
     # pattern stores the unique [hl_dim, l] combinations
     fakecell, hl_blocks, pattern, splits = _sorted_fake_cell_vnl(cell)
 
-    is_gamma_point = gamma_point(kpts)
     dtype = np.float64 if is_gamma_point else np.complex128
     nao = cell.nao
     ppnl = cp.zeros((nkpts, nao, nao), dtype=dtype)
