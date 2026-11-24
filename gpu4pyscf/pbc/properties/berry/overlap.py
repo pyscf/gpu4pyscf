@@ -52,12 +52,9 @@ def _direction_index(direction):
 def _commensurate_bvkmesh(cell, kpts):
     # FTOpt folds outer BvK images without a twist phase. Every absolute
     # k-point, not just the spacing of the mesh, must be commensurate.
-    scaled = kpts.kpts_scaled
     kmesh = kpts.kmesh
-    if kmesh is not None:
-        mesh_coords = scaled * kmesh
-        if np.max(np.abs(mesh_coords - np.rint(mesh_coords))) <= 1e-8:
-            return kmesh
+    if kmesh is not None and kpts.is_compatible_with_bvkmesh(kmesh):
+        return kmesh
     # Infer from coordinates to include shifts in the periodicity check.
     try:
         return kpts_to_bvkmesh(

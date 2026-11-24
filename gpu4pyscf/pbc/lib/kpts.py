@@ -127,6 +127,16 @@ class KPointSampling:
         '''Whether all Cartesian k-points are zero within PySCF's tolerance.'''
         return is_zero(self.kpts_scaled)
 
+    def is_compatible_with_bvkmesh(self, bvkmesh, tol=1e-8):
+        '''Whether all k-points satisfy periodic boundaries in a BvK supercell.
+
+        bvkmesh gives the three replication counts along the lattice vectors.
+        Each scaled k-point times bvkmesh must be integer within tol, so its
+        Bloch phase across every supercell lattice vector is one.
+        '''
+        mesh_coords = self.kpts_scaled * np.asarray(bvkmesh)
+        return np.max(np.abs(mesh_coords - np.rint(mesh_coords))) <= tol
+
     def __array__(self, dtype=None, copy=None):
         '''Return Cartesian coordinates as a NumPy array.'''
         return np.asarray(self.kpts, dtype=dtype, copy=copy)
