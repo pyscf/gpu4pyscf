@@ -27,6 +27,7 @@ import tempfile
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import df as df_cpu
@@ -76,6 +77,17 @@ class GDF(lib.StreamObject):
     @kpts.setter
     def kpts(self, val):
         self._kpts, _ = _normalize_kpts(self.cell, val)
+
+    @classmethod
+    def from_cpu(cls, method):
+        """Convert CPU density fitting, preserving its sampling coordinates."""
+        out = cls(method.cell)
+        out.__dict__.update(method.__dict__)
+        kpts = getattr(method, '_kpts', None)
+        if not isinstance(kpts, KPoints):
+            kpts = method.kpts
+        out.kpts = kpts
+        return out.reset()
 
     def reset(self, cell=None):
         if cell is not None:

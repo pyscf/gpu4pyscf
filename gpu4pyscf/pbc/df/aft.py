@@ -182,6 +182,17 @@ class AFTDF(lib.StreamObject):
             self._kpts = KPointSampling.from_kpts(
                 self.cell, np.asarray(val).reshape(-1, 3))
 
+    @classmethod
+    def from_cpu(cls, method):
+        """Convert CPU density fitting, preserving its sampling coordinates."""
+        out = cls(method.cell)
+        out.__dict__.update(method.__dict__)
+        kpts = getattr(method, '_kpts', None)
+        if not isinstance(kpts, KPoints):
+            kpts = method.kpts
+        out.kpts = kpts
+        return out.reset()
+
     def reset(self, cell=None):
         if cell is not None:
             self._kpts = reset_kpts(self._kpts, cell)
