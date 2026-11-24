@@ -21,15 +21,15 @@ import numpy as np
 import cupy as cp
 from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf.pbc import gto
-from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.pbc.grad.rhf import _finite_diff_cells
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 def generate_first_order_local_orbitals(cell, minao_ref='MINAO', kpts=None):
-    kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
     nkpts = len(kpts)
     if isinstance(minao_ref, str):
         pcell = reference_mol(cell, minao_ref)
@@ -99,7 +99,8 @@ def _hubbard_U_derivatives(mf, dm=None, kpts=None):
     if dm is None:
         dm = mf.make_rdm1()
     if kpts is None:
-        kpts = mf.kpts.reshape(-1, 3)
+        kpts = mf.kpts
+    kpts, _ = _normalize_kpts(mf.cell, kpts)
     nkpts = len(kpts)
     cell = mf.cell
 
@@ -174,8 +175,9 @@ def _hubbard_U_derivatives(mf, dm=None, kpts=None):
 def ovlp_strain_deriv(cell, kpts):
     '''Strain derivatives for overlap matrix
     '''
+    kpts, _ = _normalize_kpts(cell, kpts)
     disp = 1e-5
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    scaled_kpts = kpts.kpts.dot(cell.lattice_vectors().T)
     s = []
     for x in range(3):
         for y in range(3):
@@ -188,16 +190,17 @@ def ovlp_strain_deriv(cell, kpts):
     return cp.array(s)
 
 def _strain_deriv_local_orbitals(cell, minao_ref='MINAO', kpts=None):
+    kpts, _ = _normalize_kpts(cell, kpts)
     if isinstance(minao_ref, str):
         pcell = reference_mol(cell, minao_ref)
     else:
         pcell = minao_ref
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    scaled_kpts = kpts.kpts.dot(cell.lattice_vectors().T)
     nkpts = len(kpts)
 
     nao = cell.nao
     naop = pcell.nao
-    if is_zero(kpts):
+    if kpts.is_gamma_only():
         C1_minao = cp.empty((3, 3, nkpts, nao, naop))
     else:
         C1_minao = cp.empty((3, 3, nkpts, nao, naop), dtype=np.complex128)

@@ -24,6 +24,7 @@ from gpu4pyscf.pbc.scf.slabdipole import (
 from gpu4pyscf.pbc.dft import numint, gen_grid
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
 from gpu4pyscf.pbc.gto.int1e import ovlp_derivatives
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 def dipole_grad(grad, dm, kpts=None):
@@ -41,7 +42,7 @@ def dipole_grad(grad, dm, kpts=None):
     length = _slab_length(cell)
     if kpts is None:
         kpts = mf.kpts if mf.istype('KSCF') else mf.kpt
-    kpts = np.asarray(kpts).reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
     nkpts = len(kpts)
     if mf.dipole_cut is None or mf.dipole_offset is None:
         mf.get_veff(dm=dm)

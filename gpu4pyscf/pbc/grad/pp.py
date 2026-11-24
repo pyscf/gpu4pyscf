@@ -16,14 +16,13 @@
 import ctypes
 import numpy as np
 import cupy as cp
-from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl, _sorted_fake_cell_vnl
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.gto.int1e import libpbc
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, _normalize_kpts
 
 def vppnl_nuc_grad(cell, dm, kpts=None):
     '''Nuclear gradients of the non-local part of the GTH pseudo potential,
@@ -36,11 +35,8 @@ def ppnl_derivatives(cell, dm, kpts=None):
 
     Returns a real (natm+3, 3) array: nuclear gradients followed by dE/d(strain_xy)
     '''
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = np.reshape(kpts, (-1, 3))
-    is_gamma_point = gamma_point(kpts)
+    kpts, _ = _normalize_kpts(cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
     nkpts = len(kpts)
 
     nao = cell.nao
@@ -68,7 +64,7 @@ def ppnl_derivatives(cell, dm, kpts=None):
 
     bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
     bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvkmesh, True)
-    expLk = cp.exp(-1j*asarray(bvkmesh_Ls).dot(asarray(kpts).T))
+    expLk = cp.exp(-1j*asarray(bvkmesh_Ls).dot(asarray(kpts.kpts).T))
     dtype = np.float64 if is_gamma_point else np.complex128
 
     hl_offset = [0] * 3

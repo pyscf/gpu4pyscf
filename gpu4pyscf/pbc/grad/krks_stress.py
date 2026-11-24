@@ -57,6 +57,7 @@ from gpu4pyscf.pbc.dft.numint import KNumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.gto.cell import get_Gv
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, sandwich_dot, batched_vec_norm2)
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 ALIGNED = 256
 
@@ -67,6 +68,7 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
         with_j : Whether to include the electron-electron Coulomb interactions
         with_nuc : Whether to include the electron-nuclear Coulomb interactions
     '''
+    kpts, _ = _normalize_kpts(cell, kpts)
     mf = ks_grad.base
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
     assert cell.low_dim_ft_type != 'inf_vacuum'
@@ -98,7 +100,6 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
     else:
         raise NotImplementedError
 
-    assert kpts.ndim == 2
     assert dm_kpts.ndim == 3
     nkpts, nao = dm_kpts.shape[:2]
     assert nkpts == len(kpts)
@@ -287,10 +288,11 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
             AO values at each k-point
     '''
     assert deriv <= 2
+    kpts, _ = _normalize_kpts(cell, kpts)
     if opt is None:
         opt = _GTOvalOpt(cell, kpts, deriv=deriv)
     else:
-        assert kpts is opt.kpts
+        assert kpts is opt.kpts or np.array_equal(kpts.kpts, opt.kpts.kpts)
     bvkcell = opt.bvkcell
     ngrids = len(coords)
     coords = cp.asarray(coords.T, order='C')

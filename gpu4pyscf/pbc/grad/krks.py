@@ -29,6 +29,7 @@ from gpu4pyscf.pbc.dft import multigrid, multigrid_v3, BeckeGrids
 from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 from gpu4pyscf.pbc.dft.numint import _GTOvalOpt
 from gpu4pyscf.pbc.grad.krks_stress import _eval_ao_strain_derivatives
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 __all__ = ['Gradients']
 
@@ -56,6 +57,7 @@ def get_d2mu_dr2(ao_ks):
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     '''derivatives of the Exc per cell'''
+    kpts, _ = _normalize_kpts(cell, kpts)
     assert dm_kpts.ndim == 3
     xctype = ni._xc_type(xc_code)
     nao = cell.nao
@@ -189,6 +191,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 def get_vxc_full_response(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     ''' dExc/dR for Becke grids, where grid response is included '''
     # TODO: apply sparsity in ao_ks, remove zero-weight grids
+    kpts, _ = _normalize_kpts(cell, kpts)
     assert isinstance(grids, BeckeGrids)
     assert dm_kpts.ndim == 3
     assert hermi == 1, "Only hermitian dm_kpts is supported, otherwise grid density is not real, and we're not able to evaluate xc functional."

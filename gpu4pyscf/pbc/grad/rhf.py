@@ -21,7 +21,6 @@ from pyscf.gto import ATOM_OF
 from pyscf import lib
 from pyscf import gto
 from pyscf.pbc.lib.kpts_helper import gamma_point
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, asarray
 import gpu4pyscf.grad.rhf as mol_rhf
