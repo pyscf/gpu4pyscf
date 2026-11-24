@@ -28,6 +28,7 @@ from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_soc
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 def _block_diag(a, b=None):
@@ -41,12 +42,14 @@ def _block_diag(a, b=None):
 
 
 def _df_jk(mf, dm, hermi, kpts, kpts_band, with_j, with_k, omega):
-    if (with_k and
-        kpts.ndim == 2 and
-        isinstance(mf.with_df, GDF) and mf.with_df._j_only):
-        # A preceding get_j call may have built only the diagonal k-pairs.
-        mf.with_df._j_only = False
-        mf.with_df.reset()
+    if with_k and isinstance(mf.with_df, GDF) and mf.with_df._j_only:
+        _, is_single_kpt = _normalize_kpts(mf.cell, kpts)
+        # This helper serves both single-point GHF and batched KGHF, requiring
+        # batched k-points
+        if not is_single_kpt:
+            # A preceding get_j call may have built only the diagonal k-pairs.
+            mf.with_df._j_only = False
+            mf.with_df.reset()
 
     # Gamma-point GDF stores real integrals and only accepts real densities.
     # Both parts of a complex spin density must contribute to exchange.
@@ -165,8 +168,6 @@ class GHF(pbchf.SCF):
     @pbchf.SCF.kpt.setter
     def kpt(self, kpt):
         self.with_df.kpts = np.reshape(kpt, (1, 3))
-        if self.rsjk is not None:
-            self.rsjk.kpts = self.with_df.kpts
 
     get_jk = get_jk
     get_occ = get_occ
