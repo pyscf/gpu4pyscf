@@ -35,11 +35,11 @@ from gpu4pyscf.scf.jk import (
     _TimingCollector)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, THREADS, SHM_SIZE, LMAX)
-from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (
     NBAS_MAX, OMEGA, libpbc, ExtendedMole, PBCJKMatrixOpt)
 from gpu4pyscf.pbc.df import aft
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 __all__ = [
     'get_j',
@@ -148,8 +148,8 @@ class PBCJMatrixOpt:
             dms = transpose_sum(dms)
             dms *= .5
 
-        kpts, is_single_kpt = _check_kpts(kpts)
-        is_gamma_point = is_zero(kpts)
+        kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
         if is_gamma_point:
             if is_single_kpt:
                 assert dms.dtype == np.float64
@@ -164,7 +164,7 @@ class PBCJMatrixOpt:
             dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
             n_dm = len(dms)
         else:
-            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+            scaled_kpts = kpts.kpts.dot(cell.lattice_vectors().T)
             Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
             expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
             nkpts = expLk.shape[1]
@@ -345,7 +345,7 @@ class PBCJMatrixOpt:
         '''Compute J matrix
         '''
         if self.supmol is None:
-            self.build()
+            self.build(kpts)
         vj = self._get_j_sr(dm, hermi, kpts, kpts_band)
         vj += self._get_j_lr(dm, hermi, kpts, kpts_band)
         return vj

@@ -133,7 +133,7 @@ class PBCJKMatrixOpt:
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
     def build(self, kpts=None, verbose=None):
-        kpts = _as_kpts_array(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
@@ -243,11 +243,12 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
-        is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
             if is_single_kpt:
@@ -440,7 +441,9 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
         log.debug('bvkmesh = %s', bvkmesh)
         bvk_ncells = np.prod(bvkmesh)
@@ -584,7 +587,7 @@ class PBCJKMatrixOpt:
                 Gpq = Gpq1 = None
             cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
 
-        if is_zero(kpts) and not np.iscomplexobj(dm):
+        if is_gamma_point and not np.iscomplexobj(dm):
             vk = vk.real
 
         if time_reversal_symmetry:
@@ -627,9 +630,10 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
-        is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
             if is_single_kpt:
@@ -801,7 +805,9 @@ class PBCJKMatrixOpt:
         cell = self.cell
         assert cell.dimension == 3
 
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
         log.debug('bvkmesh = %s', bvkmesh)
         bvk_ncells = np.prod(bvkmesh)
@@ -850,7 +856,7 @@ class PBCJKMatrixOpt:
                 Gpq[:,:,diffuse_i,diffuse_j] = 0.
                 aft_jk._update_vj_(vj, Gpq, dms, wcoulG_SR[p0:p1])
 
-        if is_zero(kpts):
+        if is_gamma_point:
             vj = vj.real
         vj = cell.apply_CT_mat_C(vj.reshape(-1,nao1,nao1))
         return vj.reshape(dm.shape)
@@ -911,8 +917,9 @@ class PBCJKMatrixOpt:
         dms = transpose_sum(dms)
         dms *= .5
 
-        kpts, is_single_kpt = _normalize_kpts(kpts)
-        is_gamma_point = is_zero(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         if is_gamma_point:
             if is_single_kpt:
                 assert dms.dtype == np.float64
@@ -1078,11 +1085,12 @@ class PBCJKMatrixOpt:
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
 
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        is_gamma_point = kpts.is_gamma_only()
+        kpts = kpts.kpts
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
         log.debug('bvkmesh = %s', bvkmesh)
         bvk_ncells = np.prod(bvkmesh)
-        is_gamma_point = is_zero(kpts)
 
         dms = _format_dms(dm, kpts)
         n_dm, nkpts, nao = dms.shape[:3]
@@ -1417,7 +1425,7 @@ class PBCJKMatrixOpt:
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
         if self.supmol is None:
-            self.build()
+            self.build(kpts)
 
         omega, lr_factor, sr_factor = _check_rsh_factors(self.cell.cell, omega, lr_factor, sr_factor)
         omega = abs(omega)
@@ -1836,7 +1844,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     return pair_cache
 
 def _guess_omega(cell, kpts=None):
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(cell, kpts)
     nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
     ng = int(5e4/(nao*nkpts**.65))
