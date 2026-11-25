@@ -22,19 +22,19 @@ pyscf_version = int(pyscf.__version__.split('.')[1])
 if pyscf_version <= 10:
     def _fftdf_to_gpu(self):
         from gpu4pyscf.pbc.df.fft import FFTDF
-        return FFTDF(self.cell, self.kpts)
+        return FFTDF.from_cpu(self)
     from pyscf.pbc.df.fft import FFTDF
     FFTDF.to_gpu = _fftdf_to_gpu
 
     def _aftdf_to_gpu(self):
         from gpu4pyscf.pbc.df.aft import AFTDF
-        return AFTDF(self.cell, self.kpts)
+        return AFTDF.from_cpu(self)
     from pyscf.pbc.df.aft import AFTDF
     AFTDF.to_gpu = _aftdf_to_gpu
 
     def _gdf_to_gpu(self):
         from gpu4pyscf.pbc.df.df import GDF
-        return GDF(self.cell, self.kpts)
+        return GDF.from_cpu(self)
     from pyscf.pbc.df.df import GDF
     GDF.to_gpu = _gdf_to_gpu
 

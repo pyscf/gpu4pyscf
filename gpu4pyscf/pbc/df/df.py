@@ -76,7 +76,10 @@ class GDF(lib.StreamObject):
 
     @kpts.setter
     def kpts(self, val):
-        self._kpts, _ = _normalize_kpts(self.cell, val)
+        if val is None:
+            self._kpts = KPointSampling.gamma_point(self.cell)
+        else:
+            self._kpts, _ = _normalize_kpts(self.cell, val)
 
     @classmethod
     def from_cpu(cls, method):

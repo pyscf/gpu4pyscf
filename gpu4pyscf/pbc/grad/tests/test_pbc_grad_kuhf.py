@@ -14,6 +14,8 @@
 # limitations under the License.
 
 import unittest
+from packaging import version
+import pyscf
 from pyscf import lib
 from pyscf.pbc import gto
 from gpu4pyscf.gto.mole import Cell
@@ -150,6 +152,8 @@ class KnownValues(unittest.TestCase):
         e2 = mfs(atom_coords)
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
+    @unittest.skipIf(version.parse(pyscf.__version__) < version.parse('2.13'),
+                     'GPU Cell factory requires PySCF newer than 2.12')
     def test_df_kuhf_grad(self):
         cell = Cell()
         cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]

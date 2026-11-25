@@ -90,9 +90,13 @@ class KPointSampling:
         return self
 
     @classmethod
-    def gamma_point(cls, cell):
-        '''Create a single Gamma-point sampling with kmesh (1, 1, 1).'''
-        self = cls(cell.lattice_vectors(), np.zeros((1, 3)))
+    def gamma_point(cls, cell=None):
+        '''Create Gamma-only sampling, optionally using the cell's lattice.'''
+        # Gamma coordinates are zero in both Cartesian and scaled units, so
+        # the lattice has no effect on this sampling. If cell is not provided,
+        # use eye(3) as a placeholder.
+        lattice_vectors = np.eye(3) if cell is None else cell.lattice_vectors()
+        self = cls(lattice_vectors, np.zeros((1, 3)))
         self.kmesh = np.array([1, 1, 1])
         self.with_gamma_point = True
         self.wrap_around = True

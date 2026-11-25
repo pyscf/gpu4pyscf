@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import unittest
+from packaging import version
 import numpy as np
 import pyscf
 from pyscf import lib
@@ -404,6 +405,8 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=3e-6)
 
+    @unittest.skipIf(version.parse(pyscf.__version__) < version.parse('2.13'),
+                     'GPU Cell factory requires PySCF newer than 2.12')
     def test_time_reversal_symmetry_broken(self):
         np.random.seed(3)
         cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',

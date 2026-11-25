@@ -268,6 +268,8 @@ class KnownValues(unittest.TestCase):
         mf_ref = kmf.to_cpu().run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
+    @unittest.skipIf(version.parse(pyscf.__version__) < version.parse('2.13'),
+                     'GPU Cell factory requires PySCF newer than 2.12')
     def test_kpts_gga_gdf(self):
         from gpu4pyscf.pbc.df.df import GDF
         L = 4.

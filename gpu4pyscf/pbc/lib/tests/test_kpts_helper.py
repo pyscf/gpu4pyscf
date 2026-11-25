@@ -75,6 +75,12 @@ def test_sampling_object_normalization():
 def test_sampling_mesh_and_bvkmesh():
     from gpu4pyscf.gto.mole import Cell
     cell = Cell(a=np.eye(3) * 4, verbose=0).build()
+    for with_gamma, expected in ((True, [2, 3, 2]), (False, [4, 3, 4])):
+        unshifted = cell.make_kpts([2, 3, 2], with_gamma_point=with_gamma)
+        np.testing.assert_array_equal(
+            kpts_helper.kpts_to_bvkmesh(cell, unshifted), expected)
+        np.testing.assert_array_equal(
+            kpts_helper.kpts_to_bvkmesh(cell, unshifted.kpts), expected)
     sampling = cell.make_kpts([2, 1, 2], wrap_around=True,
                               scaled_center=[.25, 0, 0])
     np.testing.assert_array_equal(sampling.kmesh, [2, 1, 2])
@@ -176,6 +182,7 @@ def test_kk_adapted_iter_off_gamma():
         np.testing.assert_array_equal(kj, ref_j)
 
 def test_fft_matrix():
+    np.random.seed(10)
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
                    a=np.eye(3)*3+np.random.rand(3,3)*.2)
     kx = 1

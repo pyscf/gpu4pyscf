@@ -176,11 +176,8 @@ class AFTDF(lib.StreamObject):
     def kpts(self, val):
         if val is None:
             self._kpts = KPointSampling.gamma_point(self.cell)
-        elif isinstance(val, (KPoints, KPointSampling)):
-            self._kpts = val
         else:
-            self._kpts = KPointSampling.from_kpts(
-                self.cell, np.asarray(val).reshape(-1, 3))
+            self._kpts, _ = _normalize_kpts(self.cell, val)
 
     @classmethod
     def from_cpu(cls, method):
