@@ -23,7 +23,7 @@ from numpy.polynomial import Polynomial
 from scipy.optimize import brentq
 from scipy.special import expit, xlogy
 from pyscf import lib
-from pyscf.data.nist import HARTREE2EV
+from pyscf.data.nist import BOHR, HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.scf import smearing
 from gpu4pyscf.pbc.scf.gcscf import ConstantMuSCF
@@ -66,11 +66,13 @@ def _fit_potential(nelec, mu, tol):
     return fit
 
 
-def _newton_step(fit, nelec, mu, lr, max_step):
+def _newton_step(fit, nelec, residual, lr, max_step):
+    # This is different from the original FCP paper.
+    # We use the real residual, not from the fit potential.
     slope = float(fit.deriv()(nelec))
     if not np.isfinite(slope) or slope <= 0:
         raise RuntimeError('FCP requires a positive chemical-potential slope')
-    step = -lr*(float(fit(nelec))-mu)/slope
+    step = -lr*residual/slope
     return nelec + np.clip(step, -max_step, max_step), slope
 
 
@@ -136,6 +138,8 @@ class FCP:
     Set nelec_bounds from fixed-charge trial calculations for the chosen model.
     conv_tol and fit_tol are in Hartree; sample_step and max_step are electrons
     per cell. The inner SCF tolerances must resolve the target chemical potential.
+    Set empirical_start=True to replace presampling with an initial Newton step
+    using H = 80/(slab area in Angstrom^2) eV, then fit the converged points.
     Trial steps, including presampling, respect max_step and nelec_bounds.
     A failed inner SCF or exhausted outer loop raises RuntimeError and leaves
     converged=False.
@@ -151,6 +155,7 @@ class FCP:
     max_cycle = 100
     max_step = .2
     sample_step = .05
+    empirical_start = False
     adaptive_lr = False
     nelec_bounds = None
 
@@ -235,7 +240,7 @@ class FCP:
                 raise ValueError('Initial electron number must lie inside nelec_bounds')
         # The second sampling move crosses both sides of the initial point.
         step = min(self.sample_step, self.max_step/2)
-        samples = [initial-step, initial+step]
+        samples = [] if self.empirical_start else [initial-step, initial+step]
         if self.nelec_bounds is not None:
             samples = np.clip(samples, *self.nelec_bounds)
         samples = [float(n) for n in samples if n != initial]
@@ -268,13 +273,19 @@ class FCP:
                              self.nelec, nelec)
             else:
                 # next step nelec from newton update
-                fit = _fit_potential(numbers, potentials, self.fit_tol)
+                if self.empirical_start and len(numbers) == 1:
+                    area = (self.mf.cell.vol/self.mf.cell.lattice_vectors()[2, 2]
+                            * BOHR**2)
+                    slope = 80/area/HARTREE2EV
+                    fit = Polynomial([mu_eff-slope*self.nelec, slope])
+                else:
+                    fit = _fit_potential(numbers, potentials, self.fit_tol)
                 logger.debug(self.mf, 'FCP fit: degree = %d RMS = %.6g Ha; '
                              'mu_fit(N) = sum_i c[i]*N**i, c = %s',
                              fit.degree(), np.sqrt(np.mean((fit(numbers)-potentials)**2)),
                              np.array2string(fit.convert().coef, precision=12,
                                              separator=', ', max_line_width=160))
-                nelec, slope = _newton_step(fit, self.nelec, self.mu, lr, self.max_step)
+                nelec, slope = _newton_step(fit, self.nelec, residual, lr, self.max_step)
                 if self.nelec_bounds is not None:
                     nelec = float(np.clip(nelec, *self.nelec_bounds))
                     if nelec == self.nelec:

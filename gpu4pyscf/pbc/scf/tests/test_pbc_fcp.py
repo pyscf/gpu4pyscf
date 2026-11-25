@@ -57,7 +57,7 @@ class KnownValues(unittest.TestCase):
         numbers = np.array([1.9, 2., 2.1])
         mu = .5*(numbers-2.)
         fit = fcp._fit_potential(numbers, mu, 1e-10)
-        new_number, slope = fcp._newton_step(fit, 2., .05, 1., .2)
+        new_number, slope = fcp._newton_step(fit, 2., -.05, 1., .2)
         self.assertEqual(fit.degree(), 1)
         self.assertAlmostEqual(slope, .5, delta=1e-12)
         self.assertAlmostEqual(new_number, 2.1, delta=1e-12)
@@ -69,7 +69,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(fit.deriv()(2.), 4., delta=1e-12)
 
         fit = fcp._fit_potential([1., 2., 3.], [1., 2., 3.], 1e-10)
-        new_number, slope = fcp._newton_step(fit, 2., 10., 1., .2)
+        new_number, slope = fcp._newton_step(fit, 2., -8., 1., .2)
         self.assertAlmostEqual(new_number, 2.2, delta=1e-12)
         self.assertAlmostEqual(slope, 1., delta=1e-12)
 

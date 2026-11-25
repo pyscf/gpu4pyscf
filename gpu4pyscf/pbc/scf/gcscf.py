@@ -83,6 +83,9 @@ def constant_mu(mf, mu, sigma):
     mf.gcscf_nelec = None
     mf.e_grand = None
     mf.entropy = mf.e_free = mf.e_zero = None
+    logger.warn(mf, 'GCSCF has convergence issues: its SCF iteration has not been '
+                'optimized and can be very difficult to converge. '
+                'Use the FCP method instead.')
     return mf
 
 
