@@ -39,8 +39,10 @@ void type1_cart_unrolled_kernel(double *gctr,
     rcb[0] = rc[0] - rj[0];
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
-    const double r2ca = rca[0]*rca[0] + rca[1]*rca[1] + rca[2]*rca[2];
-    const double r2cb = rcb[0]*rcb[0] + rcb[1]*rcb[1] + rcb[2]*rcb[2];
+    const double dx = ri[0] - rj[0];
+    const double dy = ri[1] - rj[1];
+    const double dz = ri[2] - rj[2];
+    const double r2ab = dx*dx + dy*dy + dz*dz;
 
     double ur = 0.0;
     for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
@@ -69,7 +71,7 @@ void type1_cart_unrolled_kernel(double *gctr,
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
-            const double eij = exp(-ai_prim*r2ca - aj_prim*r2cb);
+            const double eij = exp(-ai_prim*(aj_prim/aij)*r2ab);
             const double eaij = eij * pow(-2.0*ai_prim, orderi) * pow(-2.0*aj_prim, orderj);
             const double ceij = eaij * ci[ip] * cj[jp];
             type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac*ceij);
@@ -151,8 +153,10 @@ void type1_cart_kernel(double *gctr,
     rcb[0] = rc[0] - rj[0];
     rcb[1] = rc[1] - rj[1];
     rcb[2] = rc[2] - rj[2];
-    const double r2ca = rca[0]*rca[0] + rca[1]*rca[1] + rca[2]*rca[2];
-    const double r2cb = rcb[0]*rcb[0] + rcb[1]*rcb[1] + rcb[2]*rcb[2];
+    const double dx = ri[0] - rj[0];
+    const double dy = ri[1] - rj[1];
+    const double dz = ri[2] - rj[2];
+    const double r2ab = dx*dx + dy*dy + dz*dz;
 
     double ur = 0.0;
     for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
@@ -183,7 +187,7 @@ void type1_cart_kernel(double *gctr,
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
             __syncthreads();
 
-            const double eij = exp(-ai_prim*r2ca - aj_prim*r2cb);
+            const double eij = exp(-ai_prim*(aj_prim/aij)*r2ab);
             const double eaij = eij * pow(-2.0*ai_prim, orderi) * pow(-2.0*aj_prim, orderj);
             const double ceij = eaij * ci[ip] * cj[jp];
             type1_rad_ang(rad_ang, LI+LJ, rij, rad_all, fac*ceij);
