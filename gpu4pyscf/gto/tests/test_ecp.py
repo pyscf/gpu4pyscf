@@ -86,6 +86,22 @@ def tearDownModule():
     del mol1, mol2
 
 class KnownValues(unittest.TestCase):
+    def test_displaced_tight_s(self):
+        # pyscf issue #3607
+        g, r = .15, 4.
+        alpha = 40.
+        mol = gto.M(
+            atom=[('S', (0., 0., 0.)), ('H', (0., 0., r))],
+            unit='Bohr',
+            basis={'S': [[0, [1., 1.]]], 'H': [[0, [alpha, 1.]]]},
+            ecp={'S': [10, [[-1, [[], [], [[g, 1.]]]]]]},
+            spin=1, verbose=0)
+        p = 2*alpha
+        ref = (p/(p+g))**1.5 * np.exp(-p*g*r*r/(p+g))
+        # The fixed 128-point grid has up to 4.5e-4 quadrature error
+        # for these tight orbitals; the cutoff bug loses the whole integral.
+        self.assertAlmostEqual(get_ecp(mol).get()[-1, -1], ref, delta=5e-4)
+
     def test_ecp_cart(self):
         h1_cpu = mol1.intor('ECPscalar_cart')
         h1_gpu = get_ecp(mol1)
