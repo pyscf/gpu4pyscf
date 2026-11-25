@@ -2,8 +2,8 @@
 
 Driven by `/.gitlab-ci.yml` on gitlab.jlse.anl.gov (Jacamar `batch` runner, queue `chiatta`).
 
-This is the SYCL CI: the GitHub-hosted CPU/OpenCL CI (`sycl-cpu-ci.yml`) is
-deactivated (manual `workflow_dispatch` only) in favor of real PVC GPU runs here.
+This is the SYCL CI. It replaces the former GitHub-hosted CPU/OpenCL workflow
+(`sycl-cpu-ci.yml`, removed) with real PVC GPU runs.
 
 | File | Role |
 |---|---|
