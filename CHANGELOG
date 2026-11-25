@@ -1,3 +1,10 @@
+v1.9.3 (2026-11-25)
+-------------------
+* Fixes
+  - Overly tight atomic SCF convergence requirements in the AUTOSAD initial guess. (#1076)
+  - Exponential scaling in local ECP CUDA kernels, affecting integrals for tight orbitals displaced from ECP centers. (#1072)
+
+
 v1.9.2 (2026-11-10)
 -------------------
 * Fixes
