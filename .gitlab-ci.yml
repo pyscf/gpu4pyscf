@@ -42,6 +42,19 @@ stages:
 # let a new master push -- or another PR's pipeline -- cancel a running PR
 # pipeline (jobs are interruptible). Never auto-cancel on new commits.
 workflow:
+  # Every pipeline checks out master (trusted CI scripts), so GitLab labels them
+  # all with master's HEAD commit. Name them by what they actually do instead.
+  name: '$SYCL_PIPELINE_NAME'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $POLL_PRS == "true"'
+      variables:
+        SYCL_PIPELINE_NAME: 'PR poller'
+    - if: '$PR_NUMBER'
+      variables:
+        SYCL_PIPELINE_NAME: 'SYCL CI: PR #$PR_NUMBER @ $PR_SHA'
+    - when: always
+      variables:
+        SYCL_PIPELINE_NAME: 'SYCL CI: $CI_COMMIT_REF_NAME @ $CI_COMMIT_SHORT_SHA ($CI_PIPELINE_SOURCE)'
   auto_cancel:
     on_new_commit: none
 
