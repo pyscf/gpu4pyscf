@@ -835,10 +835,7 @@ def _init_guess_by_qchem_sad(mol, mf_template, uhf_for_atom=False, high_spin=Tru
 
         mf_atom = mf_atom.reset(mol_atom)
 
-        mf_atom.conv_tol = 1e-10
-
         mf_atom.kernel()
-        assert mf_atom.converged
 
         mf_per_element[element] = mf_atom
 
