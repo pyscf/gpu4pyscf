@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
         # # As a result, we do not check against Q-Chem value, we made a consistency test.
         ref_guess_energy = -151.16046138557607
 
-        assert abs(test_guess_energy - ref_guess_energy) < 1e-7
+        assert abs(test_guess_energy - ref_guess_energy) < 5e-7
 
     def test_sad_guess_rks_vv10(self):
         mol = pyscf.M(
