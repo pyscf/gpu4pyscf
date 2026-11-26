@@ -726,6 +726,7 @@ def newton(mf):
         return mf
 
     assert isinstance(mf, hf.SCF)
+    assert not hasattr(mf, "sigma")
 
     if mf.istype('ROHF'):
         cls = _SecondOrderROHF
