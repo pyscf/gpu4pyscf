@@ -137,6 +137,11 @@ def _slab_length(cell, allow_2d=False):
 
 
 def _slab_charge(mf, cell):
+    # TODO: This name should be changed.
+    nelec = getattr(mf, 'fcp_nelec', None)
+    if nelec is not None:
+        # FCP electron numbers are already per primitive cell.
+        return cell.atom_charges().sum() - nelec
     if hasattr(mf, '_gate_nelectron'):
         mf._gate_nelectron(cell)
         return cell.charge
@@ -320,6 +325,7 @@ class SlabDipoleCorrection:
         out.exc = veff.exc + edip
         out.edip = edip
         out.dipole = dipole
+        out.dipole_offset = offset
         logger.info(self, 'Dipole correction: E = %.10g, p = %.6g, '
                     'cut = %.6g, z0 = %.6g Bohr',
                     edip, dipole, cut, self.dipole_z0)
