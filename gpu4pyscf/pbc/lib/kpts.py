@@ -93,9 +93,14 @@ class KPointSampling:
     def gamma_point(cls, cell=None):
         '''Create Gamma-only sampling, optionally using the cell's lattice.'''
         # Gamma coordinates are zero in both Cartesian and scaled units, so
-        # the lattice has no effect on this sampling. If cell is not provided,
-        # use eye(3) as a placeholder.
-        lattice_vectors = np.eye(3) if cell is None else cell.lattice_vectors()
+        # the lattice has no effect on this sampling. Older PySCF to_gpu()
+        # initializes GPU objects with a dummy cell whose lattice_vectors is
+        # None. Use an identity placeholder.
+        get_lattice_vectors = getattr(cell, 'lattice_vectors', None)
+        if callable(get_lattice_vectors):
+            lattice_vectors = get_lattice_vectors()
+        else:
+            lattice_vectors = np.eye(3))
         self = cls(lattice_vectors, np.zeros((1, 3)))
         self.kmesh = np.array([1, 1, 1])
         self.with_gamma_point = True
