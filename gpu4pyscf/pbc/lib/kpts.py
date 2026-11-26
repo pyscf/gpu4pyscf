@@ -100,7 +100,7 @@ class KPointSampling:
         if callable(get_lattice_vectors):
             lattice_vectors = get_lattice_vectors()
         else:
-            lattice_vectors = np.eye(3))
+            lattice_vectors = np.eye(3)
         self = cls(lattice_vectors, np.zeros((1, 3)))
         self.kmesh = np.array([1, 1, 1])
         self.with_gamma_point = True
