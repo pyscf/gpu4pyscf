@@ -16,6 +16,7 @@ Environment:
   PR_POLL_BACKLOG=1       on the very first poll, also build the PRs already open
                           (default: just record them, so only later pushes build)
   PR_POLL_DRY_RUN=1       print what would happen, trigger nothing
+  PR_SKIP_DRAFTS=1        skip draft PRs (default: build them, like the CUDA CI)
 """
 import json
 import os
@@ -28,6 +29,9 @@ ALLOWED = set(os.environ.get(
     "PR_ALLOWED_ASSOCIATIONS", "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR").split(","))
 MAX_TRIGGERS = int(os.environ.get("PR_MAX_TRIGGERS", "2"))
 DRY = os.environ.get("PR_POLL_DRY_RUN") == "1"
+# Draft PRs are built too, like upstream's CUDA CI (unittest.yml runs on every
+# pull_request event, drafts included). Set PR_SKIP_DRAFTS=1 to skip them.
+SKIP_DRAFTS = os.environ.get("PR_SKIP_DRAFTS") == "1"
 STATE = os.path.join(os.environ.get("CI_ROOT", os.path.expanduser("~/gitlab-sycl-ci")),
                      "pr-state.json")
 
@@ -60,6 +64,8 @@ def post_pending_status(sha, pipeline_url):
     """
     tok = os.environ.get("GITHUB_STATUS_TOKEN")
     if not tok:
+        print("GITHUB_STATUS_TOKEN not set (ref %s protected=%s): no pending status"
+              % (os.environ.get("CI_COMMIT_REF_NAME"), os.environ.get("CI_COMMIT_REF_PROTECTED")))
         return
     try:
         github_post("/repos/%s/statuses/%s" % (REPO, sha), {
@@ -69,7 +75,9 @@ def post_pending_status(sha, pipeline_url):
             "target_url": pipeline_url}, tok)
         print("posted pending status on %s@%s" % (REPO, sha[:10]))
     except Exception as e:
-        print("pending status failed (non-fatal): %s" % e)
+        body = e.read()[:300] if hasattr(e, "read") else ""
+        print("WARNING: pending status failed on %s@%s: %s %s (token needs push access on %s)"
+              % (REPO, sha[:10], e, body, REPO))
 
 
 def trigger(pr, sha):
@@ -90,6 +98,7 @@ def trigger(pr, sha):
 
 def main():
     first_poll = not os.path.exists(STATE)
+    print("state file: %s (first poll: %s)" % (STATE, first_poll))
     try:
         with open(STATE) as f:
             state = json.load(f)
@@ -110,9 +119,11 @@ def main():
     for pr in prs:
         num, sha = str(pr["number"]), pr["head"]["sha"]
         assoc = pr.get("author_association", "NONE")
-        if pr.get("draft"):
+        if pr.get("draft") and SKIP_DRAFTS:
+            print("PR #%s skipped: draft (PR_SKIP_DRAFTS=1)" % num)
             continue
         if state.get(num) == sha:
+            print("PR #%s unchanged at %s (already triggered or baselined)" % (num, sha[:10]))
             continue
         if assoc not in ALLOWED:
             print("PR #%s held: author_association=%s (allowed: %s)"

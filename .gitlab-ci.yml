@@ -19,8 +19,9 @@
 #         NUMA node).
 #
 # CI/CD variables (Settings > CI/CD > Variables): SYCL_TESTS, SYCL_ARCHITECTURES, CI_ROOT,
-# ZE_DRIVER_DIR, PYTEST_WORKERS; SYCL_TILES (default: all visible GPU tiles), SYCL_TILE_WORKERS,
-# SYCL_TILE_OMP; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
+# ZE_DRIVER_DIR; SYCL_TILES (default: all visible GPU tiles; never more than one test process
+# per tile), SYCL_TILE_OMP; USE_MODULES (default 1: toolchain from system modules), SYCL_MODULES,
+# SYCL_MODULE_PATH, SYCL_CI_ENV_FILE; PR_REPO, PR_ALLOWED_ASSOCIATIONS, PR_MAX_TRIGGERS,
 # GITLAB_TRIGGER_TOKEN, GITHUB_GIST_TOKEN, GITHUB_STATUS_TOKEN, GITHUB_READ_TOKEN.
 # See .github/jlse/ci_sycl.sh, poll_prs.py and report_pr.py.
 
@@ -36,10 +37,35 @@ stages:
   - test
   - report
 
+# Every PR pipeline runs on ref master (the trusted CI checkout; the PR code is
+# fetched as pull/N/merge), so GitLab's "auto-cancel redundant pipelines" would
+# let a new master push -- or another PR's pipeline -- cancel a running PR
+# pipeline (jobs are interruptible). Never auto-cancel on new commits.
+workflow:
+  # Every pipeline checks out master (trusted CI scripts), so GitLab labels them
+  # all with master's HEAD commit. Name them by what they actually do instead.
+  name: '$SYCL_PIPELINE_NAME'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $POLL_PRS == "true"'
+      variables:
+        SYCL_PIPELINE_NAME: 'PR poller'
+    - if: '$PR_NUMBER'
+      variables:
+        SYCL_PIPELINE_NAME: 'SYCL CI: PR #$PR_NUMBER @ $PR_SHA'
+    - when: always
+      variables:
+        SYCL_PIPELINE_NAME: 'SYCL CI: $CI_COMMIT_REF_NAME @ $CI_COMMIT_SHORT_SHA ($CI_PIPELINE_SOURCE)'
+  auto_cancel:
+    on_new_commit: none
+
 # ci-resources/defaults has no chiatta runner yet, so define it here from the
 # same pieces its other runners use (id token, batch tag, ALCF proxy).
 .chiatta-runner:
   extends: .batch-runner
+  # If a PR pipeline is cancelled/superseded, report_pr.py posts an "error"
+  # status so the SYCL CI check on the PR does not stay pending forever.
+  after_script:
+    - '[ "$CI_JOB_STATUS" = canceled ] && [ -n "${PR_NUMBER:-}" ] && python3 .github/jlse/report_pr.py canceled || true'
   variables:
     # --jobname shows up in qstat, e.g. gpu4pyscf-sycl-build-p42.
     JLSE_SCHEDULER_PARAMETERS: "-n 1 -t 120 -q chiatta --jobname gpu4pyscf-$CI_JOB_NAME-p$CI_PIPELINE_IID"
@@ -70,6 +96,8 @@ stages:
 .pr-only-rules:
   rules:
     - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+    # manual smoke test: Run pipeline (web) with PR_NUMBER/PR_SHA/PR_REPO set
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PR_NUMBER'
 
 pr-poller:
   stage: poll
@@ -132,12 +160,20 @@ sycl-test:
 
 report-success:
   extends: .report
-  when: on_success
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+      when: on_success
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PR_NUMBER'
+      when: on_success
   script:
     - python3 .github/jlse/report_pr.py success
 
 report-failure:
   extends: .report
-  when: on_failure
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(trigger|pipeline)$/ && $PR_NUMBER'
+      when: on_failure
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PR_NUMBER'
+      when: on_failure
   script:
     - python3 .github/jlse/report_pr.py failure

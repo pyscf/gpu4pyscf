@@ -2,15 +2,28 @@
 
 Driven by `/.gitlab-ci.yml` on gitlab.jlse.anl.gov (Jacamar `batch` runner, queue `chiatta`).
 
-This is the SYCL CI: the GitHub-hosted CPU/OpenCL CI (`sycl-cpu-ci.yml`) is
-deactivated (manual `workflow_dispatch` only) in favor of real PVC GPU runs here.
+This is the SYCL CI. It replaces the former GitHub-hosted CPU/OpenCL workflow
+(`sycl-cpu-ci.yml`, removed) with real PVC GPU runs.
 
 | File | Role |
 |---|---|
 | `ci_sycl.sh` | `build` (fresh conda env per pipeline, PVC AOT build, tile 0) and `test <paths>` sharded over all tiles |
-| `env.yml` | conda env: nightly dpnp, dpctl, oneAPI 2026.2.0, test deps as in the CUDA CI |
+| `env.yml` | conda env (modules mode, default): **only** python + nightly dpnp/dpctl + test deps; toolchain from system modules |
+| `env-conda.yml` | fallback full conda env incl. oneAPI 2026.2.0 toolchain (`USE_MODULES=0`) |
 | `poll_prs.py` | scheduled job: finds new/updated upstream PRs and starts a pipeline for each |
 | `report_pr.py` | end of a PR pipeline: publishes logs (gist) and a commit status on the PR |
+
+## Toolchain: system modules (default) vs conda
+
+By default (`USE_MODULES=1`) the compiler toolchain comes from the node's system
+modules, loaded in `ci_sycl.sh setup_env`: `module use $SYCL_MODULE_PATH` (default
+`/soft/modulefiles`) then `module load $SYCL_MODULES` (default
+`intel/oneapi/release/2026.2.0 compiler mkl cmake`), which provides icx/icpx/ifx,
+MKL, TBB, cmake, the level-zero loader and ocloc. The conda env (`env.yml`) then
+only carries python 3.13, nightly dpnp/dpctl (`dppy/label/dev` + conda-forge), and
+small build/test tools. The GPU driver (`libze_intel_gpu`) always comes from the
+node via `ZE_DRIVER_DIR`. Set `USE_MODULES=0` to use the full conda toolchain from
+`env-conda.yml` instead; override the env file with `SYCL_CI_ENV_FILE`.
 
 ## Multi-tile testing
 
@@ -20,11 +33,13 @@ A chiatta node has 8 Max 1550 cards = 16 GPU tiles (`ONEAPI_DEVICE_SELECTOR=leve
 visible) and runs one pytest process per tile with `ZE_AFFINITY_MASK=<tile>`, so every
 process stays on the supported single-device code path. Each tile process is bound to its
 card's NUMA node with `numactl --cpunodebind` (taskset fallback), which also keeps the
-oneTBB/MKL thread arenas node-sized. Per-tile parallelism: `SYCL_TILE_WORKERS` (default 2
-pytest-xdist workers) and `SYCL_TILE_OMP` (default 4 OpenMP threads). Per-tile logs land in
+oneTBB/MKL thread arenas node-sized. **Never more than one test process on a tile at any
+time:** each tile runs a single sequential pytest (no pytest-xdist `-n`), because several
+processes sharing a tile caused GPU page faults and wrong results. `SYCL_TILE_OMP` (default 4)
+sets the OpenMP threads per tile process. Per-tile logs land in
 `ci-logs/test/60_pytest_tile<N>.log`; the job fails if any tile fails. Test selection is
 identical to the upstream single-GPU CUDA CI (`-m 'not slow and not benchmark and not
-special' -k 'not _high_cost'`).
+special' -k 'not _high_cost'`); only the parallelism differs (tiles, not xdist).
 
 ## Pull requests of the upstream GitHub repo
 
@@ -69,33 +84,12 @@ become public and may contain internal hostnames/paths.
 Variables: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_MAX_TRIGGERS` (default 2 per
 poll), `PR_ALLOWED_ASSOCIATIONS`, `GITLAB_TRIGGER_TOKEN` (default: the job token).
 
-## Triggering directly from GitHub (optional)
+## Triggering
 
-The poller is latency-bound (one schedule interval). `.github/workflows/sycl-jlse-ci.yml`
-additionally triggers a pipeline immediately on every PR open/update (and on an
-`@sycl-jlse` PR comment) via the GitLab trigger API, passing `PR_NUMBER`, `PR_SHA`
-and `PR_REPO`. It needs these GitHub secrets on the repo that receives the PR:
-
-- `JLSE_GITLAB_PROJECT` -- GitLab project ID or URL-encoded path on gitlab.jlse.anl.gov
-- `JLSE_GITLAB_TRIGGER_TOKEN` -- a project trigger token
-
-Optional variables: `JLSE_GITLAB_API` (default `https://gitlab.jlse.anl.gov/api/v4`),
-`JLSE_GITLAB_REF` (trusted ref to check out, default `main`).
-
-Fork PRs never receive secrets, so the workflow skips the API call there and the
-scheduled poller remains the path for them. Either way, the pipeline's `report-*`
-jobs publish the logs to GitHub (gist + commit status) when `GITHUB_GIST_TOKEN` /
-`GITHUB_STATUS_TOKEN` are set as GitLab CI/CD variables.
-
-Notes:
-
-- The `@sycl-jlse` comment trigger is gated to PR comments by
-  OWNER/MEMBER/COLLABORATOR authors, mirroring the poller's
-  `PR_ALLOWED_ASSOCIATIONS` default; anyone else is ignored.
-- For allowed authors the poller may trigger the same head SHA a second time
-  (it is keyed on SHA, not on how the pipeline was started), so a PR update can
-  build twice on chiatta. Harmless, just slower; raise the poll interval if it
-  becomes expensive.
+There is no GitHub-side workflow: GitHub cannot reach gitlab.jlse (private,
+behind ANL) and fork PRs get no repository secrets, so the scheduled poller is
+the single trigger path for every PR (forks and drafts included). The only
+SYCL check on a PR is the `SYCL CI` commit status posted back by the pipeline.
 
 ## Minimum setup: CI logs visible on the GitHub PR
 
@@ -145,17 +139,16 @@ from the GitHub accounts noted below.
 | `GITHUB_STATUS_TOKEN` | commit-status write on `pyscf/gpu4pyscf` (`repo` classic, or fine-grained Commit statuses: write on that repo) | an account with **write** access to `pyscf/gpu4pyscf` — a pyscf maintainer; NOT mintable by fork-only contributors | `curl -H "Authorization: Bearer $T" https://api.github.com/repos/pyscf/gpu4pyscf -q .permissions` → `push: true` |
 | `GITHUB_COMMENT_TOKEN` | `public_repo` (classic) or Issues: write (fine-grained) on the public repo | **any GitHub account** — commenting on a public repo needs no upstream write access. This is the fallback when no maintainer token is available: `report_pr.py` posts a PR comment with the result + log link | `curl -H "Authorization: Bearer $T" -X POST https://api.github.com/repos/pyscf/gpu4pyscf/issues/1/comments -d '{"body":"test"}' (then delete it) |
 | `GITHUB_READ_TOKEN` (optional) | public repo read | any account | raises the poller's anonymous API rate limit |
-| `GITLAB_TRIGGER_TOKEN` (optional) | project trigger token | create at project Settings > CI/CD > Pipeline trigger tokens; defaults to the job token | used by `poll_prs.py` and `sycl-jlse-ci.yml` |
+| `GITLAB_TRIGGER_TOKEN` (optional) | project trigger token | create at project Settings > CI/CD > Pipeline trigger tokens; defaults to the job token | used by `poll_prs.py` |
 | `POLL_PRS=true` | schedule variable | set on a CI/CD schedule (every 5-10 min) | poller runs, prints held/triggered PRs |
 
 Optional: `PR_REPO` (default `pyscf/gpu4pyscf`), `PR_ALLOWED_ASSOCIATIONS` (default
-OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `SYCL_TESTS`,
-`SYCL_TILES`, `SYCL_TILE_WORKERS`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `CI_ROOT`,
-`ZE_DRIVER_DIR`, `PYTEST_WORKERS`.
+OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR), `PR_MAX_TRIGGERS` (default 2), `PR_SKIP_DRAFTS`
+(default off: draft PRs are built too, like the CUDA CI), `SYCL_TESTS`,
+`SYCL_TILES`, `SYCL_TILE_OMP`, `SYCL_ARCHITECTURES`, `USE_MODULES`,
+`SYCL_MODULES`, `SYCL_MODULE_PATH`, `SYCL_CI_ENV_FILE`, `CI_ROOT`,
+`ZE_DRIVER_DIR`.
 
-GitHub-side (optional, same-repo PRs only): secrets `JLSE_GITLAB_PROJECT` (project ID
-or URL-encoded path) and `JLSE_GITLAB_TRIGGER_TOKEN`, plus variables `JLSE_GITLAB_API`,
-`JLSE_GITLAB_REF` -- used by `.github/workflows/sycl-jlse-ci.yml`.
 
 ## Security
 
@@ -180,6 +173,15 @@ build/test jobs that execute untrusted PR code.** So:
   it, so keep tokens out of the logs (masked variables are redacted in job logs).
 
 ## Reporting behavior
+
+**Log visibility for PR viewers:** gitlab.jlse is Private-only, so GitLab pipeline/job
+links need a login. The public copy is the gist that the `SYCL CI` status's **Details**
+link opens: `00_SUMMARY.md` first -- **where it failed** (job + stage + reason, written by
+`ci_sycl.sh`'s `fail` into `ci-logs/<job>/00_failure.log`), device, per-tile test totals,
+crashes/timeouts, every failing test with **how it failed** (raising location + `E` lines),
+build errors with context, env-solve and import/sanity errors -- then each log. pytest logs keep their **full FAILURES section** (all tracebacks plus
+the short summary); other logs keep their last 400 lines. The status description itself says
+e.g. `SYCL CI failed: 3 failed tests`. Full logs stay in the GitLab job artifacts (2 weeks).
 
 One GitHub check per PR head: the poller posts a `pending` `SYCL CI` status when a
 pipeline starts (`poll_prs.py`), and the `report-*` jobs post the final

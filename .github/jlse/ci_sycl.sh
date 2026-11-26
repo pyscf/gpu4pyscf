@@ -11,7 +11,10 @@
 #   CI_ROOT        shared dir for envs, caches, builds  (default $HOME/gitlab-sycl-ci)
 #   SYCL_ARCHITECTURES  generic | pvc                   (default generic)
 #   ZE_DRIVER_DIR  dir with libze_intel_gpu             (default /soft intel-gpu-umd 821.36)
-#   PYTEST_WORKERS                                      (default 4)
+#   SYCL_TILES     GPU tiles to shard the tests over    (default: all visible)
+#   Invariant: never more than ONE test process on a tile at any time
+#   (several processes sharing a tile caused GPU page faults and wrong results),
+#   so pytest never runs with xdist (-n) here.
 #   PR_NUMBER, PR_REPO   set by the PR poller: build that GitHub PR's merge
 #                        ref (or head, on conflicts) instead of this checkout.
 #                        This script, env.yml and .gitlab-ci.yml always come
@@ -31,38 +34,165 @@ BUILD_DIR="$CI_ROOT/builds/${CI_PIPELINE_ID:-local}"
 ENV_PREFIX="$CI_ROOT/envs/${CI_PIPELINE_ID:-local}"
 mkdir -p "$CI_ROOT" "$LOG_DIR"
 
-create_env() {
-  local MM="$CI_ROOT/bin/micromamba"
-  if [ ! -x "$MM" ]; then
-    # micro.mamba.pm returns 503 through the JLSE proxy; the GitHub release works.
-    mkdir -p "$CI_ROOT/bin"
-    curl -fsSL -o "$MM" https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64 &&
-      chmod +x "$MM" || return 1
+# Record why this job failed so report_pr.py can show it on the PR: the job trace
+# is not an artifact (and gitlab.jlse is private), ci-logs/ is.
+fail() {
+  local stage="$1"; shift
+  echo "$*"
+  printf 'stage: %s\nreason: %s\n' "$stage" "$*" >> "$LOG_DIR/00_failure.log"
+  exit 1
+}
+
+# Everything that mutates the shared micromamba root ($CI_ROOT/mroot) runs under
+# one lock: the PR poller starts up to PR_MAX_TRIGGERS (2) pipelines at once, and
+# one job's cache cleanup under another job's running download truncates repodata
+# exactly like a dropped connection. /home (Lustre) is mounted -o flock.
+with_mroot_lock() {
+  (
+    flock -w "${MROOT_LOCK_TIMEOUT:-3600}" 9 ||
+      { echo "timed out after ${MROOT_LOCK_TIMEOUT:-3600}s waiting for $CI_ROOT/mroot.lock"; exit 1; }
+    "$@"
+  ) 9>"$CI_ROOT/mroot.lock"
+}
+
+# Fail early and clearly instead of with a half-written env / cache.
+check_disk() {
+  local need_gb="${1:-${CI_MIN_FREE_GB:-40}}" avail_gb
+  avail_gb=$(df -Pk "$CI_ROOT" 2>/dev/null | awk 'NR==2 {print int($4/1048576)}')
+  echo "free space on $CI_ROOT: ${avail_gb:-?} GB (need >= $need_gb GB)"
+  command -v lfs >/dev/null 2>&1 && lfs quota -h -u "$(id -un)" "$CI_ROOT" 2>/dev/null | tail -n +2 | head -3
+  if [ -n "$avail_gb" ] && [ "$avail_gb" -lt "$need_gb" ]; then
+    echo "ERROR: only $avail_gb GB free on $CI_ROOT; clean up $CI_ROOT/{envs,builds,ccache,sycl_cache,mroot/pkgs}"
+    return 1
   fi
+}
+
+fetch_micromamba() {
+  local MM="$1" url
+  "$MM" --version >/dev/null 2>&1 && return 0
+  # micro.mamba.pm returns 503 through the JLSE proxy; the GitHub release works.
+  url="https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64"
+  [ -n "${MICROMAMBA_VERSION:-}" ] &&
+    url="https://github.com/mamba-org/micromamba-releases/releases/download/$MICROMAMBA_VERSION/micromamba-linux-64"
+  mkdir -p "$(dirname "$MM")"
+  # Download to a temp name, rename only once it runs: a partial binary must
+  # never sit at $MM, where every later job would reuse it.
+  if curl -fsSL --retry 3 --retry-delay 10 -o "$MM.tmp.$$" "$url" && chmod +x "$MM.tmp.$$" &&
+     "$MM.tmp.$$" --version; then
+    mv -f "$MM.tmp.$$" "$MM"
+  else
+    rm -f "$MM.tmp.$$"; return 1
+  fi
+}
+
+# One `micromamba create` attempt; runs under with_mroot_lock.
+mm_create_attempt() {
+  local MM="$1" env_file="$2" attempt="$3" rc_args=()
+  if [ "$attempt" -eq 1 ]; then
+    # Repodata (+ .solv and state.json, which caches the has_zst verdict) is a
+    # few MB: drop it every time so an interrupted earlier download cannot
+    # poison this solve. Downloaded packages are kept.
+    rm -rf "$MAMBA_ROOT_PREFIX/pkgs/cache"
+  else
+    # "ZSTD decompression error: Unknown frame descriptor" + curl error 23 is
+    # the streaming zstd decoder rejecting the body it was SERVED (proxy error
+    # page / truncated transfer) -- it reproduces with an empty cache. Retry
+    # with plain repodata.json (only an rc file can set this; the env var is
+    # ignored), clean index cache + stale locks, and on the last try unused
+    # packages and tarballs too.
+    if [ "$attempt" -ge 3 ]; then "$MM" clean -y --all >/dev/null 2>&1
+    else "$MM" clean -y --index-cache --locks >/dev/null 2>&1; fi
+    rm -rf "$MAMBA_ROOT_PREFIX/pkgs/cache"
+    printf 'repodata_use_zst: false\n' > "$CI_ROOT/mambarc-nozst.yml"
+    rc_args=(--rc-file "$CI_ROOT/mambarc-nozst.yml")
+  fi
+  rm -rf "$ENV_PREFIX"
+  "$MM" create -y ${rc_args[@]+"${rc_args[@]}"} -p "$ENV_PREFIX" -f "$env_file"
+}
+
+# Fail fast with a clear log if the solved env cannot run the port.
+env_sanity() {
+  "$ENV_PREFIX/bin/python" - <<'EOF' 2>&1 | tee "$LOG_DIR/06_env_sanity.log"
+import sys, numpy, scipy, pyscf, dpctl, dpnp
+import dpctl.compiler  # gpu4pyscf/cupy/rawkernel.py needs dpctl >= 0.23
+print("python", sys.version.split()[0], "| dpctl", dpctl.__version__, "| dpnp", dpnp.__version__,
+      "| numpy", numpy.__version__, "| scipy", scipy.__version__, "| pyscf", pyscf.__version__)
+EOF
+  return "${PIPESTATUS[0]}"
+}
+
+create_env() {
+  local MM="$CI_ROOT/bin/micromamba" tries="${ENV_CREATE_TRIES:-3}" attempt rc=1
+  check_disk || return 1
   # Shared package cache: re-solving per pipeline only re-downloads what changed.
   export MAMBA_ROOT_PREFIX="$CI_ROOT/mroot"
-  rm -rf "$ENV_PREFIX"
-  "$MM" create -y -p "$ENV_PREFIX" -f "$TRUSTED_DIR/.github/jlse/env.yml" || return 1
+  mkdir -p "$MAMBA_ROOT_PREFIX"
+  with_mroot_lock fetch_micromamba "$MM" || { echo "could not install micromamba"; return 1; }
+  # Modules mode (default, USE_MODULES=1): toolchain from system modules, conda
+  # env carries only python + nightly dpnp/dpctl + build tools (env.yml).
+  # USE_MODULES=0: full toolchain in conda (env-conda.yml). Override the file
+  # with SYCL_CI_ENV_FILE.
+  local env_file="${SYCL_CI_ENV_FILE:-}"
+  if [ -z "$env_file" ]; then
+    if [ "${USE_MODULES:-1}" = "1" ]; then
+      env_file="$TRUSTED_DIR/.github/jlse/env.yml"
+    else
+      env_file="$TRUSTED_DIR/.github/jlse/env-conda.yml"
+    fi
+  fi
+  echo "conda env file: $env_file (USE_MODULES=${USE_MODULES:-1})" | tee "$LOG_DIR/04_env_file.log"
+  for attempt in $(seq 1 "$tries"); do
+    echo "=== micromamba create: attempt $attempt/$tries ==="
+    with_mroot_lock mm_create_attempt "$MM" "$env_file" "$attempt" 2>&1 |
+      tee "$LOG_DIR/05_env_create_$attempt.log"
+    rc="${PIPESTATUS[0]}"
+    [ "$rc" -eq 0 ] && break
+    echo "micromamba create failed (rc=$rc, attempt $attempt/$tries)"
+    [ "$attempt" -lt "$tries" ] && sleep $((attempt * 60))   # backoff, lock released
+  done
+  if [ "$rc" -ne 0 ]; then rm -rf "$ENV_PREFIX"; check_disk; return 1; fi
   "$MM" list -p "$ENV_PREFIX" 2>&1 | grep -E 'dpnp|dpctl|dpcpp|intel-sycl-rt|mkl ' | tee "$LOG_DIR/05_env_versions.log"
+  # Exact solve of the moving nightly label, for reproducing a past pipeline.
+  "$MM" env export -p "$ENV_PREFIX" --explicit > "$LOG_DIR/05_env_explicit.txt" 2>&1 || true
+  env_sanity || { echo "env $ENV_PREFIX was created but is unusable (see 06_env_sanity.log)"; return 1; }
+  touch "$ENV_PREFIX/.ci_env_ok"
   # Drop envs of old pipelines.
   find "$CI_ROOT/envs" -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null
 }
 
 setup_env() {
   export PATH="$ENV_PREFIX/bin:$PATH"
-  # conda-forge's intel-compute-runtime ships only a versioned ocloc-<ver>;
-  # icpx looks for plain `ocloc`.
-  if [ ! -e "$ENV_PREFIX/bin/ocloc" ]; then
-    for f in "$ENV_PREFIX"/bin/ocloc-*; do
-      [ -x "$f" ] && ln -sf "$(basename "$f")" "$ENV_PREFIX/bin/ocloc" && break
-    done
+  if [ "${USE_MODULES:-1}" = "1" ]; then
+    # Modules mode (default): toolchain from the node's system modules —
+    # icx/icpx/ifx, MKL, TBB, cmake, level-zero loader, IGC/ocloc. The conda env
+    # provides python, nightly dpnp/dpctl and the small build tools.
+    if ! command -v module >/dev/null 2>&1 && [ -f /etc/profile.d/modules.sh ]; then
+      . /etc/profile.d/modules.sh
+    fi
+    module use "${SYCL_MODULE_PATH:-/soft/modulefiles}"
+    # shellcheck disable=SC2086
+    module load ${SYCL_MODULES:-intel/oneapi/release/2026.2.0 compiler mkl cmake}
+    export CC=icx CXX=icpx FC=ifx
+    # MKLROOT/TBBROOT are set by the mkl/compiler modules.
+    if ! command -v ocloc >/dev/null 2>&1 && [ -e "$ENV_PREFIX"/bin/ocloc-* ]; then
+      ln -sf "$(basename "$ENV_PREFIX"/bin/ocloc-*)" "$ENV_PREFIX/bin/ocloc"
+    fi
+  else
+    # Conda toolchain mode (USE_MODULES=0): everything from the conda env.
+    # conda-forge's intel-compute-runtime ships only a versioned ocloc-<ver>;
+    # icpx looks for plain `ocloc`.
+    if [ ! -e "$ENV_PREFIX/bin/ocloc" ]; then
+      for f in "$ENV_PREFIX"/bin/ocloc-*; do
+        [ -x "$f" ] && ln -sf "$(basename "$f")" "$ENV_PREFIX/bin/ocloc" && break
+      done
+    fi
+    export MKLROOT="$ENV_PREFIX" TBBROOT="$ENV_PREFIX"
+    export CC=icx CXX=icpx FC=ifx
   fi
-  # Level-zero: loader from the conda env, GPU driver (libze_intel_gpu) from the
-  # node's system install (no conda package exists). No environment modules.
+  # Level-zero: loader from modules or the conda env, GPU driver (libze_intel_gpu)
+  # from the node's system install (no conda package exists).
   ZE_DRIVER_DIR="${ZE_DRIVER_DIR:-/soft/libraries/intel-gpu-umd/821.36/lib64}"
   export LD_LIBRARY_PATH="$ENV_PREFIX/lib:$ZE_DRIVER_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-  export MKLROOT="$ENV_PREFIX" TBBROOT="$ENV_PREFIX"
-  export CC=icx CXX=icpx FC=ifx
   export CCACHE_DIR="$CI_ROOT/ccache" CCACHE_MAXSIZE=10G
   export SYCL_CACHE_PERSISTENT=1 SYCL_CACHE_DIR="$CI_ROOT/sycl_cache"
   # chiatta nodes have 8 two-tile Max 1550 cards. Single-GPU CI: with the FLAT
@@ -136,14 +266,14 @@ relocate_libs() {
 
 do_build() {
   mkdir -p "$CI_ROOT/envs"
-  create_env || { echo "environment creation failed"; exit 1; }
-  setup_env || { echo "environment setup failed"; exit 1; }
-  checkout_pr || { echo "could not fetch PR $PR_NUMBER"; exit 1; }
+  create_env || fail env "conda environment creation failed (see 05_env_create_*.log / 06_env_sanity.log)"
+  setup_env || fail env "environment setup (modules / PATH) failed"
+  checkout_pr || fail checkout "could not fetch PR $PR_NUMBER from GitHub (see 03_pr.log)"
   cd "$SRC_DIR"
   # A CMake cache left by an earlier job would point at that job's conda env.
   rm -rf "$SRC_DIR/build"
   export PYTHONPATH="$SRC_DIR"
-  toolchain_check || exit 1
+  toolchain_check || fail toolchain "toolchain / GPU device check failed (see 10_toolchain.log)"
 
   export GPU4PYSCF_BACKEND=sycl
   # Set SYCL_ARCHITECTURES=pvc for AOT compilation targeting PVC GPUs.
@@ -151,20 +281,24 @@ do_build() {
   export SYCL_ARCHITECTURES="${SYCL_ARCHITECTURES:-generic}"
   echo "SYCL_ARCHITECTURES=$SYCL_ARCHITECTURES" | tee "$LOG_DIR/20_architecture.log"
 
+  # ccache only if available (conda env or module); otherwise build without it.
+  local launchers=""
+  if command -v ccache >/dev/null 2>&1; then
+    launchers="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+  fi
   export CMAKE_CONFIGURE_ARGS="-DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx \
-    -DCMAKE_Fortran_COMPILER=ifx -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+    -DCMAKE_Fortran_COMPILER=ifx -DCMAKE_BUILD_TYPE=Release $launchers"
   python setup.py build 2>&1 | tee "$LOG_DIR/40_build.log"
-  [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "build failed"; exit 1; }
+  [ "${PIPESTATUS[0]}" -eq 0 ] || fail build "gpu4pyscf build failed (see 40_build.log)"
   ccache -s || true
 
   python -c "import gpu4pyscf; print('gpu4pyscf import OK')" 2>&1 | tee "$LOG_DIR/50_smoke.log"
-  [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+  [ "${PIPESTATUS[0]}" -eq 0 ] || fail smoke "built tree does not import (see 50_smoke.log)"
 
   # Publish the built tree for the test jobs of this pipeline (shared filesystem).
   mkdir -p "$BUILD_DIR"
-  rsync -a --delete --exclude=.git --exclude=build --exclude=ci-logs "$SRC_DIR"/ "$BUILD_DIR"/ || exit 1
-  relocate_libs "$BUILD_DIR" || { echo "could not relocate libraries"; exit 1; }
+  rsync -a --delete --exclude=.git --exclude=build --exclude=ci-logs "$SRC_DIR"/ "$BUILD_DIR"/ || fail publish "could not publish the build to $BUILD_DIR"
+  relocate_libs "$BUILD_DIR" || fail publish "could not relocate libraries"
   echo "$ENV_PREFIX" > "$BUILD_DIR/.env_prefix"
   touch "$BUILD_DIR/.build_ok"
   find "$CI_ROOT/builds" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
@@ -173,38 +307,57 @@ do_build() {
 
 do_test() {
   [ $# -gt 0 ] || { echo "usage: $0 test <pytest paths...>"; exit 2; }
-  [ -e "$BUILD_DIR/.build_ok" ] || { echo "no build for pipeline ${CI_PIPELINE_ID:-local} at $BUILD_DIR (did the build job run?)"; exit 1; }
+  [ -e "$BUILD_DIR/.build_ok" ] || fail test-setup "no build for pipeline ${CI_PIPELINE_ID:-local} at $BUILD_DIR (did the build job run?)"
   ENV_PREFIX="$(cat "$BUILD_DIR/.env_prefix")"
-  [ -d "$ENV_PREFIX" ] || { echo "env $ENV_PREFIX from the build is gone"; exit 1; }
+  # .env_prefix is absolute; if CI_ROOT was moved since the build, look for the
+  # env under the current root (same pipeline id) before giving up.
+  if [ ! -d "$ENV_PREFIX" ] && [ -d "$CI_ROOT/envs/$(basename "$ENV_PREFIX")" ]; then
+    echo "env $ENV_PREFIX moved; using $CI_ROOT/envs/$(basename "$ENV_PREFIX") (CI_ROOT relocated)"
+    ENV_PREFIX="$CI_ROOT/envs/$(basename "$ENV_PREFIX")"
+  fi
+  [ -d "$ENV_PREFIX" ] || fail test-setup "env $ENV_PREFIX from the build is gone (re-run the whole pipeline, not just the test job)"
+  [ -e "$ENV_PREFIX/.ci_env_ok" ] || fail test-setup "env $ENV_PREFIX is incomplete (no .ci_env_ok): re-run the build job"
+  # Keep the 3-day env / 7-day build reapers off a pipeline whose tests are re-run.
+  touch "$ENV_PREFIX" "$BUILD_DIR"
+  check_disk "${CI_MIN_FREE_GB_TEST:-10}" || fail test-setup "not enough free disk on $CI_ROOT"
 
-  # How many GPU tiles to spread the tests over. Detected with the affinity
-  # mask removed (setup_env defaults it to 0 = single tile). Each test process
-  # gets exactly one tile via ZE_AFFINITY_MASK, so this stays on the supported
+  setup_env || fail test-setup "environment setup (modules / PATH) failed"
+  cd "$BUILD_DIR"
+  export PYTHONPATH="$BUILD_DIR"
+  toolchain_check || fail test-setup "toolchain / GPU device check failed (see 10_toolchain.log)"
+
+  # How many GPU tiles to spread the tests over. Must run AFTER setup_env:
+  # dpctl lives in the CI env, not in the system python3 (detecting earlier
+  # silently fell back to 1 tile). Detected with the affinity mask removed
+  # (setup_env defaults it to 0 = single tile). Each test process gets exactly
+  # one tile via ZE_AFFINITY_MASK, so this stays on the supported
   # single-device-per-process code path; the parallelism is across processes.
   local tiles="${SYCL_TILES:-}"
   if [ -z "$tiles" ]; then
     tiles=$(env -u ZE_AFFINITY_MASK ONEAPI_DEVICE_SELECTOR=level_zero:gpu \
-      python3 -c 'import dpctl; print(len(dpctl.get_devices(device_type="gpu")))' 2>/dev/null || echo 1)
+      "$ENV_PREFIX/bin/python" -c 'import dpctl; print(len(dpctl.get_devices(device_type="gpu")))' 2>&1 | tail -1)
   fi
-  [ "$tiles" -ge 1 ] 2>/dev/null || tiles=1
+  if ! [ "$tiles" -ge 1 ] 2>/dev/null; then
+    echo "WARNING: GPU tile detection failed ('$tiles'); falling back to 1 tile"
+    tiles=1
+  fi
+  echo "GPU tiles detected/used: $tiles"
 
-  setup_env || { echo "environment setup failed"; exit 1; }
-  cd "$BUILD_DIR"
-  export PYTHONPATH="$BUILD_DIR"
-  toolchain_check || exit 1
-
-  # Same pytest invocation as upstream unittest.yml (.github/workflows/unittest.yml),
+  # Same test selection as upstream unittest.yml (.github/workflows/unittest.yml),
   # including -k 'not _high_cost': the *_high_cost tests carry CUDA-tuned bounds
   # (e.g. GDM cycle counts) and are excluded from upstream CI.
-  local pytest_args=(-n "${PYTEST_WORKERS:-4}" --dist loadfile
-    -m 'not slow and not benchmark and not special' -k 'not _high_cost'
+  # Unlike the CUDA CI there is NO xdist (-n): never more than one test process
+  # on a tile at any time -- several processes sharing a tile caused GPU page
+  # faults and wrong results. Parallelism comes from sharding across tiles.
+  local pytest_args=(-m 'not slow and not benchmark and not special' -k 'not _high_cost'
     --cov="$BUILD_DIR" --durations=50)
 
   if [ "$tiles" -le 1 ]; then
     pytest "${pytest_args[@]}" "$@" 2>&1 | tee "$LOG_DIR/60_pytest.log"
     status="${PIPESTATUS[0]}"
     rm -rf .pytest_cache
-    exit "$status"
+    [ "$status" -eq 0 ] || fail tests "pytest failed (rc=$status, single tile; see 60_pytest.log)"
+    exit 0
   fi
 
   # Multi-tile: shard the test files round-robin over the tiles and run one
@@ -222,8 +375,13 @@ do_test() {
     else echo "$p" >> "$shard_dir/all.txt"; fi
   done
   split -n "r/$tiles" -d "$shard_dir/all.txt" "$shard_dir/shard_"
-  local tile_workers="${SYCL_TILE_WORKERS:-2}" tile_omp="${SYCL_TILE_OMP:-4}"
-  local pids=() t status=0 shard
+  if [ ! -s "$shard_dir/all.txt" ]; then
+    echo "no test files found under: $* -- failing instead of passing vacuously" | tee -a "$LOG_DIR/60_pytest.log"
+    fail tests "no test files found under: $*"
+  fi
+  local tile_omp="${SYCL_TILE_OMP:-4}"
+  local tile_timeout="${SYCL_TILE_TIMEOUT:-6300}"   # < 2h job timeout: logs survive a hang
+  local pids=() launched=() t i trc status=0 shard
   for t in $(seq 0 $((tiles - 1))); do
     shard="$shard_dir/shard_$(printf '%02d' "$t")"
     [ -s "$shard" ] || continue
@@ -243,26 +401,44 @@ do_test() {
         # Identify the actual device (tile) running this shard at the top of its log.
         echo "tile=$t host=$(hostname)"
         python -c "import dpctl; print('device:', dpctl.get_devices(device_type='gpu'))" 2>/dev/null || true
-        $bind env OMP_NUM_THREADS="$tile_omp" \
-          pytest -n "$tile_workers" --dist loadfile \
-          -m 'not slow and not benchmark and not special' -k 'not _high_cost' \
+        $bind env OMP_NUM_THREADS="$tile_omp" timeout -k 120 "$tile_timeout" \
+          pytest -m 'not slow and not benchmark and not special' -k 'not _high_cost' \
           --durations=50 $(cat "$shard")
       } > "$LOG_DIR/60_pytest_tile$t.log" 2>&1
-      echo "$?" > "$shard_dir/rc_$t"
+      trc=$?
+      echo "$trc" > "$shard_dir/rc_$t"
+      exit "$trc"
     ) &
-    pids+=($!)
+    pids+=($!); launched+=("$t")
   done
-  for p in "${pids[@]}"; do
-    wait "$p" || true
+  for i in "${!pids[@]}"; do
+    t="${launched[$i]}"
+    wait "${pids[$i]}"; trc=$?
+    if [ ! -s "$shard_dir/rc_$t" ]; then
+      # Subshell killed before it could record a status: never count as a pass.
+      echo "tile $t: no exit status recorded (wait rc=$trc) -> FAILED" | tee -a "$LOG_DIR/60_pytest.log"
+      status=1
+    elif [ "$(cat "$shard_dir/rc_$t")" != "0" ] || [ "$trc" -ne 0 ]; then
+      [ "$(cat "$shard_dir/rc_$t")" = "124" ] &&
+        echo "tile $t: TIMEOUT after ${tile_timeout}s" | tee -a "$LOG_DIR/60_pytest.log"
+      status=1
+    fi
   done
-  for t in $(seq 0 $((tiles - 1))); do
-    [ -f "$shard_dir/rc_$t" ] && [ "$(cat "$shard_dir/rc_$t")" != "0" ] && status=1
-  done
-  grep -hE "passed|failed|error" "$LOG_DIR"/60_pytest_tile*.log | tail -n "$tiles" | tee -a "$LOG_DIR/60_pytest.log"
+  for t in "${launched[@]}"; do
+    printf 'tile %2d (rc=%s): %s\n' "$t" "$(cat "$shard_dir/rc_$t" 2>/dev/null || echo '?')" \
+      "$(grep -E '^=+ .*(passed|failed|error|no tests ran)' "$LOG_DIR/60_pytest_tile$t.log" | tail -1)"
+  done | tee -a "$LOG_DIR/60_pytest.log"
   rm -rf .pytest_cache
-  [ "$status" -eq 0 ] && echo "ALL TILES PASSED" | tee -a "$LOG_DIR/60_pytest.log" \
-    || echo "SOME TILES FAILED (see $LOG_DIR/60_pytest_tile*.log)" | tee -a "$LOG_DIR/60_pytest.log"
-  exit "$status"
+  if [ "$status" -eq 0 ]; then
+    echo "ALL TILES PASSED" | tee -a "$LOG_DIR/60_pytest.log"
+    exit 0
+  fi
+  echo "SOME TILES FAILED (see $LOG_DIR/60_pytest_tile*.log)" | tee -a "$LOG_DIR/60_pytest.log"
+  local bad=""
+  for t in "${launched[@]}"; do
+    [ "$(cat "$shard_dir/rc_$t" 2>/dev/null || echo missing)" = "0" ] || bad="$bad $t"
+  done
+  fail tests "tests failed on tile(s):$bad (see 60_pytest_tile<N>.log)"
 }
 
 case "$MODE" in

@@ -494,7 +494,13 @@ if(BUILD_EXCHCXX)
       -DBUILD_SHARED_LIBS=ON
       -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
       -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-      -DCMAKE_CXX_FLAGS=-Wno-unused-parameter
+      # Silence all warnings from this third-party build. -w (not -Wno-...):
+      # ExchCXX adds -Wall/-Wextra as target options, which land after
+      # CMAKE_<LANG>_FLAGS and would re-enable individual warnings; -w cannot
+      # be re-enabled. Linker flags cover link-time SYCL device compilation.
+      -DCMAKE_C_FLAGS=-w
+      -DCMAKE_CXX_FLAGS=-w
+      -DCMAKE_SHARED_LINKER_FLAGS=-w
       -DEXCHCXX_ENABLE_SYCL=ON
       -DEXCHCXX_SYCL_TARGET=${GPU4PYSCF_EXCHCXX_SYCL_TARGET}
       -DEXCHCXX_ENABLE_TESTS=OFF
