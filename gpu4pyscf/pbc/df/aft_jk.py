@@ -30,7 +30,8 @@ from pyscf import lib
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
-from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
+from gpu4pyscf.pbc.df.ft_ao import (
+    FTOpt, libpbc, COMPLEX_GEMM_MAX_N, complex_gemm_blocks)
 from gpu4pyscf.pbc.df.fft_jk import (
     _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm)
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
@@ -603,7 +604,13 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
             # This is also the FT at (-Gv, -kpt) with sampling -kpts.
 
             if is_gamma_point:
-                tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
+                if COMPLEX_GEMM_MAX_N is not None and nao*nGv > COMPLEX_GEMM_MAX_N:
+                    tmp = cp.empty((n_dm, nao, nao, nGv), dtype=np.result_type(dms, pqG_conj))
+                    for g0, g1 in lib.prange(0, nGv, COMPLEX_GEMM_MAX_N // nao):
+                        contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0,:,:,g0:g1],
+                                 out=tmp[:,:,:,g0:g1])
+                else:
+                    tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                 vkG = cp.einsum('pqg,qpg->g', dm_vG, pqG[0]).real
                 if ft_opt.permutation_symmetry:
@@ -637,9 +644,14 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
                 # conjugation to the previous case.
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
-                dm_k = contract('snjk,nlkg->snjlg', dms, pqG_conj)
+                if COMPLEX_GEMM_MAX_N is not None and nao*nGv > COMPLEX_GEMM_MAX_N:
+                    dm_k = cp.empty((n_dm, nkpts, nao, nao, nGv), dtype=np.result_type(dms, pqG_conj))
+                    for g0, g1 in lib.prange(0, nGv, COMPLEX_GEMM_MAX_N // nao):
+                        contract('snjk,nlkg->snjlg', dms, pqG_conj[:,:,:,g0:g1],
+                                 out=dm_k[:,:,:,:,g0:g1])
+                else:
+                    dm_k = contract('snjk,nlkg->snjlg', dms, pqG_conj)
                 dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
-                dm_vG = contract('Lk,kjig->Ljig', expLk, dm_k)
                 # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_deriv kernel
                 # only processes the lower triangular parts (p>=q in pLqG). By using the
                 # other transformation for nijG
@@ -647,8 +659,21 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
                 # the upper triangular part can be folded into the lower triangular parts
                 # TODO: the two types of transformation likely produce the same
                 # output. Removing the following transformation if this is true.
-                if ft_opt.permutation_symmetry:
-                    dm_vG += contract('Lk,kjig->Lijg', expLk[:,idx].conj(), dm_k)
+                if COMPLEX_GEMM_MAX_N is not None and nao*nao*nGv > COMPLEX_GEMM_MAX_N:
+                    blocks = list(complex_gemm_blocks(nao, nao, nGv))
+                    dm_vG = cp.empty((len(expLk), nao, nao, nGv), dtype=dm_k.dtype)
+                    for j0, j1, g0, g1 in blocks:
+                        contract('Lk,kjig->Ljig', expLk, dm_k[:,j0:j1,:,g0:g1],
+                                 out=dm_vG[:,j0:j1,:,g0:g1])
+                    if ft_opt.permutation_symmetry:
+                        expLk_conj = expLk[:,idx].conj()
+                        for j0, j1, g0, g1 in blocks:
+                            contract('Lk,kjig->Lijg', expLk_conj, dm_k[:,j0:j1,:,g0:g1],
+                                     beta=1, out=dm_vG[:,:,j0:j1,g0:g1])
+                else:
+                    dm_vG = contract('Lk,kjig->Ljig', expLk, dm_k)
+                    if ft_opt.permutation_symmetry:
+                        dm_vG += contract('Lk,kjig->Lijg', expLk[:,idx].conj(), dm_k)
                 vkG = cp.einsum('njig,nijg->g', dm_k, pqG).real
             tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             if swap_2e:
