@@ -345,14 +345,15 @@ class _DFHF:
                             vklr *= (alpha - hyb)
                             vk += vklr
                         elif range_separated_mode == 'mix_inside_kernel':
-                            vj = self.get_j(mol, dm, hermi)
+                            vj = self.get_j(mol, dm[0]+dm[1], hermi)
                             vk = self.get_k(mol, dm, hermi, omega=omega, lr_factor=alpha, sr_factor=hyb)
                         else:
                             raise ValueError(f'range_separated_mode = {range_separated_mode} is not supported')
                     else: # omega == 0
                         vj, vk = self.get_jk(mol, dm, hermi)
                         vk *= hyb
-                    vj = vj[0] + vj[1]
+                    if vj.ndim == 3:
+                        vj = vj[0] + vj[1]
                     vxc += vj
                     vxc -= vk
                     exc -= float(cupy.einsum('sij,sji->', dm, vk).real.get()) * .5
@@ -552,15 +553,32 @@ def get_jk(dfobj, dms, hermi=0, with_j=True, with_k=True,
             _dm_sparse = cp.asarray(dm_sparse)
             vj = cp.zeros_like(dm_sparse)
 
-        blksize = dfobj.get_blksize(mem_fraction=0.4)
-        if with_k:
+        if not with_k:
+            blksize = dfobj.get_blksize(mem_fraction=0.4)
+        else:
             vk = cupy.zeros((nspin, n_dm, nao, nao))
-            mem_avail = get_avail_mem(exclude_memory_pool=True)
-            dm_batch_size = int(mem_avail * 0.6 / (blksize*nao*nocc * 8))
-            if dm_factor_mode == 1:
-                dm_batch_size = dm_batch_size // 2
-            dm_batch_size = min(dm_batch_size, n_dm)
-            assert dm_batch_size > 0
+            device_id = cp.cuda.Device().id
+            cderi_sparse = dfobj._cderi[device_id]
+            if cderi_sparse.shape[0] == 0:
+                return vj, vk
+            min_k_bufs = 1 if dm_factor_mode == 0 else 2
+            mem_fraction = 0.75
+            blksize = dfobj.get_blksize(
+                extra=min_k_bufs * nao * nocc, nao=nao, mem_fraction=mem_fraction)
+            on_gpu = isinstance(cderi_sparse, cp.ndarray)
+            loop_words_per_aux = nao * nao + (0 if on_gpu else 2 * cderi_sparse.shape[1])
+            mem_avail = get_avail_mem()
+            word_budget = int(mem_avail * mem_fraction / 8)
+            rem_words = word_budget - blksize * loop_words_per_aux
+            max_k_bufs = max(min_k_bufs, int(rem_words // (blksize * nao * nocc)))
+            if dm_factor_mode == 0:
+                dm_batch_size = max_k_bufs
+            elif dm_factor_mode == 1:
+                dm_batch_size = max_k_bufs // 2
+            else:
+                # dm_factor_mode 2/3 allocates (dm_batch_size + 1) blocks (buf + buf1)
+                dm_batch_size = max_k_bufs - 1
+            dm_batch_size = max(1, min(dm_batch_size, n_dm))
             log.debug1('blksize=%d, dm_batch_size=%d', blksize, dm_batch_size)
 
             if dm_factor_mode == 0:

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest.mock import patch
 from scipy.linalg import eigh
 import numpy as np
 import cupy
@@ -307,6 +308,158 @@ class SmallMetricAndResponse(unittest.TestCase):
         scaled, _ = obj.get_jk(cp.asarray(dm*.4), with_k=False)
         assert obj._cd_j2c is cached
         np.testing.assert_allclose(scaled.get(), ref*.4, atol=1e-9, rtol=0)
+
+
+class TestDFMemoryEstimation(unittest.TestCase):
+    def test_get_blksize_offload_and_extra(self):
+        from gpu4pyscf.df import df as df_mod
+
+        dfobj = DF(mol_sph, 'sto3g')
+        dfobj.use_gpu_memory = False
+        dfobj.build()
+        cderi_sparse = dfobj._cderi[cp.cuda.Device().id]
+        naux_slice, npairs = cderi_sparse.shape
+        nao = dfobj.nao
+        extra = 2 * nao * 10
+        words_per_aux = nao * nao + extra + 2 * npairs
+        target_blk = min(8, naux_slice)
+        fake_mem = int(np.ceil((target_blk * words_per_aux + 1) * 8 / 0.75))
+
+        with patch.object(df_mod, 'get_avail_mem', return_value=fake_mem):
+            blksize = dfobj.get_blksize(extra=extra, mem_fraction=0.75)
+            self.assertEqual(blksize, target_blk)
+
+        too_small = (words_per_aux - 1) * 8
+        with patch.object(df_mod, 'get_avail_mem', return_value=too_small):
+            with self.assertRaises(MemoryError):
+                dfobj.get_blksize(extra=extra, mem_fraction=0.75)
+
+    def test_cholesky_eri_refreshes_mem_avail_after_free(self):
+        from gpu4pyscf.df import df as df_mod
+        from gpu4pyscf.lib import multi_gpu
+
+        mol_small = pyscf.M(
+            atom='O 0 0 0; H 0 -0.757 0.587; H 0 0.757 0.587',
+            basis='def2-svp',
+            verbose=0,
+        )
+        df_ref = DF(mol_small, 'def2-universal-jkfit').build()
+        naux = sum(c.shape[0] for c in df_ref._cderi)
+        naux_sorted = df_ref.intopt.auxmol.nao
+        cderi_npairs = df_ref._cderi[0].shape[1]
+        num_devs = multi_gpu.num_devices
+
+        # 1. Small pre-free mem (simulating cached CuPy pool) + large post-free mem -> keeps CDERI on GPU
+        calls = iter([1_000_000, 10_000_000_000])
+        df_gpu = DF(mol_small, 'def2-universal-jkfit')
+        with patch.object(df_mod, 'get_avail_mem', side_effect=lambda *a, **kw: next(calls)):
+            df_gpu.build()
+        self.assertIsInstance(df_gpu._cderi[0], cp.ndarray)
+
+        # 2. Post-free mem puts cderi between 85% and 95% of word_avail -> offloads to host
+        batch_size = cderi_npairs
+        post_free_words = int(
+            batch_size * naux_sorted + (cderi_npairs * naux) / (0.90 * num_devs)
+        )
+        calls2 = iter([10_000_000_000, post_free_words * 8])
+        df_off = DF(mol_small, 'def2-universal-jkfit')
+        with patch.object(df_mod, 'get_avail_mem', side_effect=lambda *a, **kw: next(calls2)):
+            df_off.build()
+        self.assertIsInstance(df_off._cderi[0], np.ndarray)
+
+    def test_get_jk_tight_memory_all_factor_modes(self):
+        from gpu4pyscf.df import df as df_mod
+
+        nao = mol_sph.nao
+        rng = np.random.default_rng(7)
+        q_mat, _ = np.linalg.qr(rng.standard_normal((nao, nao)))
+        q_cp = cp.asarray(q_mat)
+
+        # Mode 0: tagged mo_coeff/mo_occ (n_dm=2, nocc=4)
+        mo_coeff = cp.stack([q_cp, cp.roll(q_cp, 1, axis=1)])
+        mo_occ = cp.zeros((2, nao))
+        mo_occ[:, :4] = 2.0
+        dms_m0 = cp.einsum('nik,nk,njk->nij', mo_coeff, mo_occ, mo_coeff)
+        dms_m0 = tag_array(dms_m0, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+        # Mode 1: untagged symmetric full-rank density matrices (n_dm=2, nocc=nao)
+        a = cp.asarray(rng.standard_normal((2, nao, nao)))
+        dms_m1 = cp.matmul(a, a.swapaxes(-1, -2)) + 0.1 * cp.eye(nao)
+
+        # Mode 2 & 3: asymmetric factor_l / factor_r dimensions (n_dm=3, k=4)
+        fl_2d = q_cp[:, :4].copy()
+        fr_3d = cp.stack([cp.roll(q_cp, i, axis=1)[:, :4] for i in range(3)])
+        dms_m2_arr = cp.matmul(fl_2d[None], fr_3d.swapaxes(-1, -2))
+        dms_m2 = tag_array(dms_m2_arr, factor_l=fl_2d, factor_r=fr_3d, symmetrize=0)
+        dms_m3_arr = cp.matmul(fr_3d, fl_2d.T)
+        dms_m3 = tag_array(dms_m3_arr, factor_l=fr_3d, factor_r=fl_2d, symmetrize=0)
+
+        cases = [
+            ('mode0', dms_m0, 1, 4, 1),
+            ('mode1', dms_m1, 1, nao, 2),
+            ('mode2', dms_m2, 0, 4, 2),
+            ('mode3', dms_m3, 0, 4, 2),
+        ]
+
+        for on_gpu in (True, False):
+            dfobj = DF(mol_sph, 'sto3g')
+            dfobj.use_gpu_memory = on_gpu
+            dfobj.build()
+            npairs = dfobj._cderi[0].shape[1]
+            loop_words = nao * nao + (0 if on_gpu else 2 * npairs)
+
+            for name, dms, hermi, nocc, min_k_bufs in cases:
+                ref_j, ref_k = dfobj.get_jk(dms, hermi=hermi)
+                # Force blksize=4 (< MIN_BLK_SIZE) and dm_batch_size=1 (< n_dm)
+                min_words = 4 * (loop_words + min_k_bufs * nao * nocc) + 64
+                tight_mem = int(np.ceil(min_words * 8 / 0.75))
+                with patch.object(df_mod, 'get_avail_mem', return_value=tight_mem), \
+                     patch.object(df_jk, 'get_avail_mem', return_value=tight_mem):
+                    vj, vk = dfobj.get_jk(dms, hermi=hermi)
+                np.testing.assert_allclose(vj.get(), ref_j.get(), atol=1e-10, rtol=0,
+                                           err_msg=f'{name} on_gpu={on_gpu} vj mismatch')
+                np.testing.assert_allclose(vk.get(), ref_k.get(), atol=1e-10, rtol=0,
+                                           err_msg=f'{name} on_gpu={on_gpu} vk mismatch')
+
+    def test_uks_mix_inside_kernel_get_j_summed(self):
+        from gpu4pyscf.dft.uks import UKS
+
+        mol_u = pyscf.M(
+            atom='O 0 0 0; O 0 0 1.21',
+            basis='def2-svp',
+            spin=2,
+            verbose=0,
+        )
+        mf_ref = UKS(mol_u, xc='wB97X').density_fit(auxbasis='def2-universal-jkfit')
+        mf_ref.grids.atom_grid = (50, 194)
+        mf_ref.conv_tol = 1e-10
+        mf_ref.range_separated_mode = 'mix_outside_kernel'
+        e_ref = mf_ref.kernel()
+        self.assertTrue(mf_ref.converged)
+
+        mf = UKS(mol_u, xc='wB97X').density_fit(auxbasis='def2-universal-jkfit')
+        mf.grids.atom_grid = (50, 194)
+        mf.conv_tol = 1e-10
+        mf.range_separated_mode = 'mix_inside_kernel'
+
+        seen_ndims = []
+        orig_get_j = mf.get_j
+
+        def spy_get_j(mol_arg, dm_arg, hermi=1, *args, **kwargs):
+            seen_ndims.append(cp.asarray(dm_arg).ndim)
+            return orig_get_j(mol_arg, dm_arg, hermi, *args, **kwargs)
+
+        with patch.object(mf, 'get_j', side_effect=spy_get_j):
+            e_test = mf.kernel()
+
+        self.assertTrue(mf.converged)
+        self.assertTrue(len(seen_ndims) > 0 and all(nd == 2 for nd in seen_ndims))
+        self.assertLess(abs(e_test - e_ref), 1e-5)
+
+        dm = mf.make_rdm1()
+        vj_sum = df_jk.get_j(mf.with_df, dm[0] + dm[1], hermi=1)
+        vj_ab = df_jk.get_j(mf.with_df, dm, hermi=1)
+        np.testing.assert_allclose(vj_sum.get(), (vj_ab[0] + vj_ab[1]).get(), atol=1e-10, rtol=0)
 
 
 if __name__ == "__main__":

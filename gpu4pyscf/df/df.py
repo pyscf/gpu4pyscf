@@ -200,22 +200,30 @@ class DF(lib.StreamObject):
             return 1
 
         on_gpu = isinstance(cderi_sparse, cp.ndarray)
+        words_per_aux = nao * nao + extra
         if not on_gpu:
-            # When cderi is stored on host memory, additional memory is required
-            # to load data into GPU memory. The available memory for unpacked
-            # 3-index cderi is smaller.
-            mem_fraction *= .5
+            # When cderi is stored on host memory, loop() allocates two
+            # (blksize, npairs) staging buffers (buf and buf_prefetch).
+            words_per_aux += 2 * cderi_sparse.shape[1]
 
         mem_avail = get_avail_mem()
         word_avail = int(mem_avail * mem_fraction / 8)
-
-        blksize = word_avail // (nao*nao + extra)
+        blksize = word_avail // words_per_aux
+        if blksize == 0:
+            cp.get_default_memory_pool().free_all_blocks()
+            mem_avail = get_avail_mem()
+            word_avail = int(mem_avail * mem_fraction / 8)
+            blksize = word_avail // words_per_aux
         if blksize > ALIGNED:
             blksize = blksize // ALIGNED * ALIGNED
         blksize = min(blksize, MIN_BLK_SIZE, naux_slice)
-        logger.debug1(self.mol, f"{mem_avail/1e9:.3f} GB memory available on"
+        logger.debug1(self.mol, f"{mem_avail/1e9:.3f} GB memory available on "
                       f"Device {device_id}, block size = {blksize}")
-        assert blksize > 0
+        if blksize <= 0:
+            raise MemoryError(
+                f'Not enough GPU memory on Device {device_id}: '
+                f'{mem_avail/1e9:.3f} GB available, need at least '
+                f'{words_per_aux*8/1e9:.3f} GB for blksize=1')
         return blksize
 
     def loop(self, blksize=None, unpack=True):
@@ -599,9 +607,9 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
     recontract_bas = cp.asnumpy(sorted_mol.recontract_bas)
     needs_recontraction = any(recontract_bas[:,int3c2e_bdiv.NCTR_OF] != 1)
 
-    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    mem_avail = get_avail_mem()
     word_avail = mem_avail // 8
-    batch_size = int(word_avail * .2) // naux_sorted
+    batch_size = max(int(word_avail * .2) // naux_sorted, 1)
 
     current_device = cp.cuda.device.get_device_id()
     eval_j3c, aux_sorting, ao_pair_offsets, _, clone_context = intopt.int3c2e_evaluator(
@@ -646,6 +654,8 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
     naux_per_device = min(naux, (naux + num_devices - 1) // num_devices)
 
     cp.get_default_memory_pool().free_all_blocks()
+    mem_avail = get_avail_mem(exclude_memory_pool=True)
+    word_avail = mem_avail // 8
     word_avail -= batch_size * naux_sorted
     if needs_recontraction:
         word_avail -= batch_size * naux_per_device
@@ -654,13 +664,13 @@ def _cholesky_eri(intopt, *, omega=None, lr_factor=None, sr_factor=None,
     on_gpu = True
     if use_gpu_memory is False:
         on_gpu = False
-    elif cderi_npairs * naux > word_avail * 0.95 * num_devices:
+    elif cderi_npairs * naux > word_avail * 0.85 * num_devices:
         if use_gpu_memory:
             cderi_size = cderi_npairs * naux / num_devices * 8e-9
             raise MemoryError(f'Not enough GPU memory. cderi size = {cderi_size:.2f} GB')
         on_gpu = False
     log.debug1('mem_avail=%.3f MB on_gpu=%s, nao_pairs=%d, naux_per_device=%d, batch_size=%d, num_batches=%d',
-               mem_avail, on_gpu, cderi_npairs, naux_per_device, batch_size, num_batches)
+               mem_avail/1e6, on_gpu, cderi_npairs, naux_per_device, batch_size, num_batches)
 
     if not on_gpu:
         cderi_cpu = empty_mapped((naux, cderi_npairs))
