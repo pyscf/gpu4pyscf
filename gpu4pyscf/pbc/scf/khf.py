@@ -28,7 +28,6 @@ from gpu4pyscf import BACKEND
 from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
-from pyscf.pbc import tools
 from pyscf.pbc.lib.kpts_helper import group_by_conj_pairs
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
@@ -39,8 +38,11 @@ from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
+from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, conj_kpts, _get_kmesh
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, conj_kpts, _get_kmesh, _as_kpts_array, _normalize_kpts)
 
 PBC_LINDEP_MO_ENERGY_OFFSET = 1e5
 
@@ -259,6 +261,7 @@ def _cast_mol_init_guess(fn):
     def fn_init_guess(mf, cell=None, kpts=None, **kwargs):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
+        kpts, _ = _normalize_kpts(cell, kpts)
         dm = fn(mf, cell, **kwargs)
         return _expand_dm_kpts(dm, len(kpts))
     return fn_init_guess
@@ -320,8 +323,9 @@ class KSCF(pbchf.SCF):
     e.g. mo_coeff is (nkpts, nao, nao) ndarray
 
     Attributes:
-        kpts : (nks,3) ndarray
+        kpts : (nks,3) ndarray or KPointSampling
             The sampling k-points in Cartesian coordinates, in units of 1/Bohr.
+            Sampling objects retain their mesh-generation metadata.
     '''
     conv_tol_grad = khf_cpu.KSCF.conv_tol_grad
     time_reversal_symmetry = True
@@ -348,17 +352,23 @@ class KSCF(pbchf.SCF):
     def dump_flags(self, verbose=None):
         mol_hf.SCF.dump_flags(self, verbose)
         log = logger.new_logger(self, verbose)
+        if log.verbose < logger.INFO:
+            return self
+
         log.info('\n')
         log.info('******** PBC SCF flags ********')
-        log.info('N kpts = %d', len(self.kpts))
-        log.debug2('kpts = %s', self.kpts)
+        kpts = self.kpts
+        if 'kpts_sampling' in self.__dict__:
+            kpts = KPointSampling.loads(self.__dict__['kpts_sampling'])
+        nkpts = len(kpts)
+        log.info('N kpts = %d', nkpts)
+        log.debug2('kpts = %s', kpts)
         log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
             isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
-            madelung = tools.pbc.madelung(cell, self.kpts)
+            madelung = tools.pbc.madelung(cell, kpts)
             log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
-            nkpts = len(self.kpts)
             # FIXME: consider the fractional num_electron or not? This maybe
             # relates to the charged system.
             if hasattr(self, '_gate_nelectron'):
@@ -376,7 +386,10 @@ class KSCF(pbchf.SCF):
             self.with_df.dump_flags(verbose)
         return self
 
-    kpts = khf_cpu.KSCF.kpts
+    @khf_cpu.KSCF.kpts.setter
+    def kpts(self, value):
+        self.with_df.kpts = value
+
     mol = pbchf.SCF.mol
     mo_energy_kpts = khf_cpu.KSCF.mo_energy_kpts
     mo_coeff_kpts = khf_cpu.KSCF.mo_coeff_kpts
@@ -386,8 +399,11 @@ class KSCF(pbchf.SCF):
     reset = pbchf.SCF.reset
 
     def build(self, cell=None):
-        # To handle the attribute kpt or kpts loaded from chkfile
-        if 'kpts' in self.__dict__:
+        # kpts is a property of KSCF class, must be assigned via setattr.
+        if 'kpts_sampling' in self.__dict__:
+            self.kpts = KPointSampling.loads(self.__dict__.pop('kpts_sampling'))
+            self.__dict__.pop('kpts', None)
+        elif 'kpts' in self.__dict__:
             self.kpts = self.__dict__.pop('kpts')
 
         kpts = self.kpts
@@ -421,7 +437,7 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
         bvkmesh = None
         if kpts_in_bvkcell:
-            bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         return int1e.int1e_ovlp(cell, kpts, bvkmesh)
 
     def get_hcore(self, cell=None, kpts=None):
@@ -459,7 +475,7 @@ class KSCF(pbchf.SCF):
 
         bvkmesh = None
         if kpts_in_bvkcell:
-            bvkmesh = kpts_to_bvkmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+            bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
         hcore += int1e.int1e_kin(cell, kpts, bvkmesh)
         return hcore
 
@@ -544,6 +560,8 @@ class KSCF(pbchf.SCF):
         if not time_reversal_symmetry:
             return itertools.zip_longest(range(nkpts), ())
 
+        # Pairing must check the actual coordinates, including arbitrary shifts.
+        kpts = kpts.kpts
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
         if kmesh is not None:
@@ -692,7 +710,11 @@ class KSCF(pbchf.SCF):
     init_guess_by_1e = NotImplemented
     init_guess_by_huckel = NotImplemented
     init_guess_by_mod_huckel = NotImplemented
-    init_guess_by_chkfile = return_cupy_array(khf_cpu.KSCF.init_guess_by_chkfile)
+    def init_guess_by_chkfile(self, chk=None, project=None, kpts=None):
+        if chk is None: chk = self.chkfile
+        if kpts is None: kpts = self.kpts
+        return cp.asarray(khf_cpu.init_guess_by_chkfile(
+            self.cell, chk, project, _as_kpts_array(kpts)))
     from_chk = return_cupy_array(khf_cpu.KSCF.from_chk)
 
     analyze = NotImplemented
@@ -720,7 +742,9 @@ class KSCF(pbchf.SCF):
         if self.chkfile:
             mol_hf.SCF.dump_chk(self, envs)
             with lib.H5FileWrap(self.chkfile, 'a') as fh5:
-                fh5['scf/kpts'] = cp.asnumpy(self.kpts)
+                fh5['scf/kpts'] = self.kpts.kpts
+                if isinstance(self.kpts, KPointSampling):
+                    fh5['scf/kpts_sampling'] = self.kpts.dumps()
         return self
 
 class KRHF(KSCF):
@@ -820,7 +844,7 @@ class KRHF(KSCF):
             self.dump_scf_summary(log)
             log.note('**** MO energy ****')
             log.note('k-point                    nocc    HOMO/AU         LUMO/AU')
-            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+            for k, kpt in enumerate(kpts.kpts_scaled):
                 nocc = np.count_nonzero(mo_occ[k])
                 homo = mo_energy[k,nocc-1]
                 lumo = mo_energy[k,nocc  ]
@@ -830,7 +854,7 @@ class KRHF(KSCF):
         log.note('**** Population analysis for atoms in the reference cell ****')
         s = self.get_ovlp(kpts=kpts).get()
         dm = self.make_rdm1().get()
-        pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
+        pop, chg = mulliken_meta(cell, dm, kpts=kpts.kpts, s=s, verbose=verbose)
         dip = None
         return (pop, chg), dip
 

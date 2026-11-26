@@ -217,14 +217,13 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
         log = logger.new_logger(self, verbose)
         mo_energy, mo_coeff = self.get_canonical_mo()
         mo_occ = self.mo_occ.get()
-        cell = self.cell
         kpts = self.kpts
         if log.verbose >= logger.NOTE:
             self.dump_scf_summary(log)
             log.note('**** MO energy ****')
             log.note('                           alpha                               | beta')
             log.note('k-point                    nocc    HOMO/AU         LUMO/AU     | nocc    HOMO/AU         LUMO/AU')
-            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+            for k, kpt in enumerate(kpts.kpts_scaled):
                 nocca = np.count_nonzero(mo_occ[0,k])
                 noccb = np.count_nonzero(mo_occ[1,k])
                 homoa = mo_energy[0,k,nocca-1]

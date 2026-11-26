@@ -25,17 +25,17 @@ import pyscf.pbc.gto as gto
 from pyscf import lib
 from pyscf.pbc.dft.multigrid import multigrid
 from pyscf.pbc.lib.kpts import KPoints
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.gto.mole import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.dft import gen_grid as pbc_gen_grid_cpu
 from pyscf.pbc import tools as pbc_tools_cpu
 from gpu4pyscf import BACKEND
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
-from pyscf.pbc.lib.kpts_helper import is_gamma_point
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc.df.aft import _get_ZSI
-from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.pbc.df.fft_jk import (
+    _format_dms, _format_jks, _format_kpts_band)
 from gpu4pyscf.pbc.gto.cell import get_Gv
 from gpu4pyscf.pbc.tools import pbc as pbc_tools
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
@@ -174,7 +174,8 @@ def _unique_image_pair(translation_vectors):
 
 def image_phase_for_kpts(cell, neighboring_images, kpts=None):
     n_images = len(neighboring_images)
-    if kpts is None or is_gamma_point(kpts):
+    kpts, _ = _normalize_kpts(cell, kpts)
+    if kpts.is_gamma_only():
         phase_diff_among_images = cp.asarray([[1.0]])
         image_pair_difference_index = cp.zeros((n_images, n_images), dtype=cp.int32)
     else:
@@ -184,7 +185,7 @@ def image_phase_for_kpts(cell, neighboring_images, kpts=None):
             lattice_vectors,
         )
         phase_diff_among_images = cp.exp(
-            1j * cp.asarray(kpts.reshape(-1, 3)).dot(difference_images.T)
+            1j * cp.asarray(kpts.kpts).dot(difference_images.T)
         )
     return phase_diff_among_images, image_pair_difference_index
 
@@ -1171,16 +1172,9 @@ def convert_xc_on_g_mesh_to_fock(
 
     xc_on_g_mesh = xc_on_g_mesh.reshape(n_channels, density_slices, *mydf.mesh)
 
-    if kpts is None:
-        kpts = np.zeros((1,3))
-    elif isinstance(kpts, KPoints):
-        kpts = kpts.kpts
-    is_single_kpt = kpts.ndim == 1
-    if is_single_kpt:
-        kpts = kpts.reshape(1, 3)
-    assert kpts.ndim == 2
+    kpts, _ = _normalize_kpts(cell, kpts)
     n_k_points = len(kpts)
-    at_gamma_point = multigrid.gamma_point(kpts)
+    at_gamma_point = kpts.is_gamma_only()
 
     if hermi != 1:
         raise NotImplementedError
@@ -1417,11 +1411,7 @@ def get_nuc(ni, kpts=None):
     """
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(ni.cell, kpts)
     cell = ni.cell
     mesh = ni.mesh
     vneG = multigrid_v1.eval_nucG(cell, mesh)
@@ -1439,11 +1429,7 @@ def get_pp(ni, kpts=None):
     """
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, is_single_kpt = _normalize_kpts(ni.cell, kpts)
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1455,7 +1441,7 @@ def get_pp(ni, kpts=None):
     t1 = log.timer_debug1("vpploc", *t0)
 
     vppnl = get_pp_nl(cell, kpts)
-    for k, kpt in enumerate(kpts):
+    for k in range(len(kpts)):
         if is_single_kpt:
             vpp[k] += cp.asarray(vppnl[k].real)
         else:
@@ -1486,10 +1472,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         or list of vj if the input dm_kpts is a list of DMs
     '''
     input_kpts = kpts
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1509,8 +1492,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     xc_for_fock = convert_xc_on_g_mesh_to_fock(ni, coulomb_on_g_mesh, hermi, kpts_band)
     t0 = log.timer("vj", *t0)
-    return _format_jks(xc_for_fock, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(xc_for_fock, dm_kpts, input_band, input_kpts)
 
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, with_j=False, verbose=None):
@@ -1542,10 +1524,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ni.build(xc_type)
 
     input_kpts = kpts
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1606,8 +1585,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1644,10 +1622,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ni.build(xc_type)
 
     input_kpts = kpts
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1712,8 +1687,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     kpts_band, input_band = _format_kpts_band(kpts_band, input_kpts), kpts_band
     veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
-    veff = _format_jks(veff, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum)
     t0 = log.timer("xc", *t0)
     return n_electrons, xc_energy_sum, veff
@@ -1759,10 +1733,7 @@ def get_veff_ip1(
     k-points. This should return the energy per cell directly and will be
     changed in future.
     '''
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
     log = logger.new_logger(ni, verbose)
     t0 = log.init_timer()
     cell = ni.cell
@@ -1901,10 +1872,7 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
         _get_weight_strain_derivatives, _contract_coulomb_and_nuc)
 
     cell = ni.cell
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
     dm_kpts = cp.asarray(dm_kpts, order='C')
 
     mesh = ni.mesh
@@ -1921,7 +1889,7 @@ def _rks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
 
     image_translations = _neighboring_image_translations(ni)
     disp = 1e-4
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    scaled_kpts = kpts.kpts.dot(cell.lattice_vectors().T)
     rho1 = cp.empty((3, 3, nvar, ngrids))
     for x in range(3):
         for y in range(3):
@@ -1963,10 +1931,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
         _get_weight_strain_derivatives, _contract_coulomb_and_nuc)
 
     cell = ni.cell
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
     dm_kpts = cp.asarray(dm_kpts, order='C')
     assert dm_kpts.ndim == 4
 
@@ -1984,7 +1949,7 @@ def _uks_exc_strain_deriv(ni, xc_code, dm_kpts, kpts=None, with_j=False, with_nu
 
     image_translations = _neighboring_image_translations(ni)
     disp = 1e-4
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    scaled_kpts = kpts.kpts.dot(cell.lattice_vectors().T)
     rho1 = cp.empty((3, 3, 2, nvar, ngrids))
     for x in range(3):
         for y in range(3):
@@ -2069,15 +2034,9 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
     def nr_rks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
                    kpts=None, with_j=False):
-        if kpts is None:
-            kpts = np.zeros((1,3))
-        elif isinstance(kpts, KPoints):
+        if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-
-        is_single_kpt = kpts.ndim == 1
-        if is_single_kpt:
-            kpts = kpts.reshape(1, 3)
-        assert kpts.ndim == 2
+        kpts, _ = _normalize_kpts(cell, kpts)
         assert dms.ndim == 4
         nset, nkpts, nao = dms.shape[:3]
         assert len(kpts) == nkpts
@@ -2136,15 +2095,9 @@ class MultiGridNumInt(multigrid_v1.MultiGridNumIntBase):
 
     def nr_uks_fxc(self, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None,
                    kpts=None, with_j=False):
-        if kpts is None:
-            kpts = np.zeros((1,3))
-        elif isinstance(kpts, KPoints):
+        if isinstance(kpts, KPoints):
             kpts = kpts.kpts_ibz
-
-        is_single_kpt = kpts.ndim == 1
-        if is_single_kpt:
-            kpts = kpts.reshape(1, 3)
-        assert kpts.ndim == 2
+        kpts, _ = _normalize_kpts(cell, kpts)
         assert dms.ndim == 5
         nset, nkpts, nao = dms.shape[1:4]
         assert len(kpts) == nkpts

@@ -23,6 +23,7 @@ from pyscf.lib import unpack_tril, temporary_env
 from gpu4pyscf.pbc import dft as pbcdft
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
+from gpu4pyscf.gto.mole import Cell
 from packaging import version
 
 def setUpModule():
@@ -267,10 +268,12 @@ class KnownValues(unittest.TestCase):
         mf_ref = kmf.to_cpu().run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
+    @unittest.skipIf(version.parse(pyscf.__version__) < version.parse('2.13'),
+                     'GPU Cell factory requires PySCF newer than 2.12')
     def test_kpts_gga_gdf(self):
         from gpu4pyscf.pbc.df.df import GDF
         L = 4.
-        cell = pbcgto.Cell()
+        cell = Cell()
         cell.a = np.eye(3)*L
         cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
                     ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]

@@ -15,14 +15,14 @@
 import cupy as cp
 import numpy as np
 import unittest
-from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.pbc import dft as pbcdft
 from gpu4pyscf.pbc.dft.kucdft import CDFT_KUKS
+from gpu4pyscf.gto.mole import Cell
 
 
 def setUpModule():
     global cell
-    cell = pbcgto.Cell()
+    cell = Cell()
     cell.a = '''
         0.000000000, 3.370137329, 3.370137329
         3.370137329, 0.000000000, 3.370137329

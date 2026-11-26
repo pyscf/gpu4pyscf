@@ -16,12 +16,12 @@
 import unittest
 import numpy as np
 from pyscf import lib
-from pyscf.pbc import gto as pgto
 from gpu4pyscf.pbc.dft import krkspu, kukspu
+from gpu4pyscf.gto.mole import Cell
 
 def setUpModule():
     global cell
-    cell = pgto.Cell()
+    cell = Cell()
     cell.unit = 'A'
     cell.atom = 'C 0.,  0.,  0.; C 0.8917,  0.8917,  0.8917'
     cell.a = '''0.      1.7834  1.7834

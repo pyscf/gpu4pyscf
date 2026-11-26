@@ -30,8 +30,9 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk, aft
-from gpu4pyscf.pbc.df.aft import _check_kpts, get_SI, _get_ZSI
+from gpu4pyscf.pbc.df.aft import get_SI, _get_ZSI
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts
 
 def get_nuc(mydf, kpts=None):
@@ -51,8 +52,7 @@ def get_nuc(mydf, kpts=None):
         cupy.ndarray
             AO matrix with dimensions following the kpts convention.
     '''
-    from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -64,11 +64,10 @@ def get_nuc(mydf, kpts=None):
 
     nkpts = len(kpts)
     nao = cell.nao
-    if is_zero(kpts):
+    if kpts.is_gamma_only():
         vne = cp.zeros((nkpts,nao,nao))
     else:
         vne = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
-    kpts = np.asarray(kpts)
 
     ni = mydf._numint
     deriv = 0
@@ -99,8 +98,7 @@ def get_pp(mydf, kpts=None):
         cupy.ndarray
             AO matrix with dimensions following the kpts convention.
     '''
-    from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -115,11 +113,10 @@ def get_pp(mydf, kpts=None):
     ngrids = len(vpplocG)
     nkpts = len(kpts)
     nao = cell.nao
-    if is_zero(kpts):
+    if kpts.is_gamma_only():
         vpp = cp.zeros((nkpts,nao,nao))
     else:
         vpp = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
-    kpts = np.asarray(kpts)
 
     ni = mydf._numint
     deriv = 0
@@ -186,7 +183,7 @@ def get_pp(mydf, kpts=None):
                         vppnl += contract('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
         return vppnl * (1./cell.vol)
 
-    for k, kpt in enumerate(kpts):
+    for k, kpt in enumerate(kpts.kpts):
         vppnl = vppnl_by_k(kpt)
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl.real)
@@ -246,24 +243,30 @@ class FFTDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+        return self._kpts
 
     @kpts.setter
     def kpts(self, val):
         if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
-            self._kpts = val
+            self._kpts = KPointSampling.gamma_point(self.cell)
         else:
-            self._kpts = self.cell.get_scaled_kpts(val)
+            self._kpts, _ = _normalize_kpts(self.cell, val)
+
+    @classmethod
+    def from_cpu(cls, method):
+        """Convert CPU density fitting, preserving its sampling coordinates."""
+        out = cls(method.cell)
+        out.__dict__.update(method.__dict__)
+        kpts = getattr(method, '_kpts', None)
+        if not isinstance(kpts, KPoints):
+            kpts = method.kpts
+        out.kpts = kpts
+        out._numint = method._numint.to_gpu()
+        return out.reset()
 
     def reset(self, cell=None):
         if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
+            self._kpts = reset_kpts(self._kpts, cell)
             self.cell = cell
         self._rsh_df = {}
         return self
@@ -283,9 +286,9 @@ class FFTDF(lib.StreamObject):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
         if is_single_kpt:
-            vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
+            vj, vk = fft_jk.get_jk(self, dm, hermi, kpts.kpts[0], kpts_band,
                                    with_j, with_k, exxdiv)
         else:
             vj = vk = None
@@ -315,7 +318,10 @@ class FFTDF(lib.StreamObject):
     # customize to_cpu because attributes grids and kpts are not compatible with pyscf-2.10
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
-        out = FFTDF(self.cell, kpts=self.kpts)
+        kpts = self.kpts
+        if isinstance(kpts, KPointSampling):
+            kpts = kpts.kpts
+        out = FFTDF(self.cell, kpts=kpts)
         out.exxdiv = self.exxdiv
         if self._mesh is not None:
             out.mesh = self._mesh

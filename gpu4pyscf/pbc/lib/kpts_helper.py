@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,9 +18,17 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
+from pyscf.pbc.gto.cell import make_kpts
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+
+def _as_kpts_array(kpts):
+    '''Extract coordinates without changing None or single-point inputs.'''
+    if isinstance(kpts, (KPointSampling, KPoints)):
+        return kpts.kpts
+    return kpts
 
 def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False):
     '''Infer a mesh for constructing a BvK supercell with periodic boundary
@@ -35,7 +43,7 @@ def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False
     Args:
         cell : Cell
             Provides the reciprocal lattice and lattice-sum cutoff.
-        kpts : ndarray of shape (nkpts, 3) or None
+        kpts : ndarray of shape (nkpts, 3), sampling object, or None
             Absolute k-points in Bohr^-1. None selects Gamma.
 
     Kwargs:
@@ -54,12 +62,23 @@ def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False
     '''
     if kpts is None:
         return np.ones(3, dtype=int)
-    assert kpts.ndim == 2
-    if is_zero(kpts):
+
+    if isinstance(kpts, KPointSampling):
+        if kpts.kmesh is not None and kpts.scaled_center is None:
+            bvkmesh = kpts.kmesh.copy()
+            if not kpts.with_gamma_point:
+                bvkmesh[bvkmesh % 2 == 0] *= 2
+            return bvkmesh
+    elif is_zero(_as_kpts_array(kpts)):
         return np.ones(3, dtype=int)
 
-    scaled_kpts = cell.get_scaled_kpts(kpts)
-    logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
+    if isinstance(kpts, (KPointSampling, KPoints)):
+        scaled_kpts = kpts.kpts_scaled
+    else:
+        kpts = np.asarray(kpts).reshape(-1, 3)
+        scaled_kpts = cell.get_scaled_kpts(kpts)
+        logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
+
     if rcut is None:
         bvkmesh = np.asarray(cell.nimgs) * 2 + 1
     else:
@@ -68,6 +87,7 @@ def kpts_to_bvkmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=False
 
     if precision is None:
         precision = max(1e-6, cell.precision * 1e2)
+
     for i in range(3):
         floats = scaled_kpts[:,i]
         uniq_floats_idx = np.unique((floats/precision+.5).astype(int), return_index=True)[1]
@@ -194,6 +214,8 @@ def reset_kpts(kpts, cell):
     Update the absolute k-points of an object wrt the input cell,
     while preserving the same fractional (scaled) k-point coordinates.
     '''
+    if isinstance(kpts, KPointSampling):
+        return kpts.reset(cell)
     assert isinstance(kpts, KPoints)
     if hasattr(kpts, 'reset'):
         kpts = kpts.reset(cell)
@@ -249,7 +271,25 @@ def fft_matrix(kmesh, with_gamma_point=True):
              Fz[None,None,:,None,None,:])
     return expLk.reshape(np.prod(bvkmesh), nkpts)
 
-def _normalize_kpts(kpts):
+def _normalize_kpts(cell, kpts):
+    """Return a sampling object and whether the input represents a single point.
+
+    None selects Gamma; None and a (3,) coordinate array use the single-point
+    output convention. A (nkpts, 3) array or sampling object retains the k-point
+    axis, including for Gamma-only sampling.
+
+    Arrays are Cartesian coordinates in Bohr^-1. The cell supplies the lattice
+    vectors needed to construct KPointSampling. Existing KPointSampling and CPU
+    KPoints instances are returned unchanged, preserving their metadata.
+    """
+    if isinstance(kpts, (KPointSampling, KPoints)):
+        return kpts, False
+    if kpts is None:
+        return KPointSampling.gamma_point(cell), True
+    kpts, is_single_kpt = _format_kpts_array(kpts)
+    return KPointSampling.from_kpts(cell, kpts), is_single_kpt
+
+def _format_kpts_array(kpts):
     '''Normalize k-points to an (nkpts, 3) array and flag single-point input.
 
     PySCF kpts convention:
@@ -273,8 +313,8 @@ def _normalize_kpts(kpts):
         (nkpts, ncomp, nao, nao) for batched input.
 
     Args:
-        kpts: None, array_like, or KPoints instance
-            Sampling in the convention above. A KPoints instance supplies
+        kpts: None, array_like, KPointSampling, or CPU KPoints instance
+            Sampling in the convention above. A sampling object supplies
             its full kpts array, rather than kpts_ibz, and is treated as a batch.
 
     Returns:
@@ -290,7 +330,7 @@ def _normalize_kpts(kpts):
     if kpts is None:
         return np.zeros((1, 3)), is_single_kpt
 
-    if isinstance(kpts, KPoints):
+    if isinstance(kpts, (KPointSampling, KPoints)):
         return kpts.kpts, not is_single_kpt
 
     kpts = np.asarray(kpts)
@@ -312,8 +352,8 @@ def _get_kmesh(cell, kpts, bvkmesh=None):
 
     bvkmesh gives the periodic BvK supercell dimensions returned by kpts_to_bvkmesh().
     '''
-    # TODO: if isinstance(kpts, KPoints):
-    # TODO:     return kpts.kmesh, kpts.with_gamma_point
+    if isinstance(kpts, KPointSampling):
+        return kpts.kmesh, kpts.with_gamma_point
 
     if bvkmesh is None:
         kmesh = kpts_to_bvkmesh(cell, kpts)
@@ -332,7 +372,7 @@ def _get_kmesh(cell, kpts, bvkmesh=None):
         kmesh[kmesh % 2 == 0] //= 2
 
     if np.prod(kmesh) == len(kpts):
-        reference = cell.make_kpts(kmesh, with_gamma_point=with_gamma_point)
+        reference = make_kpts(cell, kmesh, with_gamma_point=with_gamma_point)
         diff = cell.get_scaled_kpts(reference - kpts)
         # Handle wrap_around=True. Equivalent k-points can differ by integer
         diff -= np.rint(diff)

@@ -339,7 +339,7 @@ def test_kpoint_scf_properties(kpoint_spin_case):
     # GPU get_rho follows the spatially tiled block-loop order. Compare
     # densities at those same coordinates, not two different grid layouts.
     cpu_grids.coords = cp.asnumpy(grids.coords)[cp.asnumpy(grids.argsort())]
-    points = gpu.kpts
+    points = gpu.kpts.kpts
     expected_rho = ni.get_rho(gpu.cell, scalar_dm.get(), cpu_grids, points)
     np.testing.assert_allclose(cp.asnumpy(rho), expected_rho, atol=1e-10, rtol=1e-10)
 

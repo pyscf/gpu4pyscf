@@ -613,6 +613,14 @@ class Cell(pbcgto.cell.Cell):
     def from_cpu(cls, cell):
         return cell.view(cls)
 
+    def make_kpts(self, nks, *args, **kwargs):
+        '''Follow pyscf.pbc.gto.Cell.make_kpts. Returns a KPointSampling object
+        '''
+        from gpu4pyscf.pbc.lib.kpts import KPointSampling
+        return KPointSampling.from_mesh(self, nks, *args, **kwargs)
+
+    get_kpts = make_kpts
+
 class SortedGTO:
     @classmethod
     def from_mol(cls, mol, *, group_size=None,

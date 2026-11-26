@@ -43,8 +43,8 @@ from gpu4pyscf.df.int3c2e_bdiv import libvhf_rys
 from gpu4pyscf.pbc.df import ft_ao, int3c2e
 from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, conj_kpts, _normalize_kpts, _get_kmesh)
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+    kpts_to_bvkmesh, kk_adapted_iter, conj_kpts, _normalize_kpts, _get_kmesh,
+    _as_kpts_array)
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import libpbc, SRInt3c2eOpt
@@ -69,20 +69,24 @@ def build_cderi(cell, auxcell, kpts=None, bvkmesh=None, j_only=False,
     '''
     Create density fitting integral tensor.
 
+    kpts accepts Cartesian coordinate arrays or KPointSampling. A sampling
+    object retains the k-point axis even for Gamma-only sampling.
+
     This function currently only supports full-range and short-range Coulomb
     potential.
     '''
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
 
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
     if bvkmesh is None:
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
     kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
     assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     assert np.prod(kmesh) == len(kpts)
 
-    is_gamma_point = is_zero(kpts)
     if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
             cell, auxcell, omega, linear_dep_threshold, exclude_dd, int3c2e_opt)
@@ -134,7 +138,7 @@ def _weighted_coulG_kpts(cell, mesh, omega, rsdf_omega, kpts=None):
         Gk = asarray(Gv)
         nkpts = 1
     else:
-        kpts = kpts.reshape(-1, 3)
+        kpts = _as_kpts_array(kpts).reshape(-1, 3)
         Gk = asarray((Gv + kpts[:,None]).reshape(-1, 3))
         # To ensure the symmetry between conjugated k-points, it is important to
         # wrap around the high-freq Gv.
@@ -195,6 +199,7 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
 def _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, bvkmesh=None):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is not None:
+        uniq_kpts = _as_kpts_array(uniq_kpts)
         assert uniq_kpts.ndim == 2
     j2c = sr_int2c2e(auxcell, rsdf_omega, kpts=uniq_kpts, bvkmesh=bvkmesh)
     j2c = cp.asarray(j2c)
@@ -288,7 +293,8 @@ def _append_dd_cderi(opt, cderi, cd_j2c_cache, omega, recontract, kpts=None):
     cell = opt.cell
 
     real_output = kpts is None
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(opt.cell, kpts)
+    kpts = kpts.kpts
     if real_output:
         dtype = np.float64
     else:
@@ -577,19 +583,21 @@ def compressed_cderi_j_only(cell, auxcell, bvkmesh, omega=None,
 def compressed_cderi_kk(cell, auxcell, kpts, bvkmesh=None, omega=None,
                         linear_dep_threshold=LINEAR_DEP_THR, exclude_dd=False,
                         int3c2e_opt=None):
+    '''Build compressed integrals for coordinate arrays or KPointSampling.'''
     log = logger.new_logger(cell)
     t0 = log.init_timer()
 
+    kpts, _ = _normalize_kpts(cell, kpts)
+    kpts = kpts.kpts
     if bvkmesh is None:
         bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
-    kpts = kpts.reshape(-1, 3)
     bvk_ncells = int(np.prod(bvkmesh))
     kmesh, with_gamma_point = _get_kmesh(cell, kpts, bvkmesh)
     assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     kpt_iters = list(kk_adapted_iter(kmesh, with_gamma_point))
     # transfer mesh (q = kj - ki) must include gamma point.
     qmesh = kmesh
-    qpts = cell.make_kpts(qmesh, with_gamma_point=True)
+    qpts = _as_kpts_array(cell.make_kpts(qmesh, with_gamma_point=True))
     uniq_qpts = qpts[[x[0] for x in kpt_iters]]
     nqpts = len(uniq_qpts)
 
@@ -1039,8 +1047,9 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
 
-    kpts, is_single_kpt = _normalize_kpts(kpts)
-    is_gamma_point = is_zero(kpts)
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
     if is_gamma_point:
         bvkmesh = np.ones(3, dtype=int)
     else:
@@ -1107,7 +1116,8 @@ def get_pp(cell, kpts=None):
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+    kpts = kpts.kpts
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
     t1 = log.timer_debug1('get_pp_loc_part2', *t0)

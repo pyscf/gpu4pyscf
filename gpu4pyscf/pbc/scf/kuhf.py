@@ -34,6 +34,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot, asarray)
+from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array, _normalize_kpts
 
 
 def make_rdm1(mo_coeff_kpts, mo_occ_kpts, **kwargs):
@@ -238,6 +239,7 @@ def _cast_mol_init_guess(fn):
     def fn_init_guess(mf, cell=None, kpts=None, **kwargs):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
+        kpts, _ = _normalize_kpts(cell, kpts)
         dm = fn(mf, cell, **kwargs)
         return _expand_dm_kpts(dm, len(kpts))
     return fn_init_guess
@@ -371,7 +373,11 @@ class KUHF(khf.KSCF):
             c = c[:,0]
         return e, c
 
-    init_guess_by_chkfile = return_cupy_array(kuhf_cpu.KUHF.init_guess_by_chkfile)
+    def init_guess_by_chkfile(self, chk=None, project=None, kpts=None):
+        if chk is None: chk = self.chkfile
+        if kpts is None: kpts = self.kpts
+        return cp.asarray(kuhf_cpu.init_guess_by_chkfile(
+            self.cell, chk, project, _as_kpts_array(kpts)))
 
     mulliken_meta = NotImplemented
     mulliken_meta_spin = NotImplemented
@@ -412,7 +418,7 @@ class KUHF(khf.KSCF):
             log.note('**** MO energy ****')
             log.note('                           alpha                               | beta')
             log.note('k-point                    nocc    HOMO/AU         LUMO/AU     | nocc    HOMO/AU         LUMO/AU')
-            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+            for k, kpt in enumerate(kpts.kpts_scaled):
                 nocca = np.count_nonzero(mo_occ[0,k])
                 noccb = np.count_nonzero(mo_occ[1,k])
                 homoa = mo_energy[0,k,nocca-1]
@@ -425,7 +431,7 @@ class KUHF(khf.KSCF):
         log.note('**** Population analysis for atoms in the reference cell ****')
         s = self.get_ovlp(kpts=kpts).get()
         dm = self.make_rdm1().get()
-        pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
+        pop, chg = mulliken_meta(cell, dm, kpts=kpts.kpts, s=s, verbose=verbose)
         dip = None
         return (pop, chg), dip
 

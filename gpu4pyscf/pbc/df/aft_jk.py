@@ -27,26 +27,29 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import (
-    _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm)
+    _format_dms, _format_jks, _ewald_exxdiv_for_G0, _factorize_dm, _format_kpts_band)
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE, _check_rsh_factors
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
-from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, _normalize_kpts, _get_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, kk_adapted_iter, conj_kpts, _normalize_kpts, _get_kmesh,
+    _as_kpts_array)
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
+    '''Coulomb matrices for coordinate arrays or KPointSampling.'''
     if kpts_band is not None:
         return get_j_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band)
 
     input_kpts = kpts
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -58,7 +61,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         _update_vj_(vj_kpts, Gpq, dms, coulG[p0:p1])
     vj_kpts *= 1./len(kpts)
 
-    if is_zero(kpts):
+    if is_gamma_point:
         vj_kpts = vj_kpts.real
     return _format_jks(vj_kpts, dm_kpts, kpts_band, input_kpts)
 
@@ -81,7 +84,8 @@ def _update_vj_(vj_kpts, Gpq, dms, coulG, weight=None):
 def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     raise NotImplementedError
     input_kpts = kpts
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    kpts = kpts.kpts
     dm_kpts = lib.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
@@ -104,15 +108,20 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     if is_zero(kpts_band):
         vj_kpts = vj_kpts.real
-    return _format_jks(vj_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(vj_kpts, dm_kpts, input_band, input_kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
                omega=None, lr_factor=None, sr_factor=None):
+    '''Exchange matrices for coordinate arrays or KPointSampling.'''
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
-    kpts, _ = _normalize_kpts(kpts)
+    sampling = kpts
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
+    if not isinstance(sampling, KPointSampling):
+        sampling = kpts
 
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -143,7 +152,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     # For off-gamma MP mesh, the common k-shift in ki and kj cancels.
     # This mesh can be made the same to the MP mesh.
     transfer_mesh = kmesh
-    qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+    qpts = _as_kpts_array(cell.make_kpts(transfer_mesh, with_gamma_point=True))
     kk_iters = ((qpts[q], ki_idx, kj_idx, q == q_conj)
                  for q, q_conj, ki_idx, kj_idx in
                  kk_adapted_iter(kmesh, with_gamma_point))
@@ -204,7 +213,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
     buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kk_iters):
-        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, omega, kpts,
+        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, omega, sampling,
                                       lr_factor=lr_factor, sr_factor=sr_factor)
         vkcoulG *= weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -216,7 +225,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
             Gpq = None
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
 
-    if is_zero(kpts) and not np.iscomplexobj(dm_kpts):
+    if is_gamma_point and not np.iscomplexobj(dm_kpts):
         vk_kpts = vk_kpts.real
 
     if time_reversal_symmetry:
@@ -412,9 +421,10 @@ def get_ej_derivatives(mydf, dm, kpts=None, omega=None):
         _get_weighted_coulG_strain_derivatives as get_wcoulG)
     log = logger.new_logger(mydf)
     cell = mydf.cell
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
     bvkmesh = kpts_to_bvkmesh(cell, kpts)
-    is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
     assert nkpts == len(kpts)
@@ -517,9 +527,13 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
     cell = mydf.cell
-    kpts, _ = _normalize_kpts(kpts)
+    sampling = kpts
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
+    if not isinstance(sampling, KPointSampling):
+        sampling = kpts
     bvkmesh = kpts_to_bvkmesh(cell, kpts)
-    is_gamma_point = is_zero(kpts)
     dm0 = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dm0.shape[:3]
     assert nkpts == len(kpts)
@@ -534,7 +548,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
     assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
     # transfer_mesh for q = kj - ki
     transfer_mesh = kmesh
-    qpts = cell.make_kpts(transfer_mesh, with_gamma_point=True)
+    qpts = _as_kpts_array(cell.make_kpts(transfer_mesh, with_gamma_point=True))
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
     cell = ft_opt.cell
     dms = cp.asarray(dm0.reshape(-1,nao,nao))
@@ -569,7 +583,7 @@ def get_ek_derivatives(mydf, dm, kpts=None, exxdiv=None,
         if (remove_G0 and exxdiv == 'ewald' and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            exx_0, exx_1 = _exxdiv_ewald_strain_deriv(cell, kpts, range_omega)
+            exx_0, exx_1 = _exxdiv_ewald_strain_deriv(cell, sampling, range_omega)
             wcoulG_0[0] += exx_0
             wcoulG_1[:,:,0] += cp.asarray(exx_1)
         return wcoulG_0, wcoulG_1
@@ -724,7 +738,8 @@ def _estimate_max_shm_size(cell, deriv_ij=None):
     return shm_size
 
 def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
-    from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size, cutoff_to_mesh
+    from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
+    from gpu4pyscf.pbc.tools.pbc import madelung
     from gpu4pyscf.pbc.df.aft import _get_ZSI
     from gpu4pyscf.pbc.dft import multigrid_v3
     from gpu4pyscf.pbc.grad.rhf import ewald_derivatives
@@ -733,7 +748,11 @@ def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
     ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
     ecell._env = np.append(cell._env, [0., 0., 0.])
     ecell.unit = 'B'
-    ecell.a = cell.lattice_vectors() * get_monkhorst_pack_size(cell, kpts)[:,None]
+    if isinstance(kpts, KPointSampling) and kpts.kmesh is not None:
+        kmesh = kpts.kmesh
+    else:
+        kmesh = get_monkhorst_pack_size(cell, _as_kpts_array(kpts))
+    ecell.a = cell.lattice_vectors() * kmesh[:,None]
     if omega == 0:
         ewald_G0_response = -2 * ewald_derivatives(ecell)[-3:]
     else:

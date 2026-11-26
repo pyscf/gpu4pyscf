@@ -39,6 +39,7 @@ from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, _get_ejk_derivatives
 from gpu4pyscf.pbc.grad import rhf as pbchf_grad
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc.df.grad.krhf import get_nuc, get_pp_loc
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 __all__ = ['Gradients']
 
@@ -101,8 +102,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     if cell is None: cell = mf_grad.cell
     if kpts is None:
         kpts = mf_grad.kpts
-    else:
-        kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
 
     if getattr(mf_grad.base, 'with_x2c', None):
         raise NotImplementedError('X2C gradients')
@@ -149,6 +149,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     return hcore_deriv
 
 def get_nuc_fftdf(mf_grad, cell, dm0, kpts):
+    kpts, _ = _normalize_kpts(cell, kpts)
     nkpts = len(kpts)
     if nkpts == 1:
         if dm0.ndim == 2:

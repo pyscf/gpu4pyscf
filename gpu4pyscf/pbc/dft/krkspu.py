@@ -31,6 +31,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.dft import krks
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpts=None, kpts_band=None):
@@ -72,7 +73,7 @@ def _add_Vhubbard(vxc, ks, dm, kpts):
     kpts_input = kpts
     if is_ibz:
         raise NotImplementedError('DFT+U for k-point symmetry')
-    kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
     nkpts = len(kpts)
 
     ovlp = int1e.int1e_ovlp(cell, kpts)
@@ -138,7 +139,7 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
     if hasattr(kpts, "weights_ibz"):
-        e1 = cp.einsum('k,kij,kji->', kpts.weights_ibz.dot, h1e_kpts, dm_kpts).get()[()]
+        raise NotImplementedError('DFT+U for k-point symmetry')
     else:
         weight = 1./len(h1e_kpts)
         e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts).get()[()]
@@ -165,6 +166,7 @@ def _make_minao_lo(cell, minao_ref='minao', kpts=None):
     Construct orthogonal minao local orbitals.
     '''
     assert kpts is not None
+    kpts, _ = _normalize_kpts(cell, kpts)
     if isinstance(minao_ref, str):
         pcell = reference_mol(cell, minao_ref)
     else:
@@ -276,7 +278,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
     alphalist = np.asarray(alphalist)
     alphalist = np.append(-alphalist[::-1], alphalist)
 
-    kpts = mf.kpts.reshape(-1, 3)
+    kpts = mf.kpts
     nkpts = len(kpts)
     cell = mf.cell
 

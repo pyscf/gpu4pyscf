@@ -21,11 +21,11 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.gto import pseudo
 from gpu4pyscf import BACKEND
 from gpu4pyscf.lib import logger
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
@@ -33,7 +33,8 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
+from gpu4pyscf.pbc.df.fft_jk import (
+    _format_dms, _format_jks, _format_kpts_band)
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.gto.cell import get_Gv_weights
 from gpu4pyscf.__config__ import shm_size
@@ -86,9 +87,9 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj : (nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or is_zero(kpts)
     input_kpts = kpts
-    kpts = np.zeros((1, 3))
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
+    assert kpts.is_gamma_only()
 
     cell = ni.cell
     dm_kpts = cp.asarray(dm_kpts)
@@ -100,8 +101,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     vj_kpts = _get_j_pass2(ni, vG, hermi, kpts_band)
-    return _format_jks(vj_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(vj_kpts, dm_kpts, input_band, input_kpts)
 
 def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     cell = ni.cell
@@ -508,9 +508,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or is_zero(kpts)
     input_kpts = kpts
-    kpts = np.zeros((1, 3))
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
+    assert kpts.is_gamma_only()
 
     cell = ni.cell
     log = logger.new_logger(cell, verbose)
@@ -572,8 +572,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _get_j_pass2(ni, wv_freq[None,0], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[None,4], hermi, kpts_band, verbose=log)
-    veff = _format_jks(veff, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
 
     shape = list(dm_kpts.shape)
     if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
@@ -606,9 +605,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or is_zero(kpts)
     input_kpts = kpts
-    kpts = np.zeros((1, 3))
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
+    assert kpts.is_gamma_only()
 
     cell = ni.cell
     log = logger.new_logger(cell, verbose)
@@ -673,8 +672,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
-    veff = _format_jks(veff, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    veff = _format_jks(veff, dm_kpts, input_band, input_kpts)
 
     shape = list(dm_kpts.shape) # [spin,nkpts,nao,nao]
     if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
@@ -686,8 +684,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 def get_rho(ni, dm, kpts=None):
     '''Density in real space
     '''
-    assert kpts is None
-    kpts = np.zeros((1, 3))
+    kpts, _ = _normalize_kpts(ni.cell, kpts)
+    assert kpts.is_gamma_only()
 
     cell = ni.cell
     hermi = 1
@@ -725,9 +723,8 @@ def get_nuc(ni, kpts=None):
     kpts follows the PySCF kpts convention; see
     gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     """
-    assert kpts is None or is_zero(kpts)
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    kpts = np.zeros((1, 3))
+    kpts, is_single_kpt = _normalize_kpts(ni.cell, kpts)
+    assert kpts.is_gamma_only()
     cell = ni.cell
     mesh = ni.mesh
     # Compute the density of nuclear charges in reciprocal space
@@ -882,9 +879,8 @@ def get_pp(ni, kpts=None):
     gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
     '''
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
-    assert kpts is None or is_zero(kpts)
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    kpts = np.zeros((1, 3))
+    kpts, is_single_kpt = _normalize_kpts(ni.cell, kpts)
+    assert kpts.is_gamma_only()
 
     cell = ni.cell
     log = logger.new_logger(cell)
@@ -897,7 +893,7 @@ def get_pp(ni, kpts=None):
     t1 = log.timer_debug1('vpploc', *t0)
 
     vppnl = get_pp_nl(cell, kpts)
-    for k, kpt in enumerate(kpts):
+    for k, kpt in enumerate(kpts.kpts):
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl[k].real)
         else:

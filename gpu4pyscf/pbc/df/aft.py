@@ -29,16 +29,16 @@ from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, reset_kpts, _normalize_kpts, _get_kmesh)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto.cell import get_Gv, get_Gv_base, get_Gv_weights, get_SI
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, _normalize_kpts, _get_kmesh
 from gpu4pyscf.gto.mole import SortedGTO
-from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
-                                       get_avail_mem, asarray, ndarray)
 
 KE_SCALING = aft_cpu.KE_SCALING
 
@@ -46,7 +46,9 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
     kpt_allow = np.zeros(3)
     if cell.dimension > 0:
         ke_guess = aft_cpu.estimate_ke_cutoff(cell, cell.precision)
@@ -76,7 +78,7 @@ def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
     for Gpq, p0, p1 in mydf.ft_loop(mesh, kpt_allow, kpts):
         vj += contract('kGpq,G->kpq', Gpq, vpplocG[p0:p1].conj())
 
-    if is_zero(kpts):
+    if is_gamma_point:
         vj = vj.real
     if is_single_kpt:
         vj = vj[0]
@@ -100,7 +102,8 @@ def get_pp(mydf, kpts=None):
             AO matrix with dimensions following the kpts convention.
     '''
     cell = mydf.cell
-    kpts, is_single_kpt = _normalize_kpts(kpts)
+    kpts, is_single_kpt = _normalize_kpts(mydf.cell, kpts)
+    kpts = kpts.kpts
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
@@ -167,24 +170,29 @@ class AFTDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+        return self._kpts
 
     @kpts.setter
     def kpts(self, val):
         if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
-            self._kpts = val
+            self._kpts = KPointSampling.gamma_point(self.cell)
         else:
-            self._kpts = self.cell.get_scaled_kpts(val)
+            self._kpts, _ = _normalize_kpts(self.cell, val)
+
+    @classmethod
+    def from_cpu(cls, method):
+        """Convert CPU density fitting, preserving its sampling coordinates."""
+        out = cls(method.cell)
+        out.__dict__.update(method.__dict__)
+        kpts = getattr(method, '_kpts', None)
+        if not isinstance(kpts, KPoints):
+            kpts = method.kpts
+        out.kpts = kpts
+        return out.reset()
 
     def reset(self, cell=None):
         if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
+            self._kpts = reset_kpts(self._kpts, cell)
             self.cell = cell
         self._rsh_df = {}
         return self
@@ -245,7 +253,8 @@ class AFTDF(lib.StreamObject):
         if kpts is None:
             assert is_zero(q)
             kpts = self.kpts
-        kpts, _ = _normalize_kpts(kpts)
+        kpts, _ = _normalize_kpts(self.cell, kpts)
+        kpts = kpts.kpts
         if bvkmesh is None:
             bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
@@ -319,9 +328,9 @@ class AFTDF(lib.StreamObject):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        kpts, is_single_kpt = _normalize_kpts(kpts)
+        kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
         if is_single_kpt:
-            return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
+            return aft_jk.get_jk(self, dm, hermi, kpts.kpts[0], kpts_band, with_j,
                                   with_k, exxdiv, omega)
 
         vj = vk = None
@@ -349,46 +358,13 @@ class AFTDF(lib.StreamObject):
 
     def to_cpu(self):
         from pyscf.pbc.df.aft import AFTDF
-        out = AFTDF(self.cell, kpts=self.kpts)
-        return utils.to_cpu(self, out=out)
-
-def _check_kpts(kpts, dm=None):
-    '''Normalize k-point sampling and optionally validate the density layout.
-
-    kpts follows the PySCF kpts convention; see
-    gpu4pyscf.pbc.lib.kpts_helper._normalize_kpts.
-
-    If dm is supplied, single-point sampling requires an RHF (nao, nao)
-    or UHF (2, nao, nao) density. Batched sampling requires KRHF
-    (nkpts, nao, nao) or KUHF (2, nkpts, nao, nao) densities.
-
-    Returns an (nkpts, 3) k-point array and is_single_kpt.
-    '''
-    if dm is None:
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-            is_single_kpt = True
-        else:
-            is_single_kpt = kpts.ndim == 1
-        return kpts.reshape(-1, 3), is_single_kpt
-
-    if kpts is None or kpts.ndim == 1:
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        is_single_kpt = True
-        assert (dm.ndim == 2 or # RHF
-                (dm.ndim == 3 and len(dm) == 2)) # UHF
-        return kpts.reshape(1, 3), is_single_kpt
-
-    is_single_kpt = False
-    nkpts = len(kpts)
-    if dm.ndim == 2:
-        raise RuntimeError('dm.ndim == 2, incompatible with kpts')
-    elif dm.ndim == 3: # KRHF
-        assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
-    else:
-        assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
-    return kpts, is_single_kpt
+        kpts = self.kpts
+        if isinstance(kpts, KPointSampling):
+            kpts = kpts.kpts
+        out = AFTDF(self.cell, kpts=kpts)
+        out = utils.to_cpu(self, out=out)
+        out.kpts = kpts
+        return out
 
 def _fake_nuc(cell, with_pseudo=True):
     '''A fake cell with steep gaussians to mimic nuclear density

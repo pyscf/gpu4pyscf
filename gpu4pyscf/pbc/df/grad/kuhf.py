@@ -22,7 +22,6 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, ndarray, get_avail_mem, empty_aligned)
@@ -42,8 +41,7 @@ from gpu4pyscf.pbc.df.grad.rhf import (
 from gpu4pyscf.pbc.grad.krks_stress import (
     _get_weighted_coulG_strain_derivatives as get_wcoulG)
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.lib.kpts_helper import (
-    kk_adapted_iter, conj_kpts)
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_kpts, _normalize_kpts
 
 
 def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
@@ -53,11 +51,11 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     Computes the first-order derivatives (nuclear gradients and strain
     derivatives) of the energy contributions from J and K terms per atom.
     '''
-    if kpts is None or kpts.ndim == 1:
+    kpts, is_single_kpt = _normalize_kpts(int3c2e_opt.cell, kpts)
+    if is_single_kpt:
         assert dm.ndim == 3
         assert dm.dtype == np.float64
-        if kpts is not None:
-            assert is_zero(kpts)
+        assert kpts.is_gamma_only()
         return uhf._get_ejk_derivatives(
             int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose,
             linear_dep_threshold)
@@ -107,6 +105,8 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
     naux = int(aux_loc[-1])
 
     assert nkpts == len(kpts)
+    sampling = kpts
+    kpts = kpts.kpts
     expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
@@ -681,7 +681,7 @@ def _get_ejk_derivatives(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fac
         # The k_factor was previously scaled by 1/nkpts^2.
         k_factor *= nkpts**2
         de_ewald = int1e.ovlp_derivatives(cell, k_dm, kpts, bvkmesh)
-        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, kpts, -omega)
+        exx_0, exx_1 = aft_jk._exxdiv_ewald_strain_deriv(cell.cell, sampling, -omega)
         de_ewald *= -k_factor * exx_0 / nkpts
         ejk_sigma += de_ewald
 

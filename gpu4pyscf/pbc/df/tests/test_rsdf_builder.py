@@ -20,6 +20,7 @@ from pyscf import lib
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
+from gpu4pyscf.gto.mole import Cell
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.lib.kpts_helper import conj_kpts, kk_adapted_iter, kpts_to_bvkmesh
@@ -258,7 +259,7 @@ def test_kpts_compressed():
                       [3, [2., 1.]]]),
                'C2': 'ccpvdz'},
         precision=1e-10,
-        a=np.diag([2.5, 1.9, 2.2])*3)
+        a=np.diag([2.5, 1.9, 2.2])*3).view(Cell)
 
     auxcell = cell.copy()
     auxcell.basis = {
@@ -287,7 +288,7 @@ C    D
     ref = build_cderi(cell, auxcell, kpts)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
-    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.kpts.T)))
     for kp in sorted(dat):
         out = rsdf_builder._unpack_cderi_v2(
             dat[kp], idx[0], np.where(kk_conserv == kp)[1],

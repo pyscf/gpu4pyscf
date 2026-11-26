@@ -18,6 +18,104 @@ import pyscf
 from pyscf import lib
 from pyscf.pbc.tools import super_cell, k2gamma
 from gpu4pyscf.pbc.lib import kpts_helper
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+
+
+def test_is_gamma_only():
+    from pyscf.pbc.lib.kpts import KPoints
+    from pyscf.pbc.lib.kpts_helper import KPT_DIFF_TOL
+
+    cell = pyscf.pbc.gto.Cell(a=np.eye(3) * 4, verbose=0).build()
+    for coordinates, expected in (
+            (np.zeros((1, 3)), True),
+            (np.array([[KPT_DIFF_TOL * .1, 0, 0]]), True),
+            (np.array([[KPT_DIFF_TOL * 2, 0, 0]]), False),
+            (cell.make_kpts([2, 1, 1]), False)):
+        sampling = KPointSampling.from_kpts(cell, coordinates)
+        symmetry_kpts = KPoints(cell, coordinates)
+        assert sampling.is_gamma_only() == expected
+        assert symmetry_kpts.is_gamma_only() == expected
+    assert KPointSampling.gamma_point(cell).is_gamma_only()
+
+
+def test_sampling_object_normalization():
+    from pyscf.pbc.lib.kpts import KPoints
+
+    cell = pyscf.pbc.gto.Cell(atom='He 0 0 0', basis='sto3g',
+                             a=np.eye(3) * 4, verbose=0).build()
+    for mesh in ([1, 1, 1], [2, 1, 2]):
+        sampling = KPointSampling.from_mesh(cell, mesh)
+        normalized, single = kpts_helper._normalize_kpts(cell, sampling)
+        assert normalized is sampling
+        assert not single
+
+    for value, single in ((None, True), (np.zeros(3), True),
+                          (np.array([.1, .2, .3]), True),
+                          (np.zeros((1, 3)), False),
+                          (cell.make_kpts([2, 1, 2]), False)):
+        sampling, actual_single = kpts_helper._normalize_kpts(cell, value)
+        assert isinstance(sampling, KPointSampling)
+        assert actual_single == single
+        expected = np.zeros((1, 3)) if value is None else value.reshape(-1, 3)
+        np.testing.assert_allclose(sampling.kpts, expected, atol=1e-15)
+        np.testing.assert_array_equal(sampling.lattice_vectors, cell.lattice_vectors())
+        if value is None:
+            np.testing.assert_array_equal(sampling.kmesh, [1, 1, 1])
+        else:
+            assert sampling.kmesh is None
+
+    symmetry_kpts = KPoints(cell, cell.make_kpts([2, 1, 1])).build()
+    normalized, single = kpts_helper._normalize_kpts(cell, symmetry_kpts)
+    assert normalized is symmetry_kpts
+    assert not single
+    np.testing.assert_array_equal(
+        kpts_helper.kpts_to_bvkmesh(cell, symmetry_kpts), [2, 1, 1])
+
+
+def test_sampling_mesh_and_bvkmesh():
+    from gpu4pyscf.gto.mole import Cell
+    cell = Cell(a=np.eye(3) * 4, verbose=0).build()
+    for with_gamma, expected in ((True, [2, 3, 2]), (False, [4, 3, 4])):
+        unshifted = cell.make_kpts([2, 3, 2], with_gamma_point=with_gamma)
+        np.testing.assert_array_equal(
+            kpts_helper.kpts_to_bvkmesh(cell, unshifted), expected)
+        np.testing.assert_array_equal(
+            kpts_helper.kpts_to_bvkmesh(cell, unshifted.kpts), expected)
+    sampling = cell.make_kpts([2, 1, 2], wrap_around=True,
+                              scaled_center=[.25, 0, 0])
+    np.testing.assert_array_equal(sampling.kmesh, [2, 1, 2])
+    np.testing.assert_array_equal(
+        kpts_helper.kpts_to_bvkmesh(cell, sampling), [4, 1, 2])
+    mesh, with_gamma = kpts_helper._get_kmesh(cell, sampling)
+    np.testing.assert_array_equal(mesh, [2, 1, 2])
+    assert with_gamma
+    # Coordinate-only inference does not support the additional shift.
+    assert kpts_helper._get_kmesh(cell, sampling.kpts) == (None, None)
+    mesh, with_gamma = kpts_helper._get_kmesh(cell, cell.make_kpts([2, 1, 2]))
+    np.testing.assert_array_equal(mesh, [2, 1, 2])
+    assert with_gamma
+
+
+def test_sampling_df_lifecycle():
+    from gpu4pyscf.pbc import df
+    cell = pyscf.pbc.gto.Cell(a=np.eye(3) * 4, verbose=0).build()
+    cell1 = cell.copy()
+    cell1.a = np.eye(3) * 5
+    cell1.build()
+    for backend in (df.FFTDF, df.AFTDF, df.GDF):
+        sampling = KPointSampling.from_mesh(
+            cell, [2, 1, 2], wrap_around=True, scaled_center=[.25, 0, 0])
+        scaled = sampling.kpts_scaled.copy()
+        obj = backend(cell, sampling)
+        assert obj.kpts is sampling
+        np.testing.assert_allclose(obj.to_cpu().kpts, sampling.kpts, atol=1e-12)
+        obj.reset(cell1)
+        assert obj.kpts is sampling
+        np.testing.assert_allclose(sampling.kpts, cell1.get_abs_kpts(scaled))
+        np.testing.assert_array_equal(sampling.kmesh, [2, 1, 2])
+        np.testing.assert_array_equal(sampling.scaled_center, [.25, 0, 0])
+        assert sampling.wrap_around
+        np.testing.assert_allclose(obj.to_cpu().kpts, sampling.kpts, atol=1e-12)
 
 def test_kk_adapted_iter():
     def kk_adapted(kmesh):
@@ -84,6 +182,7 @@ def test_kk_adapted_iter_off_gamma():
         np.testing.assert_array_equal(kj, ref_j)
 
 def test_fft_matrix():
+    np.random.seed(10)
     cell = pyscf.M(atom='He', basis=[[0, [1, 1]]],
                    a=np.eye(3)*3+np.random.rand(3,3)*.2)
     kx = 1

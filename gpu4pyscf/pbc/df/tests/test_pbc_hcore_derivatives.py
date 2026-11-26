@@ -17,6 +17,7 @@ import numpy as np
 import cupy as cp
 
 import pyscf
+from gpu4pyscf.gto.mole import Cell
 from gpu4pyscf.pbc.dft.rks import RKS
 from gpu4pyscf.pbc.dft.krks import KRKS
 from gpu4pyscf.pbc.scf.hf import RHF
@@ -38,7 +39,7 @@ def numerical_hcore_gradient_and_stresstensor(cell, dm, kmesh):
         kpts = cell.make_kpts(kmesh)
         hcore = mf.get_hcore(kpts = kpts)
         e = cp.einsum("kij,kji->", hcore, dm)
-        e = e.real / kpts.shape[0]
+        e = e.real / len(kpts)
         return e
 
     numerical_gradient = np.zeros((cell.natm + 3, 3))
@@ -248,7 +249,7 @@ class KnownValues(unittest.TestCase):
             basis = "sto-6g",
             precision = 1e-10,
             verbose = 0,
-        )
+        ).view(Cell)
 
         kmesh = np.array([3,1,1])
 

@@ -21,6 +21,7 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 def slab_dipole_correction(mf, z0=None, cut=None, rho_tol=1e-5, width=0.):
@@ -261,7 +262,7 @@ class SlabDipoleCorrection:
         if kpts is None:
             kpts = self.kpts if is_kpts else (self.kpt if kpt is None else kpt)
         veff = super().get_veff(cell, dm, dm_last, vhf_last, hermi, kpts, kpts_band)
-        kpts = np.asarray(kpts).reshape(-1, 3)
+        kpts, _ = _normalize_kpts(cell, kpts)
         dm_charge = cp.asarray(dm)
         if self.istype('UHF') or self.istype('KUHF'):
             dm_charge = dm_charge[0] + dm_charge[1]
@@ -314,7 +315,7 @@ class SlabDipoleCorrection:
         self.dipole_z0 = ((cut + length/2 + offset) % length if self.z0 is None
                           else self.z0 % length)
         # A constant real-space potential is offset * S, not offset * I.
-        overlap = self.get_ovlp(cell, kpts if is_kpts else kpts[0])
+        overlap = self.get_ovlp(cell, kpts if is_kpts else kpts.kpts[0])
         v_dip += field * offset * overlap
         out = tag_array(veff + v_dip, **veff.__dict__)
         out.exc = veff.exc + edip

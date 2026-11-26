@@ -23,7 +23,7 @@ from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, _as_kpts_array
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, hermi_triu
 from gpu4pyscf.gto.mole import (
@@ -206,6 +206,7 @@ class Int2c2eOpt:
     def int2c2e(self, kpts=None, sort_output=True,
                 omega=None, lr_factor=None, sr_factor=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+        kpts = _as_kpts_array(kpts)
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cell = self.cell
         bvkmesh = self.bvkmesh
@@ -308,6 +309,7 @@ class Int2c2eOpt:
         Note: When ``kpts`` is supplied, derivatives of the total energy are
         computed. They are not scaled by ``1/nkpts`` to produce per-cell values.
         '''
+        kpts = _as_kpts_array(kpts)
         if self.bas_ij_cache is None:
             self.build()
         cell = self.cell

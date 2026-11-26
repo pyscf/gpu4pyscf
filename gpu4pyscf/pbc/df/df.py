@@ -27,27 +27,22 @@ import tempfile
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.df.gdf_builder import libpbc
-from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, pack_tril, get_avail_mem, asarray, ndarray)
-from gpu4pyscf.lib.memcpy import copy_array
+from gpu4pyscf.lib.cupy_helper import asarray, ndarray
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import AFTDF
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.pbc.lib.kpts_helper import (
-    reset_kpts, fft_matrix, conj_kpts, _normalize_kpts, _get_kmesh)
-from gpu4pyscf.__config__ import num_devices
-
-DEBUG = False
+    kpts_to_bvkmesh, reset_kpts, fft_matrix, conj_kpts, _normalize_kpts,
+    _get_kmesh)
 
 
 class GDF(lib.StreamObject):
@@ -77,24 +72,29 @@ class GDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+        return self._kpts
 
     @kpts.setter
     def kpts(self, val):
         if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
-            self._kpts = val
+            self._kpts = KPointSampling.gamma_point(self.cell)
         else:
-            self._kpts = self.cell.get_scaled_kpts(val)
+            self._kpts, _ = _normalize_kpts(self.cell, val)
+
+    @classmethod
+    def from_cpu(cls, method):
+        """Convert CPU density fitting, preserving its sampling coordinates."""
+        out = cls(method.cell)
+        out.__dict__.update(method.__dict__)
+        kpts = getattr(method, '_kpts', None)
+        if not isinstance(kpts, KPoints):
+            kpts = method.kpts
+        out.kpts = kpts
+        return out.reset()
 
     def reset(self, cell=None):
         if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
+            self._kpts = reset_kpts(self._kpts, cell)
             self.cell = cell
             self.auxcell = None
         self._cderi = self._cderip = self._cderi_idx = None
@@ -137,7 +137,7 @@ class GDF(lib.StreamObject):
 
         kpts = self.kpts
         if self.is_gamma_point:
-            assert kpts is None or is_zero(kpts)
+            assert kpts.is_gamma_only()
             self.bvkmesh = [1] * 3
         else:
             self.bvkmesh = kpts_to_bvkmesh(cell, kpts, rcut=cell.rcut+10)
@@ -152,7 +152,6 @@ class GDF(lib.StreamObject):
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
 
-    has_kpts = df_cpu.GDF.has_kpts
     weighted_coulG = AFTDF.weighted_coulG
     pw_loop = NotImplemented
     ft_loop = NotImplemented
@@ -182,13 +181,14 @@ class GDF(lib.StreamObject):
         if kpts is None:
             kpts = self.kpts
         else:
+            kpts, _ = _normalize_kpts(cell, kpts)
             assert len(kpts) == nkpts
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
         pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
-            kmesh, with_gamma_point = _get_kmesh(cell, kpts, self.bvkmesh)
+            kmesh, with_gamma_point = _get_kmesh(cell, kpts.kpts, self.bvkmesh)
             assert kmesh is not None, "A complete MP mesh in cell.make_kpts ordering is required"
             expLk = fft_matrix(kmesh, with_gamma_point)
             nao = cell.nao
@@ -257,9 +257,9 @@ class GDF(lib.StreamObject):
         if self.is_gamma_point:
             return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
         else:
-            kpts, is_single_kpt = _normalize_kpts(kpts)
+            kpts, is_single_kpt = _normalize_kpts(self.cell, kpts)
             if is_single_kpt:
-                return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
+                return df_jk.get_jk(self, dm, hermi, kpts.kpts[0], kpts_band, with_j,
                                     with_k, exxdiv)
         vj = vk = None
         if with_k:
@@ -291,7 +291,7 @@ class GDF(lib.StreamObject):
                 Allows multiple GPU executors to share the producer, dynamically
                 loading the tesnor blocks as needed.
         '''
-        assert is_zero(self.kpts)
+        assert self.kpts.is_gamma_only()
         cell = self.cell
         cderi_sparse = self._cderi[0]
         naux, npairs = cderi_sparse.shape
@@ -323,5 +323,10 @@ class GDF(lib.StreamObject):
 
     def to_cpu(self):
         from pyscf.pbc.df.df import GDF
-        out = GDF(self.cell, kpts=self.kpts)
-        return utils.to_cpu(self, out=out)
+        kpts = self.kpts
+        if isinstance(kpts, KPointSampling):
+            kpts = kpts.kpts
+        out = GDF(self.cell, kpts=kpts)
+        out = utils.to_cpu(self, out=out)
+        out.kpts = kpts
+        return out

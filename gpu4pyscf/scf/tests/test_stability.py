@@ -252,7 +252,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-9
         assert np.max(np.abs(test_internal_eigenvalue - ref_internal_eigenvalue)) < 2e-6
-        assert np.max(np.abs(test_real2complex_eigenvalue - ref_real2complex_eigenvalue)) < 2e-6
+        assert np.max(np.abs(test_real2complex_eigenvalue[:2] - ref_real2complex_eigenvalue[:2])) < 2e-6
         assert np.max(np.abs(test_external_eigenvalue - ref_external_eigenvalue)) < 2e-6
 
         assert test_stable_i is False

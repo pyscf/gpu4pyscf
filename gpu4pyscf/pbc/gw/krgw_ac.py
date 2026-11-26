@@ -48,7 +48,7 @@ from gpu4pyscf.lib import cupy_helper, logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.pbc.df import GDF
 from gpu4pyscf.pbc.dft import numint
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, _normalize_kpts
 from gpu4pyscf.gw.gw_ac import get_idx_metal
 from gpu4pyscf.gw.utils.gw_cp_helper import mkslice, array_scale
 
@@ -469,7 +469,7 @@ def get_qij_components(gw, mo_energy, mo_coeff, uniform_grids=False):
     blksize = max(1024, int(2e9 / (8 * 4 * nkpts * nao)))
 
     qij_x = cp.zeros(shape=[3, nkpts, nocc, nvir], dtype=cp.complex128)
-    for i, kpti in enumerate(kpts):
+    for i, kpti in enumerate(kpts.kpts):
         ao_ao_grad = cp.zeros(shape=[3, nao, nao], dtype=cp.complex128)
         for p0 in range(0, ngrid, blksize):
             p1 = min(p0 + blksize, ngrid)
@@ -564,7 +564,7 @@ def get_sigma(
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if orbs is None:
         orbs = list(range(nmo))
@@ -581,10 +581,9 @@ def get_sigma(
     nao = mo_coeff[0].shape[0]
 
     # possible kpts shift center
-    kscaled = gw.mol.get_scaled_kpts(kpts)
-    kscaled -= kscaled[0]
+    kscaled = kpts.kpts_scaled - kpts.kpts_scaled[0]
     # momentum conservation of every kL at once: kconserv_table[kL, ki] = kj with -ki+kj+kL=G
-    kconserv_table = get_kconserv_ria_efficient(gw.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(gw.mol, kpts.kpts - kpts.kpts[0])
 
     # Integration on numerical grids
     if iw_cutoff is not None and gw.rdm is False:
@@ -890,7 +889,7 @@ def get_sigma_outcore(
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if orbs is None:
         orbs = list(range(nmo))
@@ -906,10 +905,9 @@ def get_sigma_outcore(
         mo_occ = _mo_occ_frozen(gw, gw.mo_occ)
 
     # possible kpts shift center
-    kscaled = gw.mol.get_scaled_kpts(kpts)
-    kscaled -= kscaled[0]
+    kscaled = kpts.kpts_scaled - kpts.kpts_scaled[0]
     # momentum conservation of every kL at once: kconserv_table[kL, ki] = kj with -ki+kj+kL=G
-    kconserv_table = get_kconserv_ria_efficient(gw.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(gw.mol, kpts.kpts - kpts.kpts[0])
 
     # Integration on numerical grids
     if iw_cutoff is not None and gw.rdm is False:
@@ -1132,7 +1130,7 @@ def get_sigma_exchange(gw, mo_coeff_full=None, mo_occ_full=None):
     nkpts = gw.nkpts
     kpts = gw.kpts
     mydf = gw.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     if mo_coeff_full is None:
         mo_coeff_full = gw.mo_coeff
@@ -1145,10 +1143,9 @@ def get_sigma_exchange(gw, mo_coeff_full=None, mo_occ_full=None):
     nocc_full = int(np.sum(gw._scf.mo_occ[0])) // 2
 
     # possible kpts shift center
-    kscaled = gw.mol.get_scaled_kpts(kpts)
-    kscaled -= kscaled[0]
+    kscaled = kpts.kpts_scaled - kpts.kpts_scaled[0]
     # momentum conservation of every kL at once: kconserv_table[kL, ki] = kj with -ki+kj+kL=G
-    kconserv_table = get_kconserv_ria_efficient(gw.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(gw.mol, kpts.kpts - kpts.kpts[0])
 
     vk = cp.zeros(shape=[nkpts, nmo_full, nmo_full], dtype=cp.complex128)
 
@@ -1486,7 +1483,7 @@ class KRGWAC(lib.StreamObject):
         # don't modify the following attributes, they are not input options
         self._nocc = None  # number of NON-FROZEN occupied orbitals
         self._nmo = None  # number of NON-FROZEN orbitals
-        self.kpts = mf.kpts  # k-point list
+        self.kpts, _ = _normalize_kpts(self.mol, mf.kpts)
         self.nkpts = len(self.kpts)  # number of k-points
         self.mo_energy = None  # orbital energy
         self.mo_coeff = None  # orbital coefficient

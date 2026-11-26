@@ -19,9 +19,9 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc import gto as pgto
-from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.gto.mole import Cell
 from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
 from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
@@ -282,7 +282,7 @@ class KnownValues(unittest.TestCase):
             basis={'N1': [[3, [.5, 1.]], [6, [2., 1.]]], 'N2': 'ccpvdz'},
             a=np.diag([2.5, 3.9, 2.2]),
             unit='B',
-            precision=1e-8)
+            precision=1e-8).view(Cell)
 
         ft_opt = ft_ao_gpu.FTOpt(cell).build()
         nao = ft_opt.cell.nao
@@ -386,21 +386,6 @@ class KnownValues(unittest.TestCase):
         result = kernel(Gv)
         assert result.shape == (1,) + reference.shape
         cp.testing.assert_allclose(result[0], reference, atol=1e-12, rtol=0)
-
-    def test_ft_aopair_kpts_with_KPoints(self):
-        kpts = cell_he.make_kpts([3, 1, 1])
-        sampling = KPoints(cell_he, kpts)
-        Gv = cell_he.get_Gv([3]*3)
-        reference = ft_ao_gpu.ft_aopair_kpts(cell_he, Gv, kptjs=kpts)
-        result = ft_ao_gpu.ft_aopair_kpts(cell_he, Gv, kptjs=sampling)
-        cp.testing.assert_allclose(result, reference, atol=1e-12, rtol=0)
-        opt = ft_ao_gpu.FTOpt(cell_he, [3, 1, 1])
-        kernel = opt.gen_ft_kernel(kpts=sampling)
-        cp.testing.assert_allclose(kernel(Gv), reference, atol=1e-12, rtol=0)
-        cp.testing.assert_allclose(kernel(Gv, kpts=sampling), reference, atol=1e-12, rtol=0)
-        rhoG = cp.ones(len(Gv), dtype=np.complex128)
-        cp.testing.assert_allclose(opt.contract_rhoG(rhoG, Gv, sampling),
-                                   opt.contract_rhoG(rhoG, Gv, kpts), atol=1e-12, rtol=0)
 
 
 if __name__ == '__main__':

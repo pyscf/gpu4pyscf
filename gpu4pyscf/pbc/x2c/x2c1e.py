@@ -30,7 +30,6 @@ import math
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.x2c import x2c as mol_x2c
 from gpu4pyscf.x2c import sfx2c1e as mol_sfx2c1e
@@ -41,7 +40,7 @@ from gpu4pyscf.pbc.df import aft, rsdf_builder, ft_ao, int3c2e
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.gto.mole import SortedGTO, extract_pgto_params
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
+from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh, _normalize_kpts
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, hermi_triu, empty_aligned)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
@@ -186,11 +185,7 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         c = lib.param.LIGHT_SPEED
         xcell = self.get_xmol(cell)
 
-        is_single_kpt = kpts is None or kpts.ndim == 1
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        else:
-            kpts = kpts.reshape(-1, 3)
+        kpts, is_single_kpt = _normalize_kpts(cell, kpts)
         bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
         t = int1e.int1e_kin(xcell, kpts, bvkmesh, sort_output=False)
@@ -238,11 +233,7 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         c = lib.param.LIGHT_SPEED
         xcell = self.get_xmol(cell)
 
-        is_single_kpt = kpts is None or kpts.ndim == 1
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        else:
-            kpts = kpts.reshape(-1, 3)
+        kpts, is_single_kpt = _normalize_kpts(cell, kpts)
         bvkmesh = kpts_to_bvkmesh(cell, kpts, bound_by_supmol=True)
 
         x = []
@@ -292,12 +283,8 @@ def _get_pnucp(cell, kpts=None, bvkmesh=None, intor='pnucp', omega=0):
         # When omega is specified, the short-range Coulomb is evaluated
         rsdf_omega = min(rsdf_omega, omega)
 
-    is_single_kpt = kpts is None or kpts.ndim == 1
-    is_gamma_point = kpts is None or is_zero(kpts)
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-    elif is_single_kpt:
-        kpts = kpts.reshape(1, 3)
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
     if is_gamma_point:
         bvkmesh = np.ones(3, dtype=int)
         bvk_ncells = 1
@@ -449,7 +436,7 @@ def _get_pnucp(cell, kpts=None, bvkmesh=None, intor='pnucp', omega=0):
             wj = wj.transpose(1,0,2)
     else:
         nkpts = len(kpts)
-        expLk = cp.exp(1j*asarray(ft_opt.bvkmesh_Ls).dot(asarray(kpts).T))
+        expLk = cp.exp(1j*asarray(ft_opt.bvkmesh_Ls).dot(asarray(kpts.kpts).T))
         expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
         wj = contract('Lkz,pLq->kpqz', expLkz, wj)
         wj = wj.view(np.complex128)[:,:,:,0]

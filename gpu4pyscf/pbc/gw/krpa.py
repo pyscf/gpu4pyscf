@@ -33,7 +33,6 @@ import time
 
 from pyscf import lib as lib_cpu
 from pyscf.gw.utils.ac_grid import _get_scaled_legendre_roots
-from pyscf.pbc import tools
 from pyscf.pbc.gw.krpa import get_kconserv_ria_efficient
 from pyscf.pbc.mp.kmp2 import get_nocc, get_nmo, get_frozen_mask
 
@@ -42,7 +41,8 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import get_avail_mem
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.pbc import df
-from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
+from gpu4pyscf.pbc import tools
+from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, _normalize_kpts
 from gpu4pyscf.gw.gw_ac import get_idx_metal
 from gpu4pyscf.pbc.gw.krgw_ac import _mo_occ_frozen, _mo_energy_frozen, _mo_frozen, get_rho_response, \
     get_rho_response_head, get_rho_response_wing, get_qij_components
@@ -317,11 +317,10 @@ def get_rpa_ecorr(rpa, freqs, wts):
     kpts = rpa.kpts
     nw = len(freqs)
     mydf = rpa.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # possible kpts shift center
-    kscaled = rpa.mol.get_scaled_kpts(kpts)
-    kscaled -= kscaled[0]
+    kscaled = kpts.kpts_scaled - kpts.kpts_scaled[0]
 
     is_metal = hasattr(rpa._scf, 'sigma')
 
@@ -336,7 +335,7 @@ def get_rpa_ecorr(rpa, freqs, wts):
     # (k(i) - k(j) - k(kL)) \dot a = 2n\pi
     # i.e.
     # - ki + kj + kL = G
-    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts.kpts - kpts.kpts[0])
 
     for kL in range(nkpts):
         kidx = kconserv_table[kL]
@@ -446,11 +445,10 @@ def get_rpa_ecorr_outcore(rpa, freqs, wts):
     kpts = rpa.kpts
     nw = len(freqs)
     mydf = rpa.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # possible kpts shift center
-    kscaled = rpa.mol.get_scaled_kpts(kpts)
-    kscaled -= kscaled[0]
+    kscaled = kpts.kpts_scaled - kpts.kpts_scaled[0]
 
     if rpa.fc:
         qij, q_abs, nq_pts = rpa.get_q_mesh(mo_energy, mo_coeff)
@@ -463,7 +461,7 @@ def get_rpa_ecorr_outcore(rpa, freqs, wts):
     # (k(i) - k(j) - k(kL)) \dot a = 2n\pi
     # i.e.
     # - ki + kj + kL = G
-    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts.kpts - kpts.kpts[0])
 
     for kL in range(nkpts):
         Pi = None
@@ -591,11 +589,10 @@ def get_rpa_ecorr_outcore_metal(rpa, freqs, wts):
     kpts = rpa.kpts
     nw = len(freqs)
     mydf = rpa.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # possible kpts shift center
-    kscaled = rpa.mol.get_scaled_kpts(kpts)
-    kscaled -= kscaled[0]
+    kscaled = kpts.kpts_scaled - kpts.kpts_scaled[0]
 
     e_corr = 0j
 
@@ -605,7 +602,7 @@ def get_rpa_ecorr_outcore_metal(rpa, freqs, wts):
     # (k(i) - k(j) - k(kL)) \dot a = 2n\pi
     # i.e.
     # - ki + kj + kL = G
-    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts.kpts - kpts.kpts[0])
 
     for kL in range(nkpts):
         Pi = None
@@ -760,11 +757,11 @@ def get_rpa_exx(rpa, acfd=False, correction_only=False):
     nkpts = rpa.nkpts
     kpts = rpa.kpts
     mydf = rpa.with_df
-    assert abs(kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
+    assert abs(kpts.kpts[0]).max() < 1e-10, "Only Gamma-included k-point meshes are supported"
 
     # Precompute k-conservation table, kconserv_table[kL, i] = j with - ki + kj + kL = G,
     # for kpts shifted by kpts[0] (possible kpts shift center)
-    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts - kpts[0])
+    kconserv_table = get_kconserv_ria_efficient(rpa.mol, kpts.kpts - kpts.kpts[0])
 
     ex = 0j
     for kL in range(nkpts):
@@ -877,7 +874,7 @@ class KRPA(lib_cpu.StreamObject):
         # don't modify the following attributes, they are not input options
         self._nocc = None  # number of occupied orbitals
         self._nmo = None  # number of orbitals (exclude frozen orbitals)
-        self.kpts = mf.kpts  # k-points
+        self.kpts, _ = _normalize_kpts(self.mol, mf.kpts)
         self.nkpts = len(self.kpts)  # number of k-points
         # host copies, pyscf.pbc.mp.kmp2.get_frozen_mask reads them with np.asarray
         self.mo_energy = np.array(cp.asnumpy(mf.mo_energy))  # orbital energy

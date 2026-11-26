@@ -29,6 +29,7 @@ from gpu4pyscf.pbc.dft import kuks
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract, tag_array
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpts=None, kpts_band=None):
@@ -55,7 +56,7 @@ def _add_Vhubbard(vxc, ks, dm, kpts):
     kpts_input = kpts
     if is_ibz:
         raise NotImplementedError('DFT+U for k-point symmetry')
-    kpts = kpts.reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
     nkpts = len(kpts)
 
     ovlp = int1e.int1e_ovlp(cell, kpts)
@@ -232,7 +233,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
     alphalist = np.asarray(alphalist)
     alphalist = np.append(-alphalist[::-1], alphalist)
 
-    kpts = mf.kpts.reshape(-1, 3)
+    kpts = mf.kpts
     nkpts = len(kpts)
     cell = mf.cell
 

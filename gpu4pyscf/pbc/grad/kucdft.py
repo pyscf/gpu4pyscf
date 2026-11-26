@@ -21,6 +21,7 @@ from gpu4pyscf.pbc.dft.krkspu import reference_mol, _make_minao_lo
 from gpu4pyscf.pbc.grad.krkspu import generate_first_order_local_orbitals
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.dft.ucdft import _get_minao_basis_indices
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 class Gradients(kuks_grad.Gradients):
@@ -45,7 +46,8 @@ class Gradients(kuks_grad.Gradients):
         if dm is None:
             dm = mf.make_rdm1()
         if kpts is None:
-            kpts = mf.kpts.reshape(-1, 3)
+            kpts = mf.kpts
+        kpts, _ = _normalize_kpts(mf.cell, kpts)
             
         cell = mf.cell
         nkpts = len(kpts)

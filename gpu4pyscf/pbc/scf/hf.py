@@ -34,6 +34,7 @@ from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf.smearing import smearing
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.__config__ import props as gpu_specs
+from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array
 
 # 8 for 8 bytes per fp64, 10 is arbitrary (A 80 GB gpu will allow 1000^3 mesh)
 ALLOWED_FFT_MESH_SIZE = gpu_specs['totalGlobalMem'] // 8 // 10
@@ -166,7 +167,7 @@ class SCF(mol_hf.SCF):
         if 'kpt' in self.__dict__:
             # To handle the attribute kpt loaded from chkfile
             self.kpt = self.__dict__.pop('kpt')
-        return self.with_df.kpts.reshape(3)
+        return _as_kpts_array(self.with_df.kpts).reshape(3)
     @kpt.setter
     def kpt(self, x):
         kpts = np.reshape(x, (1, 3))

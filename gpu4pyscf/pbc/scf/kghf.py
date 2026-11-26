@@ -29,6 +29,7 @@ from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.scf import ghf as mol_ghf
 from gpu4pyscf.pbc.scf import khf, ghf
 from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_soc
+from gpu4pyscf.pbc.lib.kpts_helper import _as_kpts_array, _normalize_kpts
 
 
 def get_jk(mf, cell=None, dm_kpts=None, hermi=0, kpts=None, kpts_band=None,
@@ -77,7 +78,7 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     if mf.verbose >= logger.DEBUG:
         np.set_printoptions(threshold=len(mo_energy))
         logger.debug(mf, '     k-point                  mo_energy')
-        for k,kpt in enumerate(mf.cell.get_scaled_kpts(mf.kpts)):
+        for k,kpt in enumerate(mf.kpts.kpts_scaled):
             logger.debug(mf, '  %2d (%6.3f %6.3f %6.3f)   %s %s',
                          k, kpt[0], kpt[1], kpt[2],
                          mo_energy_kpts[k][mo_occ_kpts[k]> 0],
@@ -92,6 +93,7 @@ def _cast_mol_init_guess(fn):
     def fn_init_guess(mf, cell=None, kpts=None):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
+        kpts, _ = _normalize_kpts(cell, kpts)
         dm = mol_ghf._from_rhf_init_dm(fn(cell))
         nkpts = len(kpts)
         dm_kpts = cp.stack([dm] * nkpts)
@@ -164,7 +166,7 @@ class KGHF(khf.KSCF):
         # cannot restore k-point spinors. Reuse its periodic projection tools.
         if chkfile is None: chkfile = self.chkfile
         if kpts is None: kpts = self.kpts
-        kpts = np.asarray(kpts).reshape(-1, 3)
+        kpts = np.asarray(_as_kpts_array(kpts)).reshape(-1, 3)
         cell = self.cell
         chk_cell, scf_rec = chkfile_cpu.load_scf(chkfile)
         mo = scf_rec['mo_coeff']
@@ -301,7 +303,7 @@ class KGHF(khf.KSCF):
     to_gks = to_ks
 
     def to_cpu(self):
-        mf = kghf_cpu.KGHF(self.cell, self.kpts)
+        mf = kghf_cpu.KGHF(self.cell, self.kpts.kpts)
         with lib.temporary_env(self, _numint=None):
             utils.to_cpu(self, out=mf)
         return mf

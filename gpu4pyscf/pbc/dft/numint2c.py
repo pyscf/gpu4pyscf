@@ -44,26 +44,25 @@ class KNumInt2C(numint.KNumInt):
     collinear = mol_numint2c.NumInt2C.collinear
     spin_samples = mol_numint2c.NumInt2C.spin_samples
 
-    _keys = {'collinear', 'spin_samples', 'kpts'}
+    _keys = {'collinear', 'spin_samples'}
 
-    def __init__(self, kpts=None):
-        self.kpts = np.zeros((1, 3)) if kpts is None else np.reshape(kpts, (-1, 3))
+    def __init__(self, *args, **kwargs):
+        # CPU to_gpu() passes constructor kpts; sampling is supplied per call here.
+        pass
 
-    def nr_vxc(self, cell, grids, xc_code, dms, spin=0, relativity=0, hermi=1,
-               kpts=None, kpts_band=None, max_memory=2000, verbose=None):
-        if kpts is None: kpts = self.kpts
-        return _get_vxc(self, cell, grids, xc_code, dms, hermi, kpts, kpts_band)
-    get_vxc = nr_gks_vxc = nr_vxc
+    def get_vxc(self, cell, grids, xc_code, dm_kpts, spin=0, hermi=1,
+                kpts=None, kpts_band=None, verbose=None):
+        return _get_vxc(self, cell, grids, xc_code, dm_kpts, hermi, kpts, kpts_band)
+    nr_vxc = nr_gks_vxc = get_vxc
 
-    def get_rho(self, cell, dm, grids, kpts=None):
-        if kpts is None: kpts = self.kpts
+    def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3))):
         nao = cell.nao
         charge = dm[..., :nao, :nao] + dm[..., nao:, nao:]
         return super().get_rho(cell, charge, grids, kpts)
 
     def to_cpu(self):
         from pyscf.pbc.dft.numint2c import KNumInt2C
-        return KNumInt2C(self.kpts.copy()).set(
+        return KNumInt2C().set(
             omega=self.omega, collinear=self.collinear, spin_samples=self.spin_samples)
 
 

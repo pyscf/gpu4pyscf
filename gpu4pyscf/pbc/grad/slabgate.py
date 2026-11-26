@@ -23,6 +23,7 @@ from gpu4pyscf.pbc.scf.slabdipole import _dipole_grids, _slab_charge
 from gpu4pyscf.pbc.scf.slabgate import _sheet_potential, _barrier_potential
 from gpu4pyscf.pbc.dft import numint, gen_grid
 from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
+from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
 
 
 def gate_grad(grad, dm, kpts=None):
@@ -41,7 +42,7 @@ def gate_grad(grad, dm, kpts=None):
     qc = -_slab_charge(mf, cell)
     if kpts is None:
         kpts = mf.kpts if mf.istype('KSCF') else mf.kpt
-    kpts = np.asarray(kpts).reshape(-1, 3)
+    kpts, _ = _normalize_kpts(cell, kpts)
     dm = cp.asarray(dm)
     if mf.istype('UHF') or mf.istype('KUHF'):
         dm = dm[0] + dm[1]

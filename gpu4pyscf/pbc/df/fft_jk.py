@@ -24,13 +24,14 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.lib.kpts_helper import is_zero, member
-from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.lib.kpts_helper import kpts_to_bvkmesh
-from gpu4pyscf.pbc.lib.kpts_helper import _normalize_kpts
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kpts_to_bvkmesh, _normalize_kpts, _format_kpts_array)
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -40,7 +41,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
             Density matrix at each k-point.  If a list of k-point DMs, eg,
             UHF alpha and beta DM, the alpha and beta DMs are contracted
             separately.
-        kpts : (nkpts, 3) ndarray
+        kpts : (nkpts, 3) ndarray or KPointSampling
 
     Kwargs:
         kpts_band : (3,) ndarray or (*,3) ndarray
@@ -92,8 +93,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
                 aow = ao * vR[i,p0:p1,None]
                 vj_kpts[i,k] += ao.conj().T.dot(aow)
 
-    return _format_jks(vj_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, kpts)
+    return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
@@ -102,7 +102,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray
             Density matrix at each k-point
-        kpts : (nkpts, 3) ndarray
+        kpts : (nkpts, 3) ndarray or KPointSampling
 
     Kwargs:
         hermi : int
@@ -136,7 +136,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     if isinstance(kpts, (list, tuple)):
         kpts = np.asarray(kpts)
     input_kpts = kpts
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
+    kpts = kpts.kpts
+    sampling = input_kpts if isinstance(input_kpts, KPointSampling) else kpts
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -147,7 +150,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
 
-    if is_zero(kpts_band) and is_zero(kpts):
+    if is_zero(kpts_band) and is_gamma_point:
         vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=dms.dtype)
     else:
         vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
@@ -181,7 +184,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh=mesh, kpts=kpts)
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh=mesh, kpts=sampling)
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
@@ -204,8 +207,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
             for i in range(nset):
                 vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
 
-    return _format_jks(vk_kpts, dm_kpts,
-                       kpts_band if input_band is not None else None, input_kpts)
+    return _format_jks(vk_kpts, dm_kpts, input_band, input_kpts)
 
 def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
            with_j=True, with_k=True, exxdiv=None):
@@ -321,8 +323,8 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     if kpts is None:
         # FFTDF exposes this function directly, so honor its configured k-points.
         kpts = mydf.kpts
-    kpts, _ = _normalize_kpts(kpts)
-    is_gamma_point = is_zero(kpts)
+    kpts, _ = _normalize_kpts(mydf.cell, kpts)
+    is_gamma_point = kpts.is_gamma_only()
     ni = mydf._numint
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -376,54 +378,83 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     if kpts is None:
         for i,dm in enumerate(dms):
             vk[i] += m * s.dot(dm).dot(s)
-    elif np.shape(kpts) == (3,):
-        if kpts_band is None or is_zero(kpts_band-kpts):
+        return vk
+
+    kpts, is_single_kpt = _normalize_kpts(cell, kpts)
+
+    if is_single_kpt:
+        if kpts_band is None or is_zero(kpts_band-kpts.kpts[0]):
             for i,dm in enumerate(dms):
                 vk[i] += m * s.dot(dm).dot(s)
+        return vk
 
-    elif kpts_band is None or np.array_equal(kpts, kpts_band):
+    if kpts_band is None:
         for k in range(len(kpts)):
             for i,dm in enumerate(dms):
                 vk[i,k] += m * s[k].dot(dm[k]).dot(s[k])
-    else:
-        for k, kpt in enumerate(kpts):
-            for kp in member(kpt, kpts_band.reshape(-1,3)):
-                for i,dm in enumerate(dms):
-                    vk[i,kp] += m * s[k].dot(dm[k]).dot(s[k])
+        return vk
+
+    kpts = kpts.kpts
+    if np.array_equal(kpts, kpts_band):
+        for k in range(len(kpts)):
+            for i,dm in enumerate(dms):
+                vk[i,k] += m * s[k].dot(dm[k]).dot(s[k])
+        return vk
+
+    # The G=0 exchange correction occurs at zero momentum transfer: only band
+    # points matching a sampled k-point receive its m * S * D * S contribution.
+    for k, kpt in enumerate(kpts):
+        for kp in member(kpt, kpts_band.reshape(-1,3)):
+            for i,dm in enumerate(dms):
+                vk[i,kp] += m * s[k].dot(dm[k]).dot(s[k])
     return vk
 
 def _format_dms(dm_kpts, kpts):
-    kpts, _ = _normalize_kpts(kpts)
-    nkpts = len(kpts)
+    if isinstance(kpts, (KPoints, KPointSampling)):
+        nkpts = len(kpts)
+    else:
+        kpts, _ = _format_kpts_array(kpts)
+        nkpts = len(kpts)
     nao = dm_kpts.shape[-1]
     dms = dm_kpts.reshape(-1,nkpts,nao,nao)
     assert dms.dtype in (np.double, np.complex128)
     return cp.asarray(dms, order='C')
 
-def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
-    '''Restore density dimensions using kpts in its original input form.
+def _format_kpts_band(kpts_band, kpts):
+    '''Return band coordinates as an (N, 3) array.
 
-    kpts_band must be None or a normalized (N, 3) array.
+    When kpts_band is None, use the sampling coordinates. kpts may be a
+    KPointSampling, an array, or None (Gamma). Explicit band points are arrays.
     '''
-    if kpts_band is kpts or kpts_band is None:
+    if kpts_band is None:
+        return _format_kpts_array(kpts)[0]
+    return np.reshape(kpts_band, (-1, 3))
+
+def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
+    '''Restore output dimensions using the original sampling and band inputs.
+
+    kpts_band must be None or an (N, 3) array.
+    '''
+    if kpts_band is None or kpts_band is kpts:
         return v_kpts.reshape(dm_kpts.shape)
     else:
         assert kpts_band.ndim == 2
         nkpts_band = len(kpts_band)
         nao = dm_kpts.shape[-1]
 
-        _, is_single_kpt = _normalize_kpts(kpts)
+        _, is_single_kpt = _format_kpts_array(kpts)
+        # Use leading_shape to handle the spin-indices for UHF/KUHF
         if is_single_kpt:
-            shape = dm_kpts.shape[:-2]
+            leading_shape = dm_kpts.shape[:-2]
         else:
             assert dm_kpts.ndim >= 3
-            shape = dm_kpts.shape[:-3]
-        return v_kpts.reshape(shape + (nkpts_band, nao, nao))
+            leading_shape = dm_kpts.shape[:-3]
+        return v_kpts.reshape(leading_shape + (nkpts_band, nao, nao))
 
 
 def _factorize_dm(dm_kpts, kpts=None):
     from gpu4pyscf.df.df_jk import factorize_dm
-    kpts, _ = _normalize_kpts(kpts)
+    kpts, _ = _format_kpts_array(kpts)
     nkpts = len(kpts)
     orbl, orbr = factorize_dm(dm_kpts)
     if orbl.size == 0:

@@ -32,6 +32,7 @@ from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v3
+from gpu4pyscf.pbc.lib.kpts import KPointSampling
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from pyscf import __config__
 
@@ -153,8 +154,11 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             self._numint = numint.NumInt()
 
     def build(self, cell=None):
-        # To handle the attribute kpt or kpts loaded from chkfile
-        if 'kpts' in self.__dict__:
+        # kpts is a property of KSCF class, must be assigned via setattr.
+        if 'kpts_sampling' in self.__dict__:
+            self.kpts = KPointSampling.loads(self.__dict__.pop('kpts_sampling'))
+            self.__dict__.pop('kpts', None)
+        elif 'kpts' in self.__dict__:
             self.kpts = self.__dict__.pop('kpts')
         elif 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
