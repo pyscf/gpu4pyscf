@@ -27,7 +27,7 @@ import cupy as cp
 from gpu4pyscf.lib.cusolver import eigh_std
 from pyscf import lib
 from pyscf.gto import ATOM_OF
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import cutensor, logger
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib.cupy_helper import (
     contract, ndarray, transpose_sum, get_avail_mem, empty_mapped, fill_symmetric)
@@ -404,22 +404,31 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                 aux_unit1 = 3*nao*nocc + 3*naux # j3c_100
             else:
                 aux_unit1 = 3*nao*nocc_in_batch + 3*naux # j3c_100
-            aux_batch_size = min(int(word_avail*.85),
-                                 word_avail-6*naux*nao_on_atom*nocc) // aux_unit1
+            if batch_id == 0:
+                aux_unit2 = natm*3*nocc*nocc * 2 # j3c_oo_atm
+                min_work = max(6*naux*nao_on_atom*nocc,
+                               int(aux_unit2 / 0.8) + 2,
+                               int((nocc+nao)*nao / 0.8) + 2)
+            else:
+                aux_unit2 = 0
+                min_work = max(6*naux*nao_on_atom*nocc_in_batch,
+                               int((nocc+nao)*nao / 0.8) + 2)
+            aux_batch_size = min(int(word_avail*.75),
+                                 word_avail - min_work) // aux_unit1
             assert aux_batch_size > 0, 'Insufficient GPU memory'
             aux_batch_size = _balance_batch_size(aux_batch_size, metric_size, 16)
             word_avail -= aux_unit1 * aux_batch_size
             if batch_id == 0:
-                aux_unit2 = natm*3*nocc*nocc * 2 # j3c_oo_atm
-                aux_blksize = word_avail // aux_unit2
+                aux_blksize = int(word_avail * 0.8) // aux_unit2
                 assert aux_blksize > 0, 'Insufficient GPU memory'
                 if aux_blksize > 8:
-                    aux_blksize = aux_blksize & 0xfffff8
+                    aux_blksize = aux_blksize // 8 * 8
                 aux_blksize = min(aux_blksize, aux_batch_size)
             else:
-                aux_unit2 = 0
                 aux_blksize = 0
-            blksize = word_avail // ((nocc+nao)*nao * 16) * 16
+            blksize = int(word_avail * 0.8) // ((nocc+nao)*nao)
+            if blksize > 16:
+                blksize = blksize // 16 * 16
             assert blksize > 0, 'Insufficient GPU memory'
             blksize = min(blksize, batch_size)
             log.debug1('mem_avail=%.3f MB, aux_batch_size=%d, aux_blksize=%d, blksize=%d',
@@ -486,8 +495,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
                         transpose_sum(j3c_oo_atm.reshape(-1,nocc,nocc), inplace=True)
                         j3c_oo_atm_w = ndarray(j3c_oo_atm.shape, buffer=work1)
                         cp.divide(j3c_oo_atm, w_part[:,None,None], out=j3c_oo_atm_w)
-                        contract('pxrij,qyrij->pqxy', j3c_oo_atm_w, j3c_oo_atm, -.5*k_factor,
-                                 beta=1, out=ejk)
+                        tmp_ejk = cp.dot(j3c_oo_atm_w.reshape(natm*3, -1),
+                                         j3c_oo_atm.reshape(natm*3, -1).T)
+                        tmp_ejk *= -.5 * k_factor
+                        ejk += tmp_ejk.reshape(natm, 3, natm, 3).transpose(0, 2, 1, 3)
+                        tmp_ejk = None
 
                         if j_factor != 0:
                             auxvec_100_atm = cp.einsum('pxrii->pxr', j3c_oo_atm)
@@ -758,6 +770,7 @@ def _aux_metric_response(metric_w, metric_v, j2c_10v, dm, j3c_deriv, atom_labels
     npair = dm.shape[1]
     aux_indices = [cp.asarray(np.where(atom_labels == ia)[0]) for ia in range(natm)]
     naux_on_atom = max(len(idx) for idx in aux_indices)
+    cp.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem(exclude_memory_pool=True)
 
     mem_avail -= 4*naux_on_atom*nw*8
@@ -789,7 +802,9 @@ def _aux_metric_response(metric_w, metric_v, j2c_10v, dm, j3c_deriv, atom_labels
         # formal scaling to A^2*Naux*Npair
         weighted = ndarray(rhs.shape, buffer=rhs_buf[1])
         cp.divide(rhs, metric_w[None,None,:,None], out=weighted)
-        contract('axrp,byrp->abxy', weighted, rhs, beta=1, out=hess)
+        tmp_hess = cp.dot(weighted.reshape(natm*3, -1), rhs.reshape(natm*3, -1).T)
+        hess += tmp_hess.reshape(natm, 3, natm, 3).transpose(0, 2, 1, 3)
+        tmp_hess = None
     return hess
 
 def _argsort_aux_by_atom(auxmol, aux_sorting=None):
@@ -892,11 +907,14 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
     pair_size_max = max(nao_pair, nocc_per_batch*nao)
     _unit = 6*pair_size_max
+    blk_unit = nao**2 + (nao + nocc) * max(nao_on_atom, nocc)
     largest_shell_nao = int((aux_loc[1:] - aux_loc[:-1]).max())
-    batch_size = int(word_avail*.8 / _unit)
-    if batch_size < largest_shell_nao:
-        mem_req = (largest_shell_nao-batch_size) *_unit * 1.5 * 1e-6
-        raise MemoryError(f'Insufficient GPU memory. Need {mem_req} MB more.')
+    work_budget = int(word_avail * 0.85)
+    max_batch_size = (work_budget - blk_unit) // _unit
+    if max_batch_size < largest_shell_nao:
+        mem_req = (largest_shell_nao * _unit + blk_unit - work_budget) * 8 * 1e-6
+        raise MemoryError(f'Insufficient GPU memory. Need {mem_req:.1f} MB more.')
+    batch_size = max(largest_shell_nao, min(int(word_avail * 0.65) // _unit, max_batch_size))
     batch_size = min(batch_size, max(largest_shell_nao, naux))
 
     eval_j3c, aux_sorting, _, aux_offsets, clone_context = int3c2e_opt.int3c2e_evaluator(
@@ -906,8 +924,9 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
-    blksize = int((word_avail*.95 - batch_size*_unit) /
-                  (nao**2 + (nao+nocc)*max(nao_on_atom, nocc))) // 8 * 8
+    blksize = (work_budget - batch_size * _unit) // blk_unit
+    if blksize > 8:
+        blksize = blksize // 8 * 8
     assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
@@ -1374,16 +1393,47 @@ def _get_jk(dfobj, dms, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True, ome
             _dm_sparse = cp.asarray(dm_sparse)
             vj = cp.zeros_like(_dm_sparse)
 
-        blksize = dfobj.get_blksize(mem_fraction=0.2)
+        device_id = cp.cuda.Device().id
+        cderi_sparse = dfobj._cderi[device_id]
+        naux_slice = cderi_sparse.shape[0]
+        if naux_slice == 0 or n_dm == 0:
+            return vj, vk
+
         if with_k:
+            cp.get_default_memory_pool().free_all_blocks()
             mem_avail = get_avail_mem(exclude_memory_pool=True)
-            dm_batch_size = int(mem_avail * 0.75 / (nspin*blksize*(nao+nocc)*nocc * 8))
-            dm_batch_size = min(dm_batch_size, n_dm)
+            word_avail = int(mem_avail * 0.75 / 8)
+            on_gpu = isinstance(cderi_sparse, cp.ndarray)
+            npairs = cderi_sparse.shape[1]
+            loop_words = nao * nao + (0 if on_gpu else 2 * npairs)
+            dm_words = nspin * (nao + nocc) * nocc
+            # Non-cuTENSOR fallback allocates out-of-place einsum/transpose temporaries
+            # of size dm_batch_size * dm_words alongside buf2/buf3.
+            dm_buf_factor = 1 if cutensor.contract_engine is None else 2
+            min_dm_slots = dm_buf_factor + 1
+            max_blk = min(df.MIN_BLK_SIZE, naux_slice)
+            blksize = min(max_blk, word_avail // (loop_words + min_dm_slots * dm_words))
+            if blksize > 0:
+                pref_blk = min(max_blk, max(1, (word_avail // 3) // loop_words))
+                blksize = min(blksize, pref_blk)
+                if blksize > df.ALIGNED:
+                    blksize = blksize // df.ALIGNED * df.ALIGNED
+                rem_words = word_avail - blksize * loop_words
+                dm_batch_size = min(n_dm, (rem_words // (blksize * dm_words) - 1) // dm_buf_factor)
+            else:
+                dm_batch_size = 0
+            if blksize <= 0 or dm_batch_size <= 0:
+                req_mb = (loop_words + min_dm_slots * dm_words) * 8 / 0.75 * 1e-6
+                raise MemoryError(
+                    f'Insufficient GPU memory for DF CPHF K-build: '
+                    f'avail={mem_avail*1e-6:.1f} MB, need>={req_mb:.1f} MB')
             buf2 = cp.empty((dm_batch_size+1,nspin,nao,nocc,blksize))
             buf3 = cp.empty((dm_batch_size+1,nspin,nocc,nocc,blksize))
             buf = buf2[-1]
             buf1 = buf3[-1]
             log.debug1('blksize=%d, dm_batch_size=%d', blksize, dm_batch_size)
+        else:
+            blksize = dfobj.get_blksize(mem_fraction=0.2)
 
         for cderi, cderi_tril in dfobj.loop(blksize=blksize, unpack=with_k):
             if with_k:
@@ -1457,11 +1507,11 @@ def _balance_batch_size(batch_size, total_size, alignment=8):
     if batch_size <= alignment:
         return batch_size
 
+    max_batch_size = batch_size
     n_batches = (total_size + batch_size - 1) // batch_size
-    batch_size = total_size // n_batches + 1
-    mask = 0x100000000 - alignment
-    batch_size = (batch_size + alignment - 1) & mask
-    return batch_size
+    batch_size = (total_size + n_batches - 1) // n_batches
+    batch_size = (batch_size + alignment - 1) // alignment * alignment
+    return min(batch_size, max_batch_size)
 
 class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''

@@ -314,6 +314,75 @@ class KnownValues(unittest.TestCase):
             assert abs(ref - veff[0]).max() < 1e-9
             assert abs(ref - veff[1]).max() < 1e-9
 
+class TestDFUHFHessianMemory(unittest.TestCase):
+    def test_jk_energy_per_atom_tight_aux_blksize(self):
+        angles = np.linspace(0, 2 * np.pi, 6, endpoint=False)
+        atoms = [['C', (1.4 * np.cos(a), 1.4 * np.sin(a), 0.)] for a in angles]
+        mol_t = pyscf.M(atom=atoms, basis='sto3g', verbose=0)
+        auxmol_t = mol_t.copy()
+        np.random.seed(11)
+        nao_sph = mol_t.nao
+        nocc = 24
+        mo_coeff = cp.array(np.random.rand(2, nao_sph, nao_sph) - .5) * .2
+        mo_occ = cp.zeros((2, nao_sph))
+        mo_occ[:, :nocc] = 1
+        dm = cp.einsum('npi,nqi->npq', mo_coeff[:, :, :nocc], mo_coeff[:, :, :nocc])
+        dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+        opt = int3c2e.Int3c2eOpt(mol_t, auxmol_t).build()
+        ref = df_uhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+
+        nao_cart = int(opt.mol.ao_loc[-1])
+        naux = int(opt.auxmol.ao_loc[-1])
+        nao_pair = len(opt.pair_and_diag_indices(cart=True, original_ao_order=True)[0])
+        largest_shell = int((opt.auxmol.ao_loc[1:] - opt.auxmol.ao_loc[:-1]).max())
+        nao_on_atom = int(np.bincount(df_rhf_hess._bas_atom_labels(opt.mol)).max())
+        aux_unit1 = 3 * 2 * nao_cart * nocc
+        aux_unit2 = mol_t.natm * 3 * 2 * nocc * nocc * 2
+        ip_buf_words = 3 * largest_shell * nao_pair * 2
+        min_work = max(aux_unit2, ip_buf_words + (nocc * 2 + nao_cart) * nao_cart,
+                       12 * naux * nao_on_atom * nocc)
+        word_avail = max(
+            aux_unit1 * 8 + max(min_work, int(2.5 * aux_unit2)),
+            int(aux_unit1 * 8 / 0.75) + ip_buf_words + 8,
+            (aux_unit1 + 3 * naux) * 8 + 6 * naux * nao_on_atom * nocc)
+        # Force Stage 2 aux_blksize into [1, 7] where // (aux_unit2 * 8) * 8 truncated to 0.
+        tight_mem = int((word_avail / 0.8 + mol_t.natm * naux * 9 + mol_t.natm**2 * 9) * 8)
+
+        with lib.temporary_env(df_uhf_hess, get_avail_mem=(lambda **kw: tight_mem)):
+            ejk = df_uhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        assert abs(ejk - ref).max().get() < 1e-8
+
+    def test_get_veff_tight_memory_spin_factor(self):
+        mol1 = mol + mol
+        mol1 = mol1 + mol1
+        np.random.seed(12)
+        nao_sph = mol1.nao
+        nocc = 20
+        mo_coeff = cp.array(np.random.rand(2, nao_sph, nao_sph) - .5) * .1
+        mo_occ = cp.zeros((2, nao_sph))
+        mo_occ[:, :nocc] = 1
+
+        opt = int3c2e.Int3c2eOpt(mol1, auxmol).build()
+        ref = df_uhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
+
+        nao_cart = int(opt.mol.ao_loc[-1])
+        naux = int(opt.auxmol.ao_loc[-1])
+        nao_pair = len(opt.pair_and_diag_indices(cart=True, original_ao_order=True)[0])
+        largest_shell = int((opt.auxmol.ao_loc[1:] - opt.auxmol.ao_loc[:-1]).max())
+        nao_on_atom = int(np.bincount(df_rhf_hess._bas_atom_labels(opt.mol)).max())
+        unit = 6 * max(nao_pair, 2 * nocc * nao_cart)
+        blk_unit = nao_cart**2 + (nao_cart + nocc) * 2 * max(nao_on_atom, nocc)
+        work_budget = largest_shell * unit + 4 * blk_unit
+        word_avail = (int(work_budget / 0.85) + 16
+                      + 2 * naux * nocc * nao_cart + 3 * naux**2 + 2 * naux * nocc**2)
+        tight_mem = word_avail * 8
+
+        with lib.temporary_env(df_uhf_hess, get_avail_mem=(lambda **kw: tight_mem)):
+            veff = df_uhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
+        assert abs(veff[0] - ref[0]).max().get() < 1e-8
+        assert abs(veff[1] - ref[1]).max().get() < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for DF UHF Hessian")
     unittest.main()
