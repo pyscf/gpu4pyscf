@@ -20,9 +20,10 @@ import math
 import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import expm
+from cupyx.scipy.special import ndtri
 from pyscf import lib
 from pyscf.scf import chkfile
-from pyscf.scf.addons import _fermi_smearing_occ
+from pyscf.scf.addons import _fermi_smearing_occ, _gaussian_smearing_occ
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf
 from gpu4pyscf.scf.hf import SCF
@@ -93,6 +94,7 @@ class ActiveOccupationRotationSpace:
         self.occupation_idx = occupation_idx
 
         n_active_f = int(occupation_idx.size)
+        assert n_active_f > 0
         occupation_sum_constraint_projector = get_occupation_sum_constraint_projector(n_active_f)
         assert occupation_sum_constraint_projector.shape == (n_active_f, n_active_f - 1)
         self.occupation_sum_constraint_projector = occupation_sum_constraint_projector
@@ -188,8 +190,7 @@ def get_mo_energy_occupation_from_fock_mo(mf, fock_mo):
     if mf.smearing_method.lower() == "fermi":
         f_occ = _fermi_smearing_occ
     else:
-        raise NotImplementedError
-        # f_occ = _gaussian_smearing_occ
+        f_occ = _gaussian_smearing_occ
 
     # The diagonalization is necessary, because if two MOs are degenerate, the rotation within degenerate space is missing.
     # The diagonalization serves as canonicalization.
@@ -241,7 +242,19 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None, with_nlc=False, 
         0.0 + mf.zero_occupation_threshold,
         1.0 - mf.zero_occupation_threshold,
     )
-    g_f = fock_diag[active_rotation_occupation_space.occupation_idx] + mf.sigma * (cp.log(active_f) - cp.log1p(-active_f))
+
+    if mf.smearing_method.lower() == 'fermi':
+        dSdf = cp.log(active_f) - cp.log1p(-active_f)
+        d2Sdf2 = 1 / (active_f * (1.0 - active_f))
+    elif mf.smearing_method.lower() == 'gaussian':
+        # f = erfc(inv_erfc_f)/2, using ndtri to avoid cancellation in erfinv(1 - f).
+        inv_erfc_f = ndtri(active_f) / np.sqrt(2.0)
+        dSdf = inv_erfc_f
+        d2Sdf2 = np.sqrt(np.pi) * cp.exp(inv_erfc_f**2)
+    else:
+        raise NotImplementedError
+    g_f = fock_diag[active_rotation_occupation_space.occupation_idx] + mf.sigma * dSdf
+
     g = active_rotation_occupation_space.pack(g_kappa, g_f)
 
     vind = mf.gen_response(mo_coeff, mo_occ, singlet=None, hermi=1, with_nlc=with_nlc)
@@ -262,11 +275,11 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None, with_nlc=False, 
         fock_rotation_commutator = fock @ rotation_generator - rotation_generator @ fock
         x_f = cp.diag(fock_rotation_commutator + v1).real.copy()
         x_f = x_f[active_rotation_occupation_space.occupation_idx]
-        x_f += mf.sigma * eta[active_rotation_occupation_space.occupation_idx] / (active_f * (1. - active_f))
+        x_f += mf.sigma * d2Sdf2 * eta[active_rotation_occupation_space.occupation_idx]
         return active_rotation_occupation_space.pack(x_kappa, x_f)
 
     hdiag_kappa = 2 * fq_minus_fp * (fock_diag[p] - fock_diag[q])
-    hdiag_f = mf.sigma / (active_f * (1.0 - active_f))
+    hdiag_f = mf.sigma * d2Sdf2
     if active_rotation_occupation_space.occupation_sum_constraint_projector is not None:
         hdiag_f = cp.einsum("ij,i->j", active_rotation_occupation_space.occupation_sum_constraint_projector**2, hdiag_f)
     h_diag = active_rotation_occupation_space.pack(hdiag_kappa, hdiag_f, if_apply_occupation_sum_constraint=False)
@@ -332,13 +345,13 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None, with_nlc=False, 
 
 #     return g, h_op, h_diag
 
-def scale_ah_step_preserve_occupation_range(mf, dxi, mo_occ, accumulated_dx, active_rotation_occupation_space):
+def scale_ah_step_preserve_occupation_range(mf, mo_occ, dx, accumulated_dx, active_rotation_occupation_space):
     scale = 1.0
-    dxmax = abs(dxi).max()
+    dxmax = abs(dx).max()
     if dxmax > mf.max_stepsize:
         scale = min(scale, float(mf.max_stepsize / dxmax))
 
-    _, df = active_rotation_occupation_space.unpack_to_full(dxi)
+    _, df = active_rotation_occupation_space.unpack_to_full(dx)
     maximum = abs(df).max()
     if maximum > mf.max_occupation_step:
         scale = min(scale, float(mf.max_occupation_step / maximum))
@@ -364,6 +377,29 @@ def scale_ah_step_preserve_occupation_range(mf, dxi, mo_occ, accumulated_dx, act
     scale = max(0., scale)
     return scale
 
+def freeze_outofbound_occupation_direction(mf, mo_occ, dx, accumulated_dx, current_active_rotation_occupation_space):
+    """Temporarily constrain boundary components that block an AH trial."""
+    _, df = current_active_rotation_occupation_space.unpack_to_full(dx)
+    f = mo_occ * (1 / occupation_two(mf))
+    assert isinstance(accumulated_dx, (float, cp.ndarray))
+    if isinstance(accumulated_dx, cp.ndarray):
+        _, accumulated_df = current_active_rotation_occupation_space.unpack_to_full(accumulated_dx)
+        f = f + accumulated_df
+
+    space_to_freeze = (
+        ((f <= mf.zero_occupation_threshold) & (df < 0) & (f < -df * mf.freeze_occupation_step_ratio))
+        | ((f >= 1 - mf.zero_occupation_threshold) & (df > 0) & (1 - f < df * mf.freeze_occupation_step_ratio))
+    )
+    space_to_keep = ~space_to_freeze[current_active_rotation_occupation_space.occupation_idx]
+    if bool(cp.all(space_to_keep)):
+        return current_active_rotation_occupation_space
+    else:
+        return ActiveOccupationRotationSpace(
+            current_active_rotation_occupation_space.nmo,
+            current_active_rotation_occupation_space.rotation_idx_is,
+            current_active_rotation_occupation_space.rotation_idx_js,
+            current_active_rotation_occupation_space.occupation_idx[space_to_keep])
+
 def _rotate_orb_cc(mf, h1e, s1e, conv_tol_grad=None, verbose=None):
     log = logger.new_logger(mf, verbose)
 
@@ -379,16 +415,24 @@ def _rotate_orb_cc(mf, h1e, s1e, conv_tol_grad=None, verbose=None):
 
     t3m = log.init_timer()
     u = eta = g_kf = g_orb = norm_gorb = dxi = kfcount = jkcount = None
+    active_rotation_occupation_space = reset_space = None
     dm0 = vhf0 = None
-    active_rotation_occupation_space = None
     g_op = lambda: g_orb
     while True:
-        mo_coeff, mo_occ, dm0, vhf0, e_tot = (yield u, eta, g_kf, kfcount, jkcount, dm0, vhf0)
+        mo_coeff, mo_occ, dm0, vhf0, e_tot, restart_ah = (yield u, eta, g_kf, kfcount, jkcount, dm0, vhf0)
+        if restart_ah:
+            u = eta = g_kf = g_orb = norm_gorb = dxi = kfcount = jkcount = None
+            active_rotation_occupation_space = reset_space = None
         fock_ao = mf.get_fock(h1e, s1e, vhf0, dm0)
 
         previous_active_rotation_occupation_space = active_rotation_occupation_space
-        g_kf, h_op, h_diag = mf.gen_g_hop(mo_coeff, mo_occ, fock_ao)
-        active_rotation_occupation_space = mf._active_rotation_occupation_space
+        if reset_space is not None:
+            active_rotation_occupation_space = reset_space
+            g_kf, h_op, h_diag = mf.gen_g_hop(mo_coeff, mo_occ, fock_ao, active_rotation_occupation_space=active_rotation_occupation_space)
+        else:
+            g_kf, h_op, h_diag = mf.gen_g_hop(mo_coeff, mo_occ, fock_ao)
+            active_rotation_occupation_space = mf._active_rotation_occupation_space
+        reset_space = None
         if g_orb is not None and not active_rotation_occupation_space == previous_active_rotation_occupation_space:
             log.debug('    Restart AH because the FON active_rotation_occupation_space changed')
             g_orb = dxi = None
@@ -442,7 +486,14 @@ def _rotate_orb_cc(mf, h1e, s1e, conv_tol_grad=None, verbose=None):
                     mo_occ_kf = mf.accumulate_occ(mo_occ, eta_kf)
                 else:
                     mo_occ_kf = mo_occ
-                scale = scale_ah_step_preserve_occupation_range(mf, dxi, mo_occ_kf, dr, active_rotation_occupation_space)
+                scale = scale_ah_step_preserve_occupation_range(mf, mo_occ_kf, dxi, dr, active_rotation_occupation_space)
+                if scale < mf.zero_occupation_threshold:
+                    reduced_space = freeze_outofbound_occupation_direction(mf, mo_occ_kf, dxi, dr, active_rotation_occupation_space)
+                    if reduced_space != active_rotation_occupation_space:
+                        log.debug('    Freeze %d boundary occupations for the next macroiteration',
+                                  active_rotation_occupation_space.n_active_f - reduced_space.n_active_f)
+                        reset_space = reduced_space
+                        break
                 if ihop == problem_size:
                     log.debug1('... Hx=g fully converged for small systems')
                 if scale < 1:
@@ -527,6 +578,9 @@ def _rotate_orb_cc(mf, h1e, s1e, conv_tol_grad=None, verbose=None):
                         break
 
         if ihop > 0:
+            if isinstance(dr, float): # It happens when the step scale is small and the active_rotation_occupation_space is reset.
+                assert dr == 0.0
+                dr = cp.zeros_like(dxi)
             du, deta = mf._active_rotation_occupation_space.unpack_to_full(dr)
             u = mf.update_rotate_matrix(du, mo_occ, mo_coeff=mo_coeff)
             if ukf is not None:
@@ -545,15 +599,14 @@ def _rotate_orb_cc(mf, h1e, s1e, conv_tol_grad=None, verbose=None):
         t3m = log.timer('aug_hess in %d inner iters' % imic, *t3m)
 
 def get_free_energy(mf, e_tot, mo_occ):
+    f = mo_occ * (1 / occupation_two(mf))
+    f = f[(f>0) & (f<1)]
     if mf.smearing_method.lower() == 'fermi':
-        f = mo_occ * (1 / occupation_two(mf))
-        f = f[(f>0) & (f<1)]
         entropy = -cp.sum(f * cp.log(f) + (1.0 - f) * cp.log1p(-f))
-        entropy *= occupation_two(mf)
     else:
-        raise NotImplementedError
-        #     entropy = (numpy.exp(-((mo_energy-mu)/self.sigma)**2).sum()
-        #                / (2*numpy.sqrt(numpy.pi)))
+        inv_erfc_f = ndtri(f) / np.sqrt(2.0)
+        entropy = cp.sum(cp.exp(-inv_erfc_f**2)) / (2 * np.sqrt(np.pi))
+    entropy *= occupation_two(mf)
     mf.entropy = float(entropy)
     mf.e_free = e_tot - mf.sigma * mf.entropy
     mf.e_zero = e_tot - mf.sigma * mf.entropy * 0.5
@@ -622,9 +675,11 @@ def kernel(mf, mo_coeff=None, mo_occ=None, dm=None,
     scf_conv = False
     cput1 = log.timer('initializing second order scf', *cput0)
 
+    restart_ah = False
     for imacro in range(max_cycle):
         u, eta, g_orb, kfcount, jkcount, dm_last, vhf = \
-                rotaiter.send((mo_coeff, mo_occ, dm, vhf, e_tot))
+                rotaiter.send((mo_coeff, mo_occ, dm, vhf, e_tot, restart_ah))
+        restart_ah = False
         kftot += kfcount + 1
         jktot += jkcount + 1
 
@@ -652,11 +707,29 @@ def kernel(mf, mo_coeff=None, mo_occ=None, dm=None,
                  imacro, e_tot, e_free, e_free-last_e_free, norm_gorb, norm_gocc, kfcount+1, jkcount)
         cput1 = log.timer('cycle= %d'%(imacro+1), *cput1)
 
+        restart_ah = False
         if callable(mf.check_convergence):
             scf_conv = mf.check_convergence(locals())
         elif abs(e_free-last_e_free) < conv_tol and norm_gorb < conv_tol_grad:
-            # Intentionally not checking occupation number convergence
-            scf_conv = True
+            fock_mo = mo_coeff.conj().T @ fock @ mo_coeff
+            mo_energy, U, new_f, _ = get_mo_energy_occupation_from_fock_mo(mf, fock_mo)
+            new_mo_occ = new_f * occupation_two(mf)
+            new_dm_mo = (U * new_mo_occ) @ U.conj().T # In fock_mo order
+            norm_occ_error = cp.linalg.norm(new_dm_mo - cp.diag(mo_occ))
+            log.info('Smearing MO density fixed-point error = %g', norm_occ_error)
+            scf_conv = norm_occ_error < conv_tol_grad
+
+            if not scf_conv:
+                # A restricted AH solve can converge with frozen, incorrect occupations.
+                # Restore the distribution and restart at this new physical density.
+                mo_coeff = mo_coeff @ U
+                mo_occ = new_mo_occ
+                dm_last = dm
+                dm = mf.make_rdm1(mo_coeff, mo_occ)
+                vhf = mf._scf.get_veff(mol, dm, dm_last=dm_last, vhf_last=vhf)
+                e_tot = mf._scf.energy_tot(dm, h1e, vhf)
+                restart_ah = True
+                log.info('Restart SOSCF with updated occupation distribution')
 
         if dump_chk:
             mf.dump_chk(locals())
@@ -686,6 +759,7 @@ def kernel(mf, mo_coeff=None, mo_occ=None, dm=None,
 class _CIAH_SOSCF_FON(_CIAH_SOSCF):
     equal_occupation_threshold = 1e-8
     zero_occupation_threshold = 1e-8
+    freeze_occupation_step_ratio = 1e3 # If a occupation step times this value step outside the [0,1] occupation range, the exceed dimension is frozen.
     max_occupation_step = 0.1
     occupation_fraction_to_boundary = 0.95
 
