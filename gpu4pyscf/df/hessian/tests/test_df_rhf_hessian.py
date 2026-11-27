@@ -23,7 +23,8 @@ from pyscf.hessian import rhf as rhf_cpu
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib import cutensor
+from gpu4pyscf.lib.cupy_helper import empty_mapped, tag_array
 from gpu4pyscf.gto.mole import SortedMole
 
 def setUpModule():
@@ -289,6 +290,105 @@ class KnownValues(unittest.TestCase):
         with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: nao**2*3*mol2.natm*20)):
             veff = df_rhf_hess._get_veff(opt, mo_coeff, mo_occ, j_factor=1, k_factor=1)
             assert abs(ref - veff).max() < 1e-9
+
+class TestDFRHFHessianMemory(unittest.TestCase):
+    def test_balance_batch_size_never_exceeds_limit(self):
+        for batch_size, total_size, alignment in [
+            (50, 100, 16),
+            (1000, 2000, 16),
+            (17, 100, 16),
+            (7, 100, 16),
+            (100, 50, 16),
+        ]:
+            res = df_rhf_hess._balance_batch_size(batch_size, total_size, alignment)
+            self.assertGreater(res, 0)
+            self.assertLessEqual(res, min(batch_size, total_size))
+
+    def test_jk_energy_per_atom_tight_memory_gemm(self):
+        np.random.seed(13)
+        nao = mol.nao
+        nocc = nao - 5
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5) * .2
+        mo_occ = cp.zeros(nao)
+        mo_occ[:nocc] = 2
+        pmol = SortedMole.from_mol(mol, decontract=True)
+        opt = int3c2e.Int3c2eOpt(pmol, auxmol).build()
+        dm = (mo_coeff * mo_occ).dot(mo_coeff.T)
+        dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+        ref = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        tight_mem = nao**2 * auxmol.nao * 60
+        with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: tight_mem)):
+            ejk = df_rhf_hess._jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        assert abs(ejk - ref).max().get() < 1e-8
+
+    def test_cphf_get_jk_tight_memory_and_offload(self):
+        mf = mol1.RHF().density_fit().to_gpu()
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        dfobj = mf.with_df
+        mo_coeff = cp.asarray(mf.mo_coeff)
+        mo_occ = cp.asarray(mf.mo_occ)
+        orbo = mo_coeff[:, mo_occ > 0]
+        nao, nocc = orbo.shape
+        n_dm = 6
+        np.random.seed(14)
+        mo1 = cp.asarray(np.random.rand(n_dm, nao, nocc) - .5)
+        dm1 = tag_array(cp.zeros((n_dm, nao, nao)), mo1=mo1, occ_coeff=orbo)
+
+        ref_j, ref_k = df_rhf_hess._get_jk(
+            dfobj, dm1, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True)
+
+        dm_words = (nao + nocc) * nocc
+        dm_buf_factor = 1 if cutensor.contract_engine is None else 2
+        min_slots = dm_buf_factor + 1
+        tight_gpu_mem = int((nao * nao + int((min_slots + 0.5) * dm_words) + 8) * 8 / 0.75)
+        with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: tight_gpu_mem)):
+            vj, vk = df_rhf_hess._get_jk(
+                dfobj, dm1, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True)
+        assert abs(vj - ref_j).max().get() < 1e-8
+        assert abs(vk - ref_k).max().get() < 1e-8
+
+        tight_fallback_mem = int((nao * nao + int(3.5 * dm_words) + 8) * 8 / 0.75)
+        with lib.temporary_env(cutensor, contract_engine='cupy'):
+            with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: tight_fallback_mem)):
+                vj_fb, vk_fb = df_rhf_hess._get_jk(
+                    dfobj, dm1, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True)
+        assert abs(vj_fb - ref_j).max().get() < 1e-8
+        assert abs(vk_fb - ref_k).max().get() < 1e-8
+
+        is_dict = isinstance(dfobj._cderi, dict)
+        saved_cderi = dict(dfobj._cderi) if is_dict else list(dfobj._cderi)
+        try:
+            items = list(saved_cderi.items()) if is_dict else list(enumerate(saved_cderi))
+            max_npairs = max(arr.shape[1] for _, arr in items)
+            offloaded = {} if is_dict else []
+            for dev_id, arr in items:
+                if isinstance(arr, cp.ndarray):
+                    with cp.cuda.Device(dev_id):
+                        host_arr = empty_mapped(arr.shape, dtype=arr.dtype)
+                        arr.get(out=host_arr)
+                else:
+                    host_arr = arr
+                if is_dict:
+                    offloaded[dev_id] = host_arr
+                else:
+                    offloaded.append(host_arr)
+            dfobj._cderi = offloaded
+            tight_offload_mem = int(
+                (nao * nao + 2 * max_npairs + int((min_slots + 0.5) * dm_words) + 8) * 8 / 0.75)
+            with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: tight_offload_mem)):
+                vj_off, vk_off = df_rhf_hess._get_jk(
+                    dfobj, dm1, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True)
+            assert abs(vj_off - ref_j).max().get() < 1e-8
+            assert abs(vk_off - ref_k).max().get() < 1e-8
+
+            with lib.temporary_env(df_rhf_hess, get_avail_mem=(lambda **kw: 1024)):
+                with self.assertRaises(MemoryError):
+                    df_rhf_hess._get_jk(
+                        dfobj, dm1, mo_coeff, mo_occ, hermi=1, with_j=True, with_k=True)
+        finally:
+            dfobj._cderi = saved_cderi
 
 if __name__ == "__main__":
     print("Full Tests for DF RHF Hessian")

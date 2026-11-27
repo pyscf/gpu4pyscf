@@ -108,9 +108,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
     naux = int(aux_loc[-1])
     largest_shell_nao = int((aux_loc[1:] - aux_loc[:-1]).max())
 
+    cp.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    word_avail -= 2 * 3 * naux * nocc**2 # j3c_oo1
+    word_avail -= 2 * 4 * naux * nocc**2 # j3c_oo1, dm_oo
+    word_avail -= 6 * naux**2 # j2c_10v and metric_v
+    assert word_avail > 0, 'Insufficient GPU memory'
     batch_size = int(word_avail * 0.02) // nao_pair
     batch_size = max(largest_shell_nao, min(batch_size, naux))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
@@ -119,7 +122,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
-    blksize = min(naux, int(word_avail * 0.5) // (nao**2*8) * 8)
+    blksize = min(naux, int(word_avail * 0.5) // (nao**2))
+    if blksize > 8:
+        blksize = blksize // 8 * 8
     assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, aux_batches=%d, batch_size=%d, blksize=%d',
@@ -321,19 +326,33 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
     cp.get_default_memory_pool().free_all_blocks()
     mem_avail = get_avail_mem(exclude_memory_pool=True)
     word_avail = mem_avail // 8
-    word_avail -= 3 * batch_size * nao_pair * 2 # eval_ip1, eval_ipaux
-    aux_unit1 = 3*2*nao*nocc + 3*naux # j3c_100
-    aux_batch_size = (min(int(word_avail*.85), word_avail-12*naux*nao_on_atom*nocc)
-                      // (aux_unit1 * 8) * 8)
+    word_avail -= natm * naux * 9 + natm * natm * 9 # h_ao_aux, ejk_ao
+    word_avail = int(word_avail * 0.8)
+    ip_buf_words = 3 * batch_size * nao_pair * 2 # eval_ip1, eval_ipaux
+    aux_unit1 = 3*2*nao*nocc # j3c_100
+    aux_unit2 = natm*3*2*nocc*nocc * 2 # j3c_oo_atm
+    min_work = max(
+        aux_unit2,
+        ip_buf_words + (nocc*2 + nao) * nao,
+        12 * naux * nao_on_atom * nocc)
+    aux_batch_size = min(
+        int((word_avail - ip_buf_words) * 0.75) // aux_unit1,
+        (word_avail - min_work) // aux_unit1,
+        (word_avail - 6 * naux * nao_on_atom * nocc) // (aux_unit1 + 3*naux))
+    if aux_batch_size > 8:
+        aux_batch_size = aux_batch_size // 8 * 8
     assert aux_batch_size > 0, 'Insufficient GPU memory'
     metric_size = metric_v.shape[1]
     aux_batch_size = df_rhf_hess._balance_batch_size(aux_batch_size, metric_size, 16)
     word_avail -= aux_unit1 * aux_batch_size
-    aux_unit2 = natm*3*2*nocc*nocc * 2 # j3c_oo_atm
-    aux_blksize = word_avail // (aux_unit2 * 8) * 8
+    aux_blksize = word_avail // aux_unit2
+    if aux_blksize > 8:
+        aux_blksize = aux_blksize // 8 * 8
     assert aux_blksize > 0, 'Insufficient GPU memory'
     aux_blksize = min(aux_blksize, aux_batch_size)
-    blksize = word_avail // ((nocc*2+nao)*nao * 16) * 16
+    blksize = (word_avail - ip_buf_words) // ((nocc*2 + nao) * nao)
+    if blksize > 16:
+        blksize = blksize // 16 * 16
     assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, aux_batch_size=%d, aux_blksize=%d, blksize=%d',
@@ -391,8 +410,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1,
             transpose_sum(j3c_oo_atm.reshape(-1,nocc,nocc), inplace=True)
             j3c_oo_atm_w = ndarray(j3c_oo_atm.shape, buffer=work1)
             cp.divide(j3c_oo_atm, w_part[:,None,None,None], out=j3c_oo_atm_w)
-            contract('pxrnij,qyrnij->pqxy', j3c_oo_atm_w, j3c_oo_atm, -k_factor,
-                     beta=1, out=ejk_ao)
+            tmp_ejk = cp.dot(j3c_oo_atm_w.reshape(natm*3, -1),
+                             j3c_oo_atm.reshape(natm*3, -1).T)
+            tmp_ejk *= -k_factor
+            ejk_ao += tmp_ejk.reshape(natm, 3, natm, 3).transpose(0, 2, 1, 3)
+            tmp_ejk = None
 
             if j_factor != 0:
                 auxvec_100_atm = cp.einsum('pxrnii->pxr', j3c_oo_atm)
@@ -487,14 +509,21 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
         vhf_atm_ao = cp.zeros((natm,3,2,nao,nao))
         word_avail -= vhf_atm_ao.size
 
+    atm_ao_counts = np.bincount(_bas_atom_labels(mol))
+    aoslices = np.append(0, atm_ao_counts.cumsum())
+    nao_on_atom = atm_ao_counts.max()
+
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
     pair_size_max = max(nao_pair, 2*nocc*nao)
     _unit = 6*pair_size_max
+    blk_unit = nao**2 + (nao + nocc) * 2 * max(nao_on_atom, nocc)
     largest_shell_nao = int((aux_loc[1:] - aux_loc[:-1]).max())
-    batch_size = int(word_avail*.8 / _unit)
-    if batch_size < largest_shell_nao:
-        mem_req = (largest_shell_nao-batch_size) *_unit * 1.5 * 1e-6
-        raise MemoryError(f'Insufficient GPU memory. Need {mem_req} MB more.')
+    work_budget = int(word_avail * 0.85)
+    max_batch_size = (work_budget - blk_unit) // _unit
+    if max_batch_size < largest_shell_nao:
+        mem_req = (largest_shell_nao * _unit + blk_unit - work_budget) * 8 * 1e-6
+        raise MemoryError(f'Insufficient GPU memory. Need {mem_req:.1f} MB more.')
+    batch_size = max(largest_shell_nao, min(int(word_avail * 0.65) // _unit, max_batch_size))
     batch_size = min(batch_size, max(largest_shell_nao, naux))
 
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
@@ -503,12 +532,9 @@ def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1,
     batch_size = min(batch_size, int((aux_offsets[1:]-aux_offsets[:-1]).max()))
     num_aux_batches = len(aux_offsets) - 1
 
-    atm_ao_counts = np.bincount(_bas_atom_labels(mol))
-    aoslices = np.append(0, atm_ao_counts.cumsum())
-    nao_on_atom = atm_ao_counts.max()
-
-    blksize = int((word_avail*.95 - batch_size*_unit) /
-                  (nao**2 + (nao+nocc*2)*max(nao_on_atom, nocc))) // 8 * 8
+    blksize = (work_budget - batch_size * _unit) // blk_unit
+    if blksize > 8:
+        blksize = blksize // 8 * 8
     assert blksize > 0, 'Insufficient GPU memory'
     blksize = min(blksize, batch_size)
     log.debug1('mem_avail=%.3f MB, mem_sufficient=%s, aux_batches=%d, batch_size=%d, blksize=%d',
