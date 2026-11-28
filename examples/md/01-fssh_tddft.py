@@ -51,6 +51,10 @@ fssh.nsteps = 50 # Number of time steps to propagate.
 fssh.timestep_fs = 0.5 # fs
 # Save trajectory in an HDF5 file.
 fssh.filename = 'c2h4_traj.h5'
+# Reuse X/Y and Z-vector initial guesses from the previous MD step.
+fssh.reuse_xy_z = True
+# Reuse the previous MD step density matrix as the SCF initial guess.
+fssh.reuse_scf_dm = True
 # Setting the random seed to generate reproducible trajectory
 #fssh.seed = 9592
 # coefficient for each electronic state, corresponding to the initial state
